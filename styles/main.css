@@ -392,8 +392,8 @@ aside.right-panel {
   /* 點擊天數正方形時：行程表自動稍微變窄並往左靠，為右側天數正方形＋眼睛／齒輪小圓留出俐落空間 */
   #panel-left.mobile-sheet-narrow {
     left: 10px !important;
-    width: calc(100vw - 118px) !important;
-    max-width: 280px !important;
+    width: calc(100vw - 122px) !important;
+    max-width: 276px !important;
   }
   #panel-left.mobile-sheet-narrow #panel-left-header {
     padding: 9px 12px !important;
@@ -403,6 +403,9 @@ aside.right-panel {
   }
   #panel-left.mobile-sheet-narrow .pin-card {
     padding: 9px !important;
+  }
+  #panel-left.mobile-sheet-narrow .drag-handle {
+    min-width: 34px !important;
   }
   #panel-left.mobile-sheet-narrow .transport-connector-row {
     padding-left: 20px !important;
@@ -418,20 +421,28 @@ aside.right-panel {
     display: none !important;
   }
   #panel-left-header {
-    background-color: rgba(246, 238, 227, 0.64) !important;
+    background-color: rgba(246, 238, 227, 0.72) !important;
   }
+  /* 移除內層卡片重複 backdrop-filter 避免手機捲動掉幀，保留單層外框毛玻璃＋高可讀半透明卡面 */
   #panel-left .pin-card {
-    background-color: rgba(255, 253, 249, 0.72) !important;
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
+    background-color: rgba(255, 253, 249, 0.88) !important;
   }
   #panel-left .btn-open-transport {
-    background-color: rgba(246, 238, 227, 0.74) !important;
+    background-color: rgba(246, 238, 227, 0.86) !important;
   }
   #itinerary-list {
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
     touch-action: pan-y;
+  }
+  .mobile-hit-expand {
+    position: relative;
+  }
+  .mobile-hit-expand::before {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    border-radius: 9999px;
   }
 
   /* 手機版將 Leaflet 縮放 +/- 移至右上角縮放鈕下方，避免與右下圓球及往上彈出的日期方塊重疊 */
@@ -443,6 +454,23 @@ aside.right-panel {
 
   .leaflet-bottom.leaflet-right .leaflet-control-attribution {
     display: none !important;
+  }
+}
+
+/* 手機端 (< 640px) 表單欄位採用 16px 字級，安全防止 iOS Safari 聚焦自動放大並保留無障礙雙指縮放 */
+@media (max-width: 639px) {
+  #map-search-input,
+  #modal-pin-detail input[type='text'],
+  #modal-pin-detail input[type='number'],
+  #modal-pin-detail input[type='url'],
+  #modal-pin-detail textarea,
+  #modal-pin-detail select,
+  #modal-transport input[type='text'],
+  #modal-transport input[type='number'],
+  #modal-transport input[type='datetime-local'],
+  #modal-transport select,
+  #modal-dialog input[type='text'] {
+    font-size: 16px;
   }
 }
 

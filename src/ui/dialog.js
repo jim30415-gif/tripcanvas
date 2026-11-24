@@ -71,12 +71,16 @@ export function openCustomDialog({
 
     const cleanup = (result) => {
       modal.classList.add('hidden');
+      modal.onclick = null;
       btnCancel.onclick = null;
       btnConfirm.onclick = null;
       inputEl.onkeydown = null;
       resolve(result);
     };
 
+    modal.onclick = (e) => {
+      if (e.target === modal) cleanup(null);
+    };
     btnCancel.onclick = () => cleanup(null);
     btnConfirm.onclick = () => cleanup(isPrompt ? inputEl.value.trim() : true);
     inputEl.onkeydown = (e) => {

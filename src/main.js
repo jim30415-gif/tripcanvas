@@ -30,9 +30,16 @@ import { renderRightPanel } from './ui/rightPanel.js';
 import { openPinDetailModal, bindPinModalEvents } from './ui/pinModal.js';
 import { openTransportModal, bindTransportModalEvents } from './ui/transportModal.js';
 import { bindSearchBarEvents } from './ui/searchBar.js';
-import { bindTripsDrawerEvents, renderTripsDrawer } from './ui/tripsDrawer.js';
+import { bindTripsDrawerEvents, closeTripsDrawer, renderTripsDrawer } from './ui/tripsDrawer.js';
 import { bindDriveSyncUI } from './ui/driveSyncUI.js';
-import { setMobileTab, bindMobileNav, renderMobileHud } from './ui/mobileNav.js';
+import {
+  setMobileTab,
+  bindMobileNav,
+  renderMobileHud,
+  closeAllMobileOverlays,
+  hasOpenMobileOverlay,
+  getMobileFitBoundsOptions,
+} from './ui/mobileNav.js';
 import { openCustomDialog, showToast } from './ui/dialog.js';
 import { refreshIcons, uid } from './utils/format.js';
 
@@ -58,12 +65,12 @@ function updateMapHeaderUI() {
   if (state.addMode) {
     mapSection.classList.add('map-add-mode');
     addBtn.className =
-      'bg-owl-primary hover:bg-owl-primaryHover text-white rounded-xl px-2.5 md:px-3 py-1.5 text-xs font-bold flex items-center gap-1 md:gap-1.5 shadow-xs transition active:scale-95 shrink-0';
+      'order-2 ml-auto md:ml-0 md:order-none bg-owl-primary hover:bg-owl-primaryHover text-white rounded-xl px-3 py-2 md:py-1.5 text-xs font-bold flex items-center gap-1.5 shadow-xs transition active:scale-95 shrink-0';
     addLabel.textContent = '標點模式：開';
   } else {
     mapSection.classList.remove('map-add-mode');
     addBtn.className =
-      'bg-owl-softBg hover:bg-owl-border/70 text-owl-primaryDeep border border-owl-border rounded-xl px-2.5 md:px-3 py-1.5 text-xs font-bold flex items-center gap-1 md:gap-1.5 transition active:scale-95 shrink-0';
+      'order-2 ml-auto md:ml-0 md:order-none bg-owl-softBg hover:bg-owl-border/70 text-owl-primaryDeep border border-owl-border rounded-xl px-3 py-2 md:py-1.5 text-xs font-bold flex items-center gap-1.5 transition active:scale-95 shrink-0';
     addLabel.textContent = '標點模式：關';
   }
 }
@@ -218,7 +225,11 @@ function fitMapToVisiblePins(silentIfEmpty = false) {
     if (!silentIfEmpty) showToast('目前地圖上沒有可見的標點', 'info');
     return;
   }
-  fitBoundsToPoints(pts, { padding: [70, 70], maxZoom: 15 });
+  const opts =
+    window.innerWidth < 1024 && hasOpenMobileOverlay()
+      ? getMobileFitBoundsOptions({ splitOpen: true })
+      : { padding: [70, 70], maxZoom: 15 };
+  fitBoundsToPoints(pts, opts);
 }
 
 function addPinAtCoordinate(lat, lng, customName = null) {
@@ -288,6 +299,9 @@ function importJSON(file) {
       const { tripName, data } = parseImportedState(e.target.result);
       const fallbackName = file.name.replace(/\.json$/i, '') || '匯入的旅遊計畫';
       const created = createNewTrip(tripName || fallbackName, { initialData: data });
+      if (window.innerWidth < 1024) {
+        getState().addMode = false;
+      }
       renderAll();
       triggerBackgroundResolve(true);
       fitMapToVisiblePins(true);
@@ -299,14 +313,38 @@ function importJSON(file) {
   reader.readAsText(file);
 }
 
+async function promptRestoreDemo() {
+  const activeTrip = getActiveTrip();
+  const ok = await openCustomDialog({
+    title: '重置目前計畫為台北 2 日示範？',
+    message: `將把目前計畫「${activeTrip?.name || ''}」重設為台北 2 日示範行程（其他旅遊計畫不受影響）。`,
+    confirmText: '確認重置',
+  });
+  if (ok) {
+    resetStateToDemo();
+    if (window.innerWidth < 1024) {
+      getState().addMode = false;
+    }
+    renderAll();
+    triggerBackgroundResolve(true);
+    fitMapToVisiblePins(true);
+    showToast('已重置目前計畫為台北 2 日示範行程', 'success');
+  }
+}
+
 function bindGlobalEvents() {
   document.getElementById('btn-toggle-add-mode').addEventListener('click', () => {
     const state = getState();
     state.addMode = !state.addMode;
     saveState((msg) => showToast(msg, 'error'));
     updateMapHeaderUI();
+    const isMobile = window.innerWidth < 1024;
     showToast(
-      state.addMode ? '標點模式已開啟：點擊地圖即可新增標點' : '標點模式已關閉（仍可右鍵新增）',
+      state.addMode
+        ? '標點模式已開啟：點擊地圖即可新增標點'
+        : isMobile
+          ? '已切換為瀏覽模式（可長按地圖空處或使用搜尋新增標點）'
+          : '標點模式已關閉（仍可右鍵新增）',
       'info'
     );
   });
@@ -332,31 +370,34 @@ function bindGlobalEvents() {
 
   document.getElementById('btn-add-day').addEventListener('click', createAndAddNewDay);
 
-  document.getElementById('btn-export-json').addEventListener('click', exportJSON);
-  document.getElementById('input-import-json').addEventListener('change', (e) => {
-    const file = e.target.files?.[0];
-    if (file) importJSON(file);
-    e.target.value = '';
+  document.getElementById('btn-export-json')?.addEventListener('click', exportJSON);
+  document.getElementById('btn-export-json-mobile')?.addEventListener('click', () => {
+    closeTripsDrawer();
+    exportJSON();
   });
 
-  document.getElementById('btn-restore-demo').addEventListener('click', async () => {
-    const activeTrip = getActiveTrip();
-    const ok = await openCustomDialog({
-      title: '重置目前計畫為台北 2 日示範？',
-      message: `將把目前計畫「${activeTrip?.name || ''}」重設為台北 2 日示範行程（其他旅遊計畫不受影響）。`,
-      confirmText: '確認重置',
-    });
-    if (ok) {
-      resetStateToDemo();
-      renderAll();
-      triggerBackgroundResolve(true);
-      fitMapToVisiblePins(true);
-      showToast('已重置目前計畫為台北 2 日示範行程', 'success');
+  const handleImportChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      closeTripsDrawer();
+      importJSON(file);
     }
+    e.target.value = '';
+  };
+  document.getElementById('input-import-json')?.addEventListener('change', handleImportChange);
+  document.getElementById('input-import-json-mobile')?.addEventListener('change', handleImportChange);
+
+  document.getElementById('btn-restore-demo')?.addEventListener('click', promptRestoreDemo);
+  document.getElementById('btn-restore-demo-mobile')?.addEventListener('click', () => {
+    closeTripsDrawer();
+    promptRestoreDemo();
   });
 
   bindTripsDrawerEvents({
     onTripSwitched: (shouldRefit) => {
+      if (window.innerWidth < 1024) {
+        getState().addMode = false;
+      }
       renderAll();
       if (shouldRefit) {
         triggerBackgroundResolve(true);
@@ -385,6 +426,9 @@ async function hydratePersistedWorkspace() {
   try {
     const restoredFromIdb = await hydrateFromIndexedDBIfNeeded();
     if (restoredFromIdb) {
+      if (window.innerWidth < 1024) {
+        getState().addMode = false;
+      }
       renderAll();
       renderTripsDrawer();
       fitMapToVisiblePins(true);
@@ -392,6 +436,9 @@ async function hydratePersistedWorkspace() {
 
     await initDriveSync({
       onWorkspaceUpdated: (shouldRefit) => {
+        if (window.innerWidth < 1024) {
+          getState().addMode = false;
+        }
         renderAll();
         renderTripsDrawer();
         if (shouldRefit) {
@@ -408,17 +455,25 @@ async function hydratePersistedWorkspace() {
 
 function boot() {
   if (window.innerWidth < 1024) {
+    // 手機端預設進入瀏覽模式，避免滑動／點擊地圖時誤觸新增標點
+    getState().addMode = false;
     setMobileTab('map');
   }
 
   initMap({
     onMapClick: (lat, lng) => {
       if (wasPinRecentlyDragged()) return;
+      // 手機版若有浮動面板開啟，點擊露出的地圖空處優先收合面板並攔截誤加標點
+      if (window.innerWidth < 1024 && hasOpenMobileOverlay()) {
+        closeAllMobileOverlays();
+        return;
+      }
       if (!getState().addMode) return;
       addPinAtCoordinate(lat, lng);
     },
     onMapRightClick: (lat, lng) => {
       if (wasPinRecentlyDragged()) return;
+      if (window.innerWidth < 1024 && hasOpenMobileOverlay()) return;
       addPinAtCoordinate(lat, lng);
     },
   });

@@ -914,6 +914,14 @@ async function saveTransportSetting() {
 export function bindTransportModalEvents({ onStateChanged }) {
   onChangeCallback = onStateChanged;
 
+  const modalEl = document.getElementById('modal-transport');
+  modalEl?.addEventListener('click', (e) => {
+    if (e.target === modalEl) closeTransportModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && editingTransportContext) closeTransportModal();
+  });
+
   document.getElementById('btn-close-transport').addEventListener('click', closeTransportModal);
   document.getElementById('btn-cancel-transport').addEventListener('click', closeTransportModal);
   document.getElementById('btn-save-transport').addEventListener('click', saveTransportSetting);

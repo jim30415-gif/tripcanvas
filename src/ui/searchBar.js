@@ -67,9 +67,9 @@ export function bindSearchBarEvents({ onAddPinAtCoordinate }) {
 
       const activeDay = getActiveDay(getState());
       const headerBar = `
-        <div class="px-3.5 py-2 bg-owl-selectedBg border-b border-owl-border/80 flex items-center justify-between text-[11px] text-owl-subtext">
-          <span class="font-semibold">找到 ${list.length} 筆結果（可定位檢視或直接加入「${escapeHTML(activeDay?.name || '目前天數')}」）</span>
-          <button type="button" id="btn-close-search-dropdown" class="text-owl-muted hover:text-owl-text font-bold">關閉</button>
+        <div class="px-3.5 py-2 bg-owl-selectedBg border-b border-owl-border/80 flex items-center justify-between gap-2 text-[11px] text-owl-subtext">
+          <span class="font-semibold min-w-0">找到 ${list.length} 筆結果（可定位檢視或直接加入「${escapeHTML(activeDay?.name || '目前天數')}」）</span>
+          <button type="button" id="btn-close-search-dropdown" class="px-2 py-1 rounded-lg hover:bg-owl-softBg text-owl-muted hover:text-owl-text font-bold whitespace-nowrap shrink-0 transition">關閉</button>
         </div>
       `;
 

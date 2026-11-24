@@ -72,7 +72,8 @@ function syncOrbsAndPanels() {
 
   const isPureItineraryOpen = activeOverlay === 'itinerary';
   const isDaysOpen = activeOverlay === 'days';
-  const isSplitItineraryOpen = isDaysOpen && Boolean(splitDayId);
+  const showGearSheet = isDaysOpen && Boolean(gearSettingsDayId);
+  const isSplitItineraryOpen = isDaysOpen && Boolean(splitDayId) && !showGearSheet;
   const isExpenseOpen = activeOverlay === 'expense';
   const showItineraryOnMobile = (isPureItineraryOpen || isSplitItineraryOpen) && isMobileViewport();
 
@@ -88,11 +89,10 @@ function syncOrbsAndPanels() {
   }
 
   if (daysPopup) {
-    daysPopup.classList.toggle('hidden', !isDaysOpen);
+    daysPopup.classList.toggle('hidden', !(isDaysOpen && !showGearSheet));
   }
 
   if (dayDetailSheet) {
-    const showGearSheet = isDaysOpen && Boolean(gearSettingsDayId);
     dayDetailSheet.classList.toggle('hidden', !showGearSheet);
   }
 
@@ -208,8 +208,8 @@ function renderMobileExpenseSheet(breakdown) {
         </div>
         <div class="flex items-center gap-2 shrink-0">
           <span class="text-lg font-extrabold text-owl-cream tabular-nums-strict">${formatTWD(breakdown.grandTotal)}</span>
-          <button type="button" id="btn-close-mobile-expense" aria-label="關閉支出明細" class="w-6 h-6 rounded-full bg-white/12 hover:bg-white/22 text-[#F2E7D9] flex items-center justify-center transition">
-            <i data-lucide="x" class="w-3.5 h-3.5"></i>
+          <button type="button" id="btn-close-mobile-expense" aria-label="關閉支出明細" class="w-9 h-9 rounded-full bg-white/12 hover:bg-white/22 text-[#F2E7D9] flex items-center justify-center transition active:scale-95">
+            <i data-lucide="x" class="w-4 h-4"></i>
           </button>
         </div>
       </div>
@@ -272,8 +272,8 @@ function renderMobileDayDetailSheet() {
             <h4 class="text-xs font-extrabold text-owl-text truncate mt-1">${escapeHTML(day.name)}</h4>
           </div>
         </div>
-        <button type="button" id="btn-close-mobile-day-detail" aria-label="關閉單日詳細設定" class="w-6 h-6 rounded-full bg-owl-softBg hover:bg-owl-border/70 text-owl-subtext flex items-center justify-center shrink-0 transition">
-          <i data-lucide="x" class="w-3.5 h-3.5"></i>
+        <button type="button" id="btn-close-mobile-day-detail" aria-label="關閉單日詳細設定" class="w-9 h-9 rounded-full bg-owl-softBg hover:bg-owl-border/70 text-owl-subtext flex items-center justify-center shrink-0 transition active:scale-95">
+          <i data-lucide="x" class="w-4 h-4"></i>
         </button>
       </div>
 
@@ -291,7 +291,7 @@ function renderMobileDayDetailSheet() {
         <button
           type="button"
           id="btn-mobile-day-eye"
-          class="py-2 px-2 rounded-xl border text-[11px] font-bold flex items-center justify-center gap-1 transition active:scale-95 ${
+          class="py-2.5 px-2 rounded-xl border text-[11px] font-bold flex items-center justify-center gap-1 transition active:scale-95 ${
             day.visible
               ? 'bg-owl-softBg border-owl-accentBorder text-owl-primaryDeep'
               : 'bg-owl-canvas/80 border-owl-border text-owl-muted'
@@ -304,7 +304,7 @@ function renderMobileDayDetailSheet() {
         <button
           type="button"
           id="btn-mobile-day-rename"
-          class="py-2 px-2 rounded-xl bg-owl-card hover:bg-owl-softBg border border-owl-border text-[11px] font-bold text-owl-text flex items-center justify-center gap-1 transition active:scale-95"
+          class="py-2.5 px-2 rounded-xl bg-owl-card hover:bg-owl-softBg border border-owl-border text-[11px] font-bold text-owl-text flex items-center justify-center gap-1 transition active:scale-95"
         >
           <i data-lucide="pencil" class="w-3 h-3 shrink-0"></i>
           <span>重新命名</span>
@@ -313,7 +313,7 @@ function renderMobileDayDetailSheet() {
         <button
           type="button"
           id="btn-mobile-day-delete"
-          class="py-2 px-2 rounded-xl bg-owl-card hover:bg-[#F9EDEC] border border-owl-border hover:border-[#E3BDB8] text-[11px] font-bold text-[#9B534B] flex items-center justify-center gap-1 transition active:scale-95"
+          class="py-2.5 px-2 rounded-xl bg-owl-card hover:bg-[#F9EDEC] border border-owl-border hover:border-[#E3BDB8] text-[11px] font-bold text-[#9B534B] flex items-center justify-center gap-1 transition active:scale-95"
         >
           <i data-lucide="trash-2" class="w-3 h-3 shrink-0"></i>
           <span>刪除</span>
@@ -427,31 +427,31 @@ function renderMobileDaysPopup() {
           : 'mobile-day-tile-idle';
       const dimClass = day.visible ? '' : 'opacity-55';
 
-      // 點擊該天正方形時，緊貼其左側同步跳出「眼睛小圓」與「齒輪小圓」
+      // 點擊該天正方形時，緊貼其左側同步跳出「眼睛小圓」與「齒輪小圓」（視覺 32px，觸控熱區擴大至 40px）
       const inlineMiniOrbsHtml = isSplitSelected
         ? `
-          <div class="flex flex-col items-center gap-1 mr-1.5 mobile-day-square-animate">
+          <div class="flex flex-col items-center gap-1.5 mr-1.5 mobile-day-square-animate">
             <button
               type="button"
               data-inline-eye-day-id="${day.id}"
               title="${day.visible ? '隱藏此天數地圖顯示' : '開啟此天數地圖顯示'}"
               aria-label="${day.visible ? '隱藏此天數圖層' : '顯示此天數圖層'}"
-              class="btn-mobile-inline-eye w-[28px] h-[28px] rounded-full shadow-float flex items-center justify-center transition active:scale-90 ${
+              class="btn-mobile-inline-eye mobile-hit-expand w-[32px] h-[32px] rounded-full shadow-float flex items-center justify-center transition active:scale-90 ${
                 day.visible ? 'mobile-mini-orb' : 'mobile-mini-orb-off'
               }"
             >
-              <i data-lucide="${day.visible ? 'eye' : 'eye-off'}" class="w-3.5 h-3.5"></i>
+              <i data-lucide="${day.visible ? 'eye' : 'eye-off'}" class="w-4 h-4"></i>
             </button>
             <button
               type="button"
               data-inline-gear-day-id="${day.id}"
               title="單日詳細設定（更名、刪除、預算查看）"
               aria-label="單日詳細設定"
-              class="btn-mobile-inline-gear w-[28px] h-[28px] rounded-full shadow-float flex items-center justify-center transition active:scale-90 ${
+              class="btn-mobile-inline-gear mobile-hit-expand w-[32px] h-[32px] rounded-full shadow-float flex items-center justify-center transition active:scale-90 ${
                 isGearOpen ? 'mobile-mini-orb-active' : 'mobile-mini-orb'
               }"
             >
-              <i data-lucide="settings" class="w-3.5 h-3.5"></i>
+              <i data-lucide="settings" class="w-4 h-4"></i>
             </button>
           </div>
         `
@@ -506,17 +506,18 @@ function renderMobileDaysPopup() {
 
       if (changedDay) {
         callbacks.onStateChanged();
-        if (chosen.visible && chosen.pins.length > 0) {
-          fitBoundsToPoints(
-            chosen.pins.map((p) => [p.lat, p.lng]),
-            { padding: [60, 60], maxZoom: 14 }
-          );
-        }
       } else {
         renderMobileDaysPopup();
         renderMobileDayDetailSheet();
         syncOrbsAndPanels();
         refreshIcons();
+      }
+
+      if (chosen.visible && chosen.pins.length > 0) {
+        fitBoundsToPoints(
+          chosen.pins.map((p) => [p.lat, p.lng]),
+          getMobileFitBoundsOptions({ splitOpen: true })
+        );
       }
     });
   });
@@ -547,6 +548,20 @@ function renderMobileDaysPopup() {
       refreshIcons();
     });
   });
+}
+
+export function hasOpenMobileOverlay() {
+  return isMobileViewport() && activeOverlay !== 'none';
+}
+
+export function getMobileFitBoundsOptions({ splitOpen = false } = {}) {
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 844;
+  const bottomReserve = splitOpen || activeOverlay !== 'none' ? Math.min(Math.round(vh * 0.56), 470) : 110;
+  return {
+    paddingTopLeft: [24, 68],
+    paddingBottomRight: [splitOpen ? 92 : 24, bottomReserve],
+    maxZoom: 14,
+  };
 }
 
 export function renderMobileHud() {

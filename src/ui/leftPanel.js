@@ -126,6 +126,10 @@ function bindItineraryInteractions(day, { onOpenPinDetail, onOpenTransport, onRe
     let indicatorEl = null;
     let targetIndex = pinIndex;
 
+    const blockTouchScroll = (ev) => {
+      if (isDragging && ev.cancelable) ev.preventDefault();
+    };
+
     const clearTimer = () => {
       if (longPressTimer) {
         clearTimeout(longPressTimer);
@@ -137,6 +141,13 @@ function bindItineraryInteractions(day, { onOpenPinDetail, onOpenTransport, onRe
       isDragging = true;
       clearTimer();
       if (navigator.vibrate) navigator.vibrate(25);
+      window.addEventListener('touchmove', blockTouchScroll, { passive: false });
+      listEl.style.overflowY = 'hidden';
+      try {
+        if (pointerId != null && card.setPointerCapture) card.setPointerCapture(pointerId);
+      } catch {
+        // 某些瀏覽器若觸控點已移開則略過 capture
+      }
 
       const rect = card.getBoundingClientRect();
       card.classList.add('dragging-source');
@@ -178,6 +189,7 @@ function bindItineraryInteractions(day, { onOpenPinDetail, onOpenTransport, onRe
           break;
         }
       }
+
       if (!inserted && blocks.length > 0) {
         newTarget = blocks.length - 1;
         blocks[blocks.length - 1].after(indicatorEl);
@@ -190,10 +202,20 @@ function bindItineraryInteractions(day, { onOpenPinDetail, onOpenTransport, onRe
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('pointercancel', onPointerCancel);
+      window.removeEventListener('touchmove', blockTouchScroll);
+      listEl.style.overflowY = '';
+      try {
+        if (pointerId != null && card.hasPointerCapture?.(pointerId)) {
+          card.releasePointerCapture(pointerId);
+        }
+      } catch {
+        // ignore
+      }
 
       if (!isDragging) return;
       isDragging = false;
       card.classList.remove('dragging-source');
+
       if (ghostEl) {
         ghostEl.remove();
         ghostEl = null;
@@ -292,7 +314,7 @@ export function renderLeftPanel(callbacks) {
           <i data-lucide="map-pin-plus" class="w-6 h-6"></i>
         </div>
         <h3 class="text-sm font-bold text-owl-text">這一天還沒有標點</h3>
-        <p class="text-xs text-owl-subtext mt-1.5 leading-relaxed">在中間地圖任意點擊（或右鍵點擊），<br/>亦可使用上方搜尋列直接加入景點！</p>
+        <p class="text-xs text-owl-subtext mt-1.5 leading-relaxed">開啟「標點模式」點擊地圖，或使用上方搜尋列加入景點<br/><span class="text-[11px] text-owl-muted">（瀏覽模式下：桌機可右鍵、手機可長按地圖空處新增）</span></p>
       </div>
     `;
     refreshIcons();
@@ -309,8 +331,8 @@ export function renderLeftPanel(callbacks) {
     html += `
       <div class="pin-item-block" data-pin-index="${idx}" data-pin-id="${pin.id}">
         <div class="pin-card group relative bg-owl-card hover:bg-owl-selectedBg/75 border border-owl-cardBorder hover:border-owl-accentBorder rounded-2xl p-3 shadow-xs hover:shadow-soft transition cursor-pointer touch-pan-y" data-pin-index="${idx}" data-pin-id="${pin.id}">
-          <div class="flex items-center gap-2.5">
-            <div class="drag-handle flex flex-col items-center justify-center gap-1 py-1 px-0.5 cursor-grab active:cursor-grabbing text-owl-muted group-hover:text-owl-primaryDeep shrink-0 touch-none" title="按住上下拖曳調整順序">
+          <div class="flex items-center gap-2">
+            <div class="drag-handle flex flex-col items-center justify-center gap-1 min-w-[38px] min-h-[44px] -ml-1.5 pl-1.5 pr-1 py-1 cursor-grab active:cursor-grabbing text-owl-muted group-hover:text-owl-primaryDeep shrink-0 touch-none" title="按住上下拖曳調整順序">
               <span class="w-6 h-6 rounded-full text-white text-xs font-extrabold flex items-center justify-center shadow-xs" style="background:${day.color};">
                 ${idx + 1}
               </span>

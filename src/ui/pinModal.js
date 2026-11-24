@@ -138,7 +138,7 @@ function renderDetailSubSpots() {
             <select data-sub-idx="${i}" data-field="currency" title="選擇幣別（外幣自動換算新台幣）" class="subspot-input bg-owl-softBg/80 hover:bg-owl-softBg px-1.5 py-1.5 border-r border-owl-border text-[10.5px] font-extrabold text-owl-primaryDeep focus:outline-none shrink-0">
               ${buildCurrencyOptionsHTML(activeCurrency)}
             </select>
-            <input type="number" min="0" step="any" data-sub-idx="${i}" data-field="amount" value="${displayAmount}" class="subspot-input w-20 sm:w-24 bg-white px-2 py-1.5 text-xs font-bold text-owl-primaryDeep tabular-nums-strict focus:outline-none" />
+            <input type="number" inputmode="decimal" min="0" step="any" data-sub-idx="${i}" data-field="amount" value="${displayAmount}" class="subspot-input w-20 sm:w-24 bg-white px-2 py-1.5 text-xs font-bold text-owl-primaryDeep tabular-nums-strict focus:outline-none" />
           </div>
           <button type="button" data-del-sub-idx="${i}" class="btn-del-subspot w-7 h-7 rounded-lg text-owl-muted hover:text-[#A65D57] hover:bg-[#F9EDEC] flex items-center justify-center shrink-0 transition">
             <i data-lucide="x" class="w-4 h-4"></i>
@@ -352,6 +352,14 @@ function savePinDetail() {
 
 export function bindPinModalEvents({ onStateChanged }) {
   onChangeCallback = onStateChanged;
+
+  const modalEl = document.getElementById('modal-pin-detail');
+  modalEl?.addEventListener('click', (e) => {
+    if (e.target === modalEl) closePinDetailModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && editingPinContext) closePinDetailModal();
+  });
 
   document.getElementById('btn-close-pin-detail').addEventListener('click', closePinDetailModal);
   document.getElementById('btn-save-pin-detail').addEventListener('click', savePinDetail);

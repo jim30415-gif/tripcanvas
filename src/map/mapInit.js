@@ -159,7 +159,20 @@ export function flyToPoint(lat, lng, zoom = 16) {
 export function fitBoundsToPoints(pts, options = { padding: [70, 70], maxZoom: 15 }) {
   if (!mapInstance || !pts || pts.length === 0) return;
   if (pts.length === 1) {
-    mapInstance.flyTo(pts[0], 15, { duration: 0.7 });
+    const zoom = options.maxZoom || 15;
+    const bottomPad = Array.isArray(options.paddingBottomRight) ? options.paddingBottomRight[1] || 0 : 0;
+    const topPad = Array.isArray(options.paddingTopLeft) ? options.paddingTopLeft[1] || 0 : 0;
+    const rightPad = Array.isArray(options.paddingBottomRight) ? options.paddingBottomRight[0] || 0 : 0;
+    const leftPad = Array.isArray(options.paddingTopLeft) ? options.paddingTopLeft[0] || 0 : 0;
+    if (bottomPad > topPad || rightPad > leftPad) {
+      const projected = mapInstance.project(pts[0], zoom);
+      const offsetX = (rightPad - leftPad) / 2;
+      const offsetY = (bottomPad - topPad) / 2;
+      const shifted = mapInstance.unproject([projected.x + offsetX, projected.y + offsetY], zoom);
+      mapInstance.flyTo(shifted, zoom, { duration: 0.65 });
+      return;
+    }
+    mapInstance.flyTo(pts[0], zoom, { duration: 0.7 });
   } else {
     mapInstance.fitBounds(L.latLngBounds(pts), options);
   }
