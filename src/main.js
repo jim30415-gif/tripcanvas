@@ -32,7 +32,7 @@ import { openTransportModal, bindTransportModalEvents } from './ui/transportModa
 import { bindSearchBarEvents } from './ui/searchBar.js';
 import { bindTripsDrawerEvents, renderTripsDrawer } from './ui/tripsDrawer.js';
 import { bindDriveSyncUI } from './ui/driveSyncUI.js';
-import { setMobileTab, bindMobileNav } from './ui/mobileNav.js';
+import { setMobileTab, bindMobileNav, renderMobileHud } from './ui/mobileNav.js';
 import { openCustomDialog, showToast } from './ui/dialog.js';
 import { refreshIcons, uid } from './utils/format.js';
 
@@ -58,12 +58,12 @@ function updateMapHeaderUI() {
   if (state.addMode) {
     mapSection.classList.add('map-add-mode');
     addBtn.className =
-      'bg-owl-primary hover:bg-owl-primaryHover text-white rounded-xl px-3 py-1.5 text-xs font-bold flex items-center gap-1.5 shadow-xs transition active:scale-95 shrink-0';
+      'bg-owl-primary hover:bg-owl-primaryHover text-white rounded-xl px-2.5 md:px-3 py-1.5 text-xs font-bold flex items-center gap-1 md:gap-1.5 shadow-xs transition active:scale-95 shrink-0';
     addLabel.textContent = '標點模式：開';
   } else {
     mapSection.classList.remove('map-add-mode');
     addBtn.className =
-      'bg-owl-softBg hover:bg-owl-border/70 text-owl-primaryDeep border border-owl-border rounded-xl px-3 py-1.5 text-xs font-bold flex items-center gap-1.5 transition active:scale-95 shrink-0';
+      'bg-owl-softBg hover:bg-owl-border/70 text-owl-primaryDeep border border-owl-border rounded-xl px-2.5 md:px-3 py-1.5 text-xs font-bold flex items-center gap-1 md:gap-1.5 transition active:scale-95 shrink-0';
     addLabel.textContent = '標點模式：關';
   }
 }
@@ -151,6 +151,7 @@ function renderRight() {
       renderMapLayers();
     },
   });
+  renderMobileHud();
 }
 
 function renderAll() {
@@ -277,7 +278,7 @@ function bindGlobalEvents() {
 
   document.getElementById('btn-fit-bounds').addEventListener('click', () => fitMapToVisiblePins(false));
 
-  document.getElementById('btn-add-day').addEventListener('click', () => {
+  const createAndAddNewDay = () => {
     const state = getState();
     const nextNum = state.days.length + 1;
     const newDay = {
@@ -292,7 +293,9 @@ function bindGlobalEvents() {
     saveState((msg) => showToast(msg, 'error'));
     renderAll();
     showToast(`已新增「${newDay.name}」圖層`, 'success');
-  });
+  };
+
+  document.getElementById('btn-add-day').addEventListener('click', createAndAddNewDay);
 
   document.getElementById('btn-export-json').addEventListener('click', exportJSON);
   document.getElementById('input-import-json').addEventListener('change', (e) => {
@@ -331,7 +334,14 @@ function bindGlobalEvents() {
   bindPinModalEvents({ onStateChanged: renderAll });
   bindTransportModalEvents({ onStateChanged: renderAll });
   bindDriveSyncUI();
-  bindMobileNav();
+  bindMobileNav({
+    onStateChanged: renderAll,
+    onVisibilityChanged: () => {
+      renderRight();
+      renderMapLayers();
+    },
+    onAddDay: createAndAddNewDay,
+  });
 
   window.addEventListener('resize', () => invalidateMapSize());
 }

@@ -23,28 +23,28 @@
   <div id="app">
 
     <!-- ==================== 頂部導覽列（z-index: 2000） ==================== -->
-    <header class="app-header h-14 bg-owl-panel border-b border-owl-border px-2.5 sm:px-4 flex items-center justify-between gap-2 shrink-0 shadow-xs">
-      <!-- 左側：三條短橫線多計畫選單 ＋ 38×38 淺咖啡漸層圓角方塊白色行李箱 ＋ 品牌文字 -->
-      <div class="flex items-center gap-2 shrink-0">
+    <header class="app-header bg-owl-panel border-b border-owl-border px-2.5 py-2 md:py-0 md:h-14 md:px-4 flex flex-wrap md:flex-nowrap items-center justify-between gap-x-2 gap-y-2 md:gap-2 shrink-0 shadow-xs">
+      <!-- 左側：三條短橫線多計畫選單 ＋ 行李箱 Logo ＋ 品牌文字 -->
+      <div class="order-1 flex items-center gap-1.5 md:gap-2 shrink-0">
         <!-- 三條短橫線：開啟／管理多個旅遊計畫與 Google 雲端同步 -->
         <button
           id="btn-open-trips-drawer"
           type="button"
           title="切換或新增旅遊計畫、Google 雲端同步"
           aria-label="開啟旅遊計畫清單"
-          class="relative w-9 h-9 rounded-xl bg-owl-softBg/85 hover:bg-owl-border/75 border border-owl-border text-owl-primaryDeep flex items-center justify-center shrink-0 transition active:scale-95"
+          class="relative w-8 h-8 md:w-9 md:h-9 rounded-xl bg-owl-softBg/85 hover:bg-owl-border/75 border border-owl-border text-owl-primaryDeep flex items-center justify-center shrink-0 transition active:scale-95"
         >
           <i data-lucide="menu" class="w-4 h-4"></i>
           <span id="mobile-drive-sync-dot" class="hidden"></span>
         </button>
 
         <div
-          class="w-[38px] h-[38px] rounded-[10px] flex items-center justify-center shadow-brand shrink-0 overflow-hidden"
+          class="w-[34px] h-[34px] md:w-[38px] md:h-[38px] rounded-[10px] flex items-center justify-center shadow-brand shrink-0 overflow-hidden"
           style="background: linear-gradient(135deg, #A68666 0%, #826447 100%);"
           title="漫步地圖 TripCanvas"
         >
           <!-- 單手拉大型傾斜硬殼滾輪行李箱 SVG（純白前景，無人形） -->
-          <svg viewBox="0 0 38 38" class="w-[38px] h-[38px]" xmlns="http://www.w3.org/2000/svg" aria-label="手拉傾斜行李箱標誌">
+          <svg viewBox="0 0 38 38" class="w-full h-full" xmlns="http://www.w3.org/2000/svg" aria-label="手拉傾斜行李箱標誌">
             <g transform="rotate(25 15 21.5)">
               <line x1="12.7" y1="14.2" x2="12.7" y2="7.5" stroke="#FFFFFF" stroke-width="1.55" stroke-linecap="round" />
               <line x1="17.3" y1="14.2" x2="17.3" y2="7.5" stroke="#FFFFFF" stroke-width="1.55" stroke-linecap="round" />
@@ -73,17 +73,17 @@
         </div>
       </div>
 
-      <!-- 中央：標點模式開關 & Nominatim 地點搜尋欄 -->
-      <div class="flex items-center gap-2 flex-1 max-w-2xl justify-center min-w-0">
-        <button id="btn-toggle-add-mode" type="button" class="bg-owl-primary hover:bg-owl-primaryHover text-white rounded-xl px-3 py-1.5 text-xs font-bold flex items-center gap-1.5 shadow-xs transition active:scale-95 shrink-0">
-          <i data-lucide="map-pin-plus" class="w-4 h-4"></i>
-          <span id="add-mode-label" class="hidden sm:inline">標點模式：開</span>
+      <!-- 中央（手機版獨立第二列滿版）：標點模式開關 & Nominatim 地點搜尋欄 -->
+      <div class="order-3 md:order-2 w-full md:w-auto flex items-center gap-1.5 md:gap-2 md:flex-1 md:max-w-2xl md:justify-center min-w-0">
+        <button id="btn-toggle-add-mode" type="button" class="bg-owl-primary hover:bg-owl-primaryHover text-white rounded-xl px-2.5 md:px-3 py-1.5 text-xs font-bold flex items-center gap-1 md:gap-1.5 shadow-xs transition active:scale-95 shrink-0">
+          <i data-lucide="map-pin-plus" class="w-3.5 h-3.5 md:w-4 md:h-4 shrink-0"></i>
+          <span id="add-mode-label" class="whitespace-nowrap">標點模式：開</span>
         </button>
 
         <!-- 地點搜尋框與最頂層下拉結果 -->
-        <div class="relative flex-1 min-w-0 max-w-md">
+        <div class="relative flex-1 min-w-0 md:max-w-md">
           <form id="map-search-form" class="flex items-center min-w-0 bg-owl-softBg/75 hover:bg-owl-softBg border border-owl-border rounded-xl px-2 sm:px-2.5 py-1 focus-within:bg-owl-card focus-within:ring-2 focus-within:ring-owl-primary/30 focus-within:border-owl-accentBorder transition">
-            <i data-lucide="search" class="w-3.5 h-3.5 text-owl-muted shrink-0 mr-1 sm:mr-1.5"></i>
+            <i data-lucide="search" class="w-3.5 h-3.5 text-owl-muted shrink-0 mr-1.5"></i>
             <input
               id="map-search-input"
               type="text"
@@ -94,7 +94,7 @@
             <button id="btn-clear-search" type="button" title="清除關鍵字" class="hidden ml-1 w-5 h-5 rounded-full hover:bg-owl-border/70 text-owl-muted hover:text-owl-text flex items-center justify-center shrink-0 transition">
               <i data-lucide="x" class="w-3 h-3"></i>
             </button>
-            <button type="submit" class="ml-1 sm:ml-1.5 px-2 sm:px-2.5 py-1 rounded-lg bg-owl-primary hover:bg-owl-primaryHover text-white text-[11px] font-bold transition shrink-0">
+            <button type="submit" class="ml-1.5 px-2.5 py-1 rounded-lg bg-owl-primary hover:bg-owl-primaryHover text-white text-[11px] font-bold transition shrink-0">
               搜尋
             </button>
           </form>
@@ -105,21 +105,21 @@
       </div>
 
       <!-- 右側：Google 雲端同步狀態 ＋ JSON 匯出 / 匯入 / 重置示範 -->
-      <div class="flex items-center gap-1.5 shrink-0">
+      <div class="order-2 md:order-3 flex items-center gap-1 md:gap-1.5 shrink-0 ml-auto md:ml-0">
         <button id="btn-drive-sync-header" type="button" title="連結自己的 Google 雲端硬碟，自動跨裝置同步行程" class="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold text-owl-subtext hover:text-owl-primaryDeep hover:bg-owl-softBg border border-owl-border bg-owl-card transition active:scale-95 shrink-0">
           <i data-lucide="cloud" class="w-3.5 h-3.5 shrink-0"></i>
           <span class="whitespace-nowrap">本機備份</span>
         </button>
-        <button id="btn-export-json" type="button" title="匯出目前旅遊計畫 JSON" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-owl-subtext hover:text-owl-primaryDeep hover:bg-owl-softBg border border-owl-border bg-owl-card transition">
+        <button id="btn-export-json" type="button" title="匯出目前旅遊計畫 JSON" class="inline-flex items-center justify-center gap-1 w-8 h-8 md:w-auto md:h-auto md:px-2.5 md:py-1.5 rounded-xl text-xs font-semibold text-owl-subtext hover:text-owl-primaryDeep hover:bg-owl-softBg border border-owl-border bg-owl-card transition">
           <i data-lucide="download" class="w-3.5 h-3.5"></i>
           <span class="hidden md:inline">匯出</span>
         </button>
-        <label title="匯入行程 JSON（將建立為新計畫）" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-owl-subtext hover:text-owl-primaryDeep hover:bg-owl-softBg border border-owl-border bg-owl-card transition cursor-pointer">
+        <label title="匯入行程 JSON（將建立為新計畫）" class="inline-flex items-center justify-center gap-1 w-8 h-8 md:w-auto md:h-auto md:px-2.5 md:py-1.5 rounded-xl text-xs font-semibold text-owl-subtext hover:text-owl-primaryDeep hover:bg-owl-softBg border border-owl-border bg-owl-card transition cursor-pointer">
           <i data-lucide="upload" class="w-3.5 h-3.5"></i>
           <span class="hidden md:inline">匯入</span>
           <input id="input-import-json" type="file" accept="application/json,.json" class="hidden" />
         </label>
-        <button id="btn-restore-demo" type="button" title="重置目前計畫並載入台北 2 日示範行程" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-owl-subtext hover:text-[#4F6F57] hover:bg-[#EBF2EC] border border-owl-border bg-owl-card transition">
+        <button id="btn-restore-demo" type="button" title="重置目前計畫並載入台北 2 日示範行程" class="inline-flex items-center justify-center gap-1 w-8 h-8 md:w-auto md:h-auto md:px-2.5 md:py-1.5 rounded-xl text-xs font-semibold text-owl-subtext hover:text-[#4F6F57] hover:bg-[#EBF2EC] border border-owl-border bg-owl-card transition">
           <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
           <span class="hidden md:inline">重置示範</span>
         </button>
@@ -129,8 +129,8 @@
     <!-- ==================== 三欄主工作區（z-index: 1） ==================== -->
     <main class="app-main flex-1 flex min-h-0 overflow-hidden bg-owl-canvas">
 
-      <!-- ==================== 左側欄：目前天數標點順序與交通設定 ==================== -->
-      <aside id="panel-left" class="w-full lg:w-[305px] xl:w-[360px] bg-owl-panel border-r border-owl-border flex flex-col shrink-0 z-20 h-full min-h-0">
+      <!-- ==================== 左側欄：目前天數標點順序與交通設定（手機版改為半透明浮動非滿版視窗） ==================== -->
+      <aside id="panel-left" class="hidden lg:flex fixed left-3 bottom-[80px] z-[1550] w-[calc(100vw-24px)] max-w-[356px] max-h-[60dvh] rounded-3xl border border-owl-border/90 bg-owl-panel/80 backdrop-blur-md shadow-2xl overflow-hidden flex-col shrink-0 min-h-0 lg:static lg:inset-auto lg:z-20 lg:w-[305px] xl:w-[360px] lg:max-w-none lg:max-h-none lg:h-full lg:rounded-none lg:border-0 lg:border-r lg:border-owl-border lg:bg-owl-panel lg:backdrop-blur-none lg:shadow-none">
         <!-- 當前天數標題與支出小計 -->
         <div class="px-4 py-3 border-b border-owl-border/80 bg-owl-selectedBg/75 shrink-0">
           <div class="flex items-center justify-between gap-2">
@@ -138,7 +138,12 @@
               <span id="left-day-dot" class="w-3.5 h-3.5 rounded-full shrink-0 ring-4 ring-owl-softBg"></span>
               <h2 id="left-day-title" class="text-sm font-extrabold text-owl-text truncate">Day 1</h2>
             </div>
-            <span id="left-pin-count" class="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-owl-card border border-owl-cardBorder text-owl-subtext shrink-0">0 個標點</span>
+            <div class="flex items-center gap-1.5 shrink-0">
+              <span id="left-pin-count" class="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-owl-card/90 border border-owl-cardBorder text-owl-subtext shrink-0">0 個標點</span>
+              <button id="btn-close-mobile-itinerary" type="button" title="收合行程清單" aria-label="收合行程清單" class="lg:hidden w-7 h-7 rounded-full bg-owl-card/85 hover:bg-owl-softBg border border-owl-border text-owl-subtext flex items-center justify-center transition active:scale-95">
+                <i data-lucide="x" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
           </div>
           <div class="mt-1.5 flex items-center justify-between text-[11px] text-owl-subtext">
             <span class="inline-flex items-center gap-1">
@@ -153,11 +158,11 @@
         </div>
 
         <!-- 標點與交通連接器可捲動清單 -->
-        <div id="itinerary-list" class="flex-1 overflow-y-auto custom-scroll p-3.5 pb-24 lg:pb-6"></div>
+        <div id="itinerary-list" class="flex-1 overflow-y-auto custom-scroll p-3.5 pb-4 lg:pb-6"></div>
       </aside>
 
       <!-- ==================== 中間主畫面：Google 地圖互動區（isolation: isolate） ==================== -->
-      <section id="panel-map" class="map-wrapper map-add-mode hidden lg:block">
+      <section id="panel-map" class="map-wrapper map-add-mode block">
         <div id="map"></div>
 
         <!-- 左上角精簡浮動膠囊：目前編輯圖層 -->
@@ -242,21 +247,74 @@
 
     </main>
 
-    <!-- 手機 / 直向平板底部三頁籤切換列 (< lg 顯示) -->
-    <nav class="lg:hidden fixed bottom-0 left-0 right-0 h-16 bg-owl-panel/95 backdrop-blur-md border-t border-owl-border z-[1500] grid grid-cols-3 px-2 py-1.5 shadow-float">
-      <button type="button" data-mobile-tab="left" class="mobile-tab-btn flex flex-col items-center justify-center rounded-xl text-owl-subtext font-medium text-xs gap-0.5 transition">
-        <i data-lucide="list-ordered" class="w-5 h-5"></i>
-        <span>行程清單</span>
-      </button>
-      <button type="button" data-mobile-tab="map" class="mobile-tab-btn flex flex-col items-center justify-center rounded-xl text-owl-primaryDeep bg-owl-softBg font-bold text-xs gap-0.5 transition">
-        <i data-lucide="map" class="w-5 h-5"></i>
-        <span>互動地圖</span>
-      </button>
-      <button type="button" data-mobile-tab="right" class="mobile-tab-btn flex flex-col items-center justify-center rounded-xl text-owl-subtext font-medium text-xs gap-0.5 transition">
-        <i data-lucide="layers" class="w-5 h-5"></i>
-        <span>天數與支出</span>
-      </button>
-    </nav>
+    <!-- ==================== 手機版浮動互動控制列（< lg 顯示；電腦與橫向平板隱藏） ==================== -->
+    <!-- 點擊地圖空白處收合手機版浮動視窗的透明攔截層（避免收合時誤觸地圖新增標點） -->
+    <div id="mobile-hud-backdrop" class="hidden lg:hidden fixed inset-0 z-[1490] bg-transparent"></div>
+
+    <!-- 右邊圓球往上彈出的正方形天數方塊列（僅標示第幾天，點擊後再開啟該天詳細設定） -->
+    <div
+      id="mobile-days-popup"
+      class="hidden lg:hidden fixed right-3.5 bottom-[calc(76px+env(safe-area-inset-bottom))] z-[1560] flex flex-col items-center gap-2 max-h-[56dvh] overflow-y-auto custom-scroll py-1 px-0.5"
+    ></div>
+
+    <!-- 點擊日期正方形後展開的「單日詳細設定」半透明卡片 -->
+    <div
+      id="mobile-day-detail-sheet"
+      class="hidden lg:hidden fixed left-3 right-[78px] bottom-[calc(76px+env(safe-area-inset-bottom))] max-w-[300px] ml-auto z-[1570] rounded-3xl bg-owl-panel/90 backdrop-blur-md border border-owl-border shadow-2xl p-3.5 mobile-sheet-animate"
+    ></div>
+
+    <!-- 點擊中間總支出圓弧長條後展開的「開銷比例明細」半透明深咖卡片 -->
+    <div
+      id="mobile-expense-sheet"
+      class="hidden lg:hidden fixed left-3 right-3 bottom-[calc(76px+env(safe-area-inset-bottom))] max-w-[360px] mx-auto z-[1565] rounded-3xl mobile-expense-card shadow-2xl p-4 max-h-[58dvh] overflow-y-auto custom-scroll mobile-sheet-animate"
+    ></div>
+
+    <!-- 底部浮動三元件：左半透明行程圓球 ＋ 中間長條圓弧總支出 ＋ 右半透明日期圓球 -->
+    <div
+      id="mobile-bottom-hud"
+      class="lg:hidden fixed bottom-0 left-0 right-0 z-[1600] px-3.5 pb-[max(14px,env(safe-area-inset-bottom))] pt-2 pointer-events-none"
+    >
+      <div class="flex items-center justify-between gap-2.5">
+        <!-- 左邊半透明小圓球：切換半透明非滿版行程清單 -->
+        <button
+          id="btn-mobile-orb-itinerary"
+          type="button"
+          title="開啟／收合行程清單"
+          aria-label="開啟或收合行程清單"
+          aria-expanded="false"
+          class="pointer-events-auto relative w-[52px] h-[52px] rounded-full mobile-glass-orb shadow-float flex items-center justify-center transition-all duration-200 active:scale-95 shrink-0"
+        >
+          <i data-lucide="list-ordered" class="w-5 h-5"></i>
+        </button>
+
+        <!-- 中間下面長條圓弧型：直接顯示總支出（點擊可檢視分類與各天開銷比例） -->
+        <button
+          id="btn-mobile-expense-pill"
+          type="button"
+          title="檢視總支出與開銷比例明細"
+          aria-label="總支出與開銷比例明細"
+          aria-expanded="false"
+          class="pointer-events-auto flex-1 max-w-[232px] h-[46px] px-4 rounded-full mobile-expense-capsule shadow-float flex items-center justify-center gap-2 transition-all duration-200 active:scale-[0.97] min-w-0"
+        >
+          <span class="text-[11px] font-semibold text-[#DECDB8] whitespace-nowrap shrink-0">總支出</span>
+          <span id="mobile-grand-total-expense" class="text-[15px] font-extrabold tracking-tight text-owl-cream tabular-nums-strict truncate">NT$ 0</span>
+          <span id="mobile-expense-arrow" class="text-[9px] text-owl-gold transition-transform duration-200 shrink-0">▲</span>
+        </button>
+
+        <!-- 右邊半透明小圓球：往上彈出正方形日期選項 -->
+        <button
+          id="btn-mobile-orb-days"
+          type="button"
+          title="選擇天數圖層"
+          aria-label="選擇天數圖層"
+          aria-expanded="false"
+          class="pointer-events-auto relative w-[52px] h-[52px] rounded-full mobile-glass-orb shadow-float flex items-center justify-center transition-all duration-200 active:scale-95 shrink-0"
+        >
+          <i data-lucide="calendar-days" class="w-5 h-5"></i>
+          <span id="mobile-orb-day-dot" class="absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full ring-2 ring-owl-panel/90" style="background:#A46C49;"></span>
+        </button>
+      </div>
+    </div>
   </div>
 
   <!-- ==================== 左側抽屜：多旅遊計畫管理（z-index: 2800） ==================== -->

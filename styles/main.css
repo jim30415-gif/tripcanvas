@@ -249,3 +249,125 @@ aside.right-panel {
 .longpress-active {
   animation: longPressLift 0.42s ease-out;
 }
+
+/* =========================================================================
+ * 手機版 (< 1024px) 專屬：半透明浮動行程清單、圓球彈出動畫與地圖控制項避讓
+ * （完全限定於 max-width: 1023px，不影響任何電腦或橫向平板版面）
+ * ========================================================================= */
+@keyframes mobileSheetIn {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes mobileOrbPopUp {
+  0% {
+    opacity: 0;
+    transform: translateY(12px) scale(0.88);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.mobile-sheet-animate {
+  animation: mobileSheetIn 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.mobile-day-square-animate {
+  animation: mobileOrbPopUp 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* 手機版半透明毛玻璃元件（顯式色值，避免非標準透明度步階遺失） */
+.mobile-glass-orb {
+  background: rgba(251, 248, 243, 0.82);
+  border: 1px solid rgba(226, 214, 197, 0.95);
+  color: #6B513A;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.mobile-glass-orb:hover {
+  background: rgba(251, 248, 243, 0.94);
+}
+.mobile-glass-orb-active {
+  background: linear-gradient(135deg, rgba(166, 134, 102, 0.94) 0%, rgba(130, 100, 71, 0.94) 100%);
+  border: 1px solid rgba(107, 81, 58, 0.85);
+  color: #FFFFFF;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.mobile-expense-capsule {
+  background: linear-gradient(135deg, rgba(74, 56, 43, 0.88) 0%, rgba(61, 46, 35, 0.92) 100%);
+  border: 1px solid rgba(138, 108, 82, 0.72);
+  color: #FAF4EC;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.mobile-expense-capsule:hover {
+  background: linear-gradient(135deg, rgba(66, 50, 38, 0.95) 0%, rgba(52, 39, 29, 0.96) 100%);
+}
+
+.mobile-expense-card {
+  background: linear-gradient(145deg, rgba(74, 56, 43, 0.93) 0%, rgba(56, 42, 32, 0.95) 100%);
+  border: 1px solid rgba(138, 108, 82, 0.75);
+  color: #FAF4EC;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.mobile-day-tile-idle {
+  background: rgba(251, 248, 243, 0.86);
+  border: 1px solid rgba(226, 214, 197, 0.95);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.mobile-day-tile-active {
+  background: rgba(246, 238, 227, 0.94);
+  border: 2px solid #9A7B5C;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.mobile-day-tile-selected {
+  background: rgba(242, 232, 218, 0.96);
+  border: 2px solid #6B513A;
+  box-shadow: 0 0 0 3px rgba(154, 123, 92, 0.25), 0 8px 20px -4px rgba(58, 44, 33, 0.22);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.mobile-day-tile-add {
+  background: linear-gradient(135deg, rgba(166, 134, 102, 0.92) 0%, rgba(130, 100, 71, 0.92) 100%);
+  border: 1px solid rgba(107, 81, 58, 0.5);
+  color: #FFFFFF;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+@media (max-width: 1023px) {
+  /* 手機版行程清單採半透明暖咖毛玻璃卡片，讓底層互動地圖若隱若現 */
+  #panel-left {
+    background-color: rgba(251, 248, 243, 0.84);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  #panel-left .pin-card {
+    background-color: rgba(255, 253, 249, 0.88);
+  }
+
+  /* 手機版將 Leaflet 縮放 +/- 移至右上角縮放鈕下方，避免與右下圓球及往上彈出的日期方塊重疊 */
+  .leaflet-bottom.leaflet-right {
+    bottom: auto !important;
+    top: 56px !important;
+    right: 2px !important;
+  }
+
+  .leaflet-bottom.leaflet-right .leaflet-control-attribution {
+    display: none !important;
+  }
+}
+
