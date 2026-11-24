@@ -1,0 +1,234 @@
+import { TRANSPORT_MODES } from '../config/constants.js';
+import { calcDistanceKm } from '../utils/geo.js';
+import { encodePolyline } from './polyline.js';
+
+/**
+ * 免費陸路備援引擎：使用正確依交通方式分流的 FOSSGIS OSRM 實例
+ * （routed-car / routed-bike / routed-foot），並以低並發排隊避免觸發限流。
+ * 修正舊版單打 router.project-osrm.org 導致步行/自行車退化為車道或逾時橫越街區的問題。
+ */
+
+const MAX_CONCURRENCY = 2;
+const MIN_GAP_MS = 160;
+let activeCount = 0;
+let lastStartTime = 0;
+const queue = [];
+
+function enqueueRequest(fn) {
+  return new Promise((resolve, reject) => {
+    queue.push({ fn, resolve, reject });
+    drainQueue();
+  });
+}
+
+function drainQueue() {
+  if (activeCount >= MAX_CONCURRENCY || queue.length === 0) return;
+
+  const waitMs = Math.max(0, MIN_GAP_MS - (Date.now() - lastStartTime));
+  if (waitMs > 0) {
+    setTimeout(drainQueue, waitMs);
+    return;
+  }
+
+  const task = queue.shift();
+  activeCount++;
+  lastStartTime = Date.now();
+
+  Promise.resolve()
+    .then(() => task.fn())
+    .then(task.resolve, task.reject)
+    .finally(() => {
+      activeCount--;
+      drainQueue();
+    });
+}
+
+function extractRoadCoordsFromOSRM(route) {
+  // 優先拼接 steps 幾何確保最高轉角精準度；若無 steps 則使用 overview=full 完整幾何
+  const steps = route?.legs?.[0]?.steps;
+  if (Array.isArray(steps) && steps.length > 0) {
+    const merged = [];
+    for (const step of steps) {
+      const raw = step?.geometry?.coordinates;
+      if (!Array.isArray(raw)) continue;
+      for (const [lng, lat] of raw) {
+        if (merged.length > 0) {
+          const last = merged[merged.length - 1];
+          if (Math.abs(last[0] - lat) < 1e-6 && Math.abs(last[1] - lng) < 1e-6) continue;
+        }
+        merged.push([lat, lng]);
+      }
+    }
+    if (merged.length >= 2) return merged;
+  }
+
+  const rawCoords = route?.geometry?.coordinates;
+  if (Array.isArray(rawCoords) && rawCoords.length >= 2) {
+    return rawCoords.map(([lng, lat]) => [lat, lng]);
+  }
+  return [];
+}
+
+function validateOSRMResponse(data, coords, pinA, pinB) {
+  const route = data?.routes?.[0];
+  if (!route || coords.length < 2) return false;
+
+  const straightKm = calcDistanceKm(pinA.lat, pinA.lng, pinB.lat, pinB.lng);
+
+  // 驗證 1：檢查 waypoints 吸附距離是否超過 5 公里（跨海常被強行吸附到岸邊）
+  if (Array.isArray(data.waypoints) && data.waypoints.length >= 2) {
+    const wpA = data.waypoints[0];
+    const wpB = data.waypoints[data.waypoints.length - 1];
+    const wpADistKm = wpA?.location
+      ? calcDistanceKm(pinA.lat, pinA.lng, wpA.location[1], wpA.location[0])
+      : 0;
+    const wpBDistKm = wpB?.location
+      ? calcDistanceKm(pinB.lat, pinB.lng, wpB.location[1], wpB.location[0])
+      : 0;
+    if ((wpA?.distance || 0) > 5000 || (wpB?.distance || 0) > 5000 || wpADistKm > 5 || wpBDistKm > 5) {
+      return false;
+    }
+  }
+
+  // 驗證 2：起終點幾何與實際標點距離不可超過 5 公里
+  const startErrKm = calcDistanceKm(pinA.lat, pinA.lng, coords[0][0], coords[0][1]);
+  const endErrKm = calcDistanceKm(
+    pinB.lat,
+    pinB.lng,
+    coords[coords.length - 1][0],
+    coords[coords.length - 1][1]
+  );
+  if (startErrKm > 5 || endErrKm > 5) return false;
+
+  // 驗證 3：非零跨度卻回傳幾乎零距離，或單步出現超過 120km 的異常直線跳躍
+  if (straightKm > 0.3 && (!route.distance || route.distance < 10)) return false;
+  for (let i = 1; i < coords.length; i++) {
+    const stepKm = calcDistanceKm(coords[i - 1][0], coords[i - 1][1], coords[i][0], coords[i][1]);
+    if (stepKm > 120) return false;
+  }
+
+  return true;
+}
+
+async function fetchOSRMUrl(url, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    const data = await res.json().catch(() => null);
+    return { ok: res.ok, status: res.status, data };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function queryFossgisOSRM(mode, pinA, pinB) {
+  const modeMeta = TRANSPORT_MODES[mode];
+  if (!modeMeta || !modeMeta.fossgisService) {
+    return { status: 'unsupported', provider: 'osrm', encodedPolyline: '', distanceKm: null, durationMin: null };
+  }
+
+  return enqueueRequest(async () => {
+    const coordStr = `${pinA.lng},${pinA.lat};${pinB.lng},${pinB.lat}`;
+    const baseParams = 'overview=full&geometries=geojson&steps=true';
+
+    const candidateUrls = [];
+    if (mode === 'scooter') {
+      // 機車優先避開高速公路，若該實例不支援 exclude=motorway 再退回一般道路
+      candidateUrls.push(
+        `https://routing.openstreetmap.de/${modeMeta.fossgisService}/route/v1/driving/${coordStr}?${baseParams}&exclude=motorway`
+      );
+      candidateUrls.push(
+        `https://routing.openstreetmap.de/${modeMeta.fossgisService}/route/v1/driving/${coordStr}?${baseParams}`
+      );
+    } else {
+      candidateUrls.push(
+        `https://routing.openstreetmap.de/${modeMeta.fossgisService}/route/v1/driving/${coordStr}?${baseParams}`
+      );
+    }
+
+    // 汽車可額外加入 router.project-osrm.org 作為最後備援
+    if (mode === 'car') {
+      candidateUrls.push(`https://router.project-osrm.org/route/v1/driving/${coordStr}?${baseParams}`);
+    }
+
+    let lastStatus = 'network_error';
+
+    for (const url of candidateUrls) {
+      try {
+        const res = await fetchOSRMUrl(url);
+
+        if (res.status === 400) {
+          // 若是 exclude=motorway 不支援（InvalidValue），改試下一個候選 URL
+          if (res.data?.code === 'InvalidValue' || res.data?.code === 'InvalidOptions') {
+            continue;
+          }
+          if (res.data?.code === 'NoRoute' || res.data?.code === 'NoSegment') {
+            return {
+              status: 'unsupported',
+              provider: 'osrm',
+              encodedPolyline: '',
+              distanceKm: null,
+              durationMin: null,
+            };
+          }
+          lastStatus = 'unsupported';
+          continue;
+        }
+
+        if (!res.ok || !res.data) {
+          lastStatus = 'network_error';
+          continue;
+        }
+
+        if (res.data.code !== 'Ok' || !Array.isArray(res.data.routes) || res.data.routes.length === 0) {
+          return {
+            status: 'unsupported',
+            provider: 'osrm',
+            encodedPolyline: '',
+            distanceKm: null,
+            durationMin: null,
+          };
+        }
+
+        const route = res.data.routes[0];
+        const coords = extractRoadCoordsFromOSRM(route);
+        if (!validateOSRMResponse(res.data, coords, pinA, pinB)) {
+          return {
+            status: 'unsupported',
+            provider: 'osrm',
+            encodedPolyline: '',
+            distanceKm: null,
+            durationMin: null,
+          };
+        }
+
+        const distanceKm = Number((route.distance / 1000).toFixed(2));
+        let durationMin = Math.max(1, Math.round(route.duration / 60));
+        if (mode === 'scooter') {
+          durationMin = Math.max(1, Math.round((route.duration / 60) * 1.12));
+        }
+
+        return {
+          status: 'ok',
+          provider: 'osrm',
+          mode,
+          distanceKm,
+          durationMin,
+          encodedPolyline: encodePolyline(coords),
+          fallbackNote: mode === 'scooter' ? '依一般道路估算（免費備援路網）' : '',
+        };
+      } catch {
+        lastStatus = 'network_error';
+      }
+    }
+
+    return {
+      status: lastStatus,
+      provider: 'osrm',
+      encodedPolyline: '',
+      distanceKm: null,
+      durationMin: null,
+    };
+  });
+}

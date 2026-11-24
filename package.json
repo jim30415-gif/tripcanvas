@@ -1,0 +1,23 @@
+{
+  "name": "tripcanvas",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "漫步地圖 TripCanvas - 自由行旅遊規劃網站",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "leaflet": "^1.9.4",
+    "lucide": "^0.460.0"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "vite": "^6.0.7"
+  }
+}

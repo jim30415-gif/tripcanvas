@@ -1,0 +1,178 @@
+import { TRANSPORT_MODES, TRANSIT_TYPES } from '../config/constants.js';
+import { formatDurationZh } from '../utils/format.js';
+
+export function getActiveDay(state) {
+  return state.days.find((d) => d.id === state.activeDayId) || state.days[0];
+}
+
+export function calcPinExpense(pin) {
+  return (pin.subSpots || []).reduce((sum, s) => sum + (Number(s.cost) || 0), 0);
+}
+
+export function calcDayExpense(day) {
+  return (day.pins || []).reduce((sum, p) => sum + calcPinExpense(p), 0);
+}
+
+export function hasManualTransitDetails(t) {
+  if (!t) return false;
+  return Boolean(
+    (t.transitType && t.transitType.trim()) ||
+      (t.line && t.line.trim()) ||
+      (t.schedule && t.schedule.trim()) ||
+      Number(t.duration) > 0
+  );
+}
+
+export function hasSegmentedTransit(t) {
+  return Boolean(
+    t &&
+      t.mode === 'transit' &&
+      t.status === 'ok' &&
+      Array.isArray(t.segments) &&
+      t.segments.length > 0
+  );
+}
+
+/**
+ * 解析各類交通設定的誠實展示資訊（涵蓋 Google 分段大眾運輸、手動大眾運輸、陸路實查與異常提示）
+ */
+export function getTransportDisplayInfo(t) {
+  if (!t) return null;
+  const modeMeta = TRANSPORT_MODES[t.mode] || TRANSPORT_MODES.car;
+
+  // 1. 大眾運輸
+  if (t.mode === 'transit') {
+    if (hasSegmentedTransit(t)) {
+      const transitSegs = t.segments.filter((s) => s.type === 'TRANSIT');
+      const primaryEmoji = transitSegs[0]?.vehicleEmoji || '🚆';
+      const durStr = formatDurationZh(t.duration);
+      const lineNames = transitSegs.map((s) => s.displayLine).filter(Boolean);
+      const leftTitle =
+        lineNames.length > 0 ? lineNames.join(' → ') : '大眾運輸（步行）';
+
+      const timeRange =
+        t.departureTimeText && t.arrivalTimeText
+          ? `${t.departureTimeText}–${t.arrivalTimeText}`
+          : '';
+      const transferText =
+        transitSegs.length > 1 ? `轉乘 ${transitSegs.length - 1} 次` : '';
+      const subParts = [durStr, timeRange, transferText].filter(Boolean);
+
+      const pillLines = lineNames.length > 0 ? lineNames.slice(0, 2).join('→') : '大眾運輸';
+      const mapPill = durStr
+        ? `${primaryEmoji} ${pillLines} · ${durStr}`
+        : `${primaryEmoji} ${pillLines}`;
+
+      return {
+        kind: 'transit-segmented',
+        emoji: primaryEmoji,
+        leftTitle,
+        leftSub: subParts.join(' · ') || 'Google 分段路線',
+        badge: '分段路線',
+        mapPill,
+        segments: t.segments,
+      };
+    }
+
+    if (t.status === 'pending') {
+      return {
+        kind: 'pending',
+        emoji: '🚆',
+        leftTitle: '大眾運輸',
+        leftSub: '正在查詢分段路線與班次...',
+        badge: '查詢中',
+        mapPill: '🚆 查詢大眾運輸中...',
+      };
+    }
+
+    if (t.status === 'unsupported') {
+      return {
+        kind: 'unsupported',
+        emoji: '⚠️',
+        leftTitle: '查無可用大眾運輸路線',
+        leftSub: '可調整出發時間、改手動紀錄或查 Google Maps',
+        badge: '無班次',
+        mapPill: '⚠️ 查無大眾運輸',
+      };
+    }
+
+    if (!hasManualTransitDetails(t)) {
+      return {
+        kind: 'transit-empty',
+        emoji: '🚆',
+        leftTitle: '大眾運輸',
+        leftSub: '點此查詢分段路線或手動記錄',
+        badge: '未記錄',
+        mapPill: '🚆 大眾運輸（點此設定）',
+      };
+    }
+
+    const tTypeObj = TRANSIT_TYPES.find((x) => x.id === t.transitType);
+    const emoji = tTypeObj?.emoji || '🚆';
+    const mainText = [t.transitType, t.line].filter(Boolean).join(' ') || '大眾運輸';
+    const durText = Number(t.duration) > 0 ? formatDurationZh(t.duration) : '';
+    const subParts = [t.schedule, durText].filter(Boolean);
+    const cleanSched = t.schedule ? t.schedule.replace('（手動紀錄範例）', '').trim() : '';
+    const mapParts = [mainText, cleanSched, durText ? `(${durText})` : ''].filter(Boolean);
+
+    return {
+      kind: 'transit-manual',
+      emoji,
+      leftTitle: mainText,
+      leftSub: subParts.length ? subParts.join(' · ') : '手動紀錄',
+      badge: '手動紀錄',
+      mapPill: `${emoji} ${mapParts.join(' · ')}`,
+    };
+  }
+
+  // 2. 陸路交通：不支援 / 斷線 / 查詢中 / 成功
+  if (t.status === 'unsupported') {
+    return {
+      kind: 'unsupported',
+      emoji: '⚠️',
+      leftTitle: `此兩點不支援${modeMeta.label}路線`,
+      leftSub: '可能跨海或無可達道路',
+      badge: '不支援',
+      mapPill: '⚠️ 不支援陸路',
+    };
+  }
+
+  if (t.status === 'network_error') {
+    return {
+      kind: 'network_error',
+      emoji: '⚠️',
+      leftTitle: `無法連線取得${modeMeta.label}路線`,
+      leftSub: '點此重新查詢或改用 Google Maps',
+      badge: '連線失敗',
+      mapPill: '⚠️ 無法取得路線',
+    };
+  }
+
+  if (t.status === 'pending' || t.duration == null || t.distanceKm == null) {
+    return {
+      kind: 'pending',
+      emoji: modeMeta.emoji,
+      leftTitle: modeMeta.label,
+      leftSub: '正在查詢實際道路路線...',
+      badge: '查詢中',
+      mapPill: `${modeMeta.emoji} 查詢路線中...`,
+    };
+  }
+
+  const durStr = formatDurationZh(t.duration);
+  const distStr = `${Number(t.distanceKm).toFixed(1)} km`;
+  const extraNote = t.fallbackNote
+    ? ` · ${t.fallbackNote}`
+    : t.mode === 'scooter' && t.provider !== 'google'
+      ? ' · 依一般道路估算'
+      : '';
+
+  return {
+    kind: 'land-ok',
+    emoji: modeMeta.emoji,
+    leftTitle: modeMeta.label,
+    leftSub: `${durStr} · 約 ${distStr}${extraNote}`,
+    badge: t.provider === 'google' ? 'Google 路網' : '道路路線',
+    mapPill: `${modeMeta.emoji} ${modeMeta.label} · ${durStr}`,
+  };
+}
