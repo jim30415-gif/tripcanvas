@@ -1,4 +1,5 @@
 import { decodePolyline, encodePolyline, stitchEncodedPolylines } from '../src/services/polyline.js';
+import { convertMoneyToTwd } from './currency.js';
 
 const GOOGLE_ROUTES_ENDPOINT = 'https://routes.googleapis.com/directions/v2:computeRoutes';
 
@@ -17,6 +18,8 @@ const TRANSIT_FIELD_MASK = [
   'routes.distanceMeters',
   'routes.duration',
   'routes.polyline.encodedPolyline',
+  'routes.travelAdvisory.transitFare',
+  'routes.localizedValues.transitFare',
   'routes.legs.distanceMeters',
   'routes.legs.duration',
   'routes.legs.steps.travelMode',
@@ -492,7 +495,18 @@ export async function handleComputeRoutes(body, env = process.env) {
       }
 
       const rawRoutes = Array.isArray(res.data?.routes) ? res.data.routes : [];
-      const routes = rawRoutes.map(normalizeTransitRoute).filter(Boolean);
+      const routes = (
+        await Promise.all(
+          rawRoutes.map(async (rawRoute) => {
+            const parsed = normalizeTransitRoute(rawRoute);
+            if (!parsed) return null;
+            const rawMoney = rawRoute?.travelAdvisory?.transitFare || null;
+            const localizedFareText = rawRoute?.localizedValues?.transitFare?.text || '';
+            parsed.fare = await convertMoneyToTwd(rawMoney, localizedFareText);
+            return parsed;
+          })
+        )
+      ).filter(Boolean);
 
       if (routes.length === 0) {
         return {

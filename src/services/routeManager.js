@@ -125,9 +125,24 @@ export async function computeSegmentRoute({
 /**
  * 將選定的 Google 大眾運輸路線物件轉換為存於 pin.transportToNext 的標準欄位
  */
-export function buildTransitTransportRecord(routeObj, { departureTime = '', transitPreference = 'DEFAULT', selectedRouteIndex = 0 } = {}) {
+export function buildTransitTransportRecord(
+  routeObj,
+  {
+    departureTime = '',
+    transitPreference = 'DEFAULT',
+    selectedRouteIndex = 0,
+    cost = null,
+  } = {}
+) {
   const transitSegs = (routeObj.segments || []).filter((s) => s.type === 'TRANSIT');
   const firstTransit = transitSegs[0];
+  const fare = routeObj.fare || null;
+  const resolvedCost =
+    cost != null && Number.isFinite(Number(cost))
+      ? Math.max(0, Math.round(Number(cost)))
+      : fare?.amountTwd
+        ? Math.max(0, Math.round(Number(fare.amountTwd)))
+        : 0;
 
   return {
     mode: 'transit',
@@ -135,6 +150,8 @@ export function buildTransitTransportRecord(routeObj, { departureTime = '', tran
     provider: 'google',
     duration: routeObj.durationMin,
     distanceKm: routeObj.distanceKm,
+    cost: resolvedCost,
+    fare,
     encodedPolyline: routeObj.encodedPolyline || '',
     departureTime,
     transitPreference,
@@ -222,10 +239,14 @@ export async function resolvePendingSegments({ onUpdated, retryNetworkErrors = f
         if (job.mode === 'transit') {
           if (res.status === 'ok' && Array.isArray(res.routes) && res.routes.length > 0) {
             const chosenIdx = Math.min(afterPin.transportToNext.selectedRouteIndex || 0, res.routes.length - 1);
-            afterPin.transportToNext = buildTransitTransportRecord(res.routes[chosenIdx], {
+            const chosenRoute = res.routes[chosenIdx];
+            // 若 Google 有回傳票價優先自動帶入新台幣票價，否則保留既有費用
+            const autoCost = chosenRoute.fare?.amountTwd ?? afterPin.transportToNext.cost ?? 0;
+            afterPin.transportToNext = buildTransitTransportRecord(chosenRoute, {
               departureTime: afterPin.transportToNext.departureTime || '',
               transitPreference: afterPin.transportToNext.transitPreference || 'DEFAULT',
               selectedRouteIndex: chosenIdx,
+              cost: autoCost,
             });
             saveState();
             if (typeof onUpdated === 'function') onUpdated();
@@ -241,6 +262,7 @@ export async function resolvePendingSegments({ onUpdated, retryNetworkErrors = f
           duration: res.status === 'ok' ? res.durationMin : null,
           encodedPolyline: res.status === 'ok' ? res.encodedPolyline || '' : '',
           fallbackNote: res.status === 'ok' ? res.fallbackNote || '' : '',
+          cost: Math.max(0, Math.round(Number(afterPin.transportToNext.cost) || 0)),
         };
         saveState();
         if (typeof onUpdated === 'function') onUpdated();

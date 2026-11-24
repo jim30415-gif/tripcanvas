@@ -50,7 +50,12 @@ function renderConnectorHTML(day, pin, idx) {
   const isUnrecorded = info.kind === 'transit-empty';
   const lineColor = isAlert ? '#C5BAB0' : `${day.color}55`;
 
-  // 分段大眾運輸專屬卡片：直覺呈現「步行 → 大眾運輸路線 → 步行」
+  const costPill =
+    info.cost > 0
+      ? `<span class="text-[10px] font-bold shrink-0 px-1.5 py-0.5 rounded-md bg-[#EBF0F4] border border-[#C8D4DE] text-[#435A6E] tabular-nums-strict">${escapeHTML(formatTWD(info.cost))}</span>`
+      : '';
+
+  // 分段大眾運輸專屬卡片：直覺呈現「步行 → 大眾運輸路線 → 步行」與交通支出
   if (info.kind === 'transit-segmented' && Array.isArray(info.segments)) {
     return `
       <div class="relative flex items-center pl-9 py-2">
@@ -59,9 +64,12 @@ function renderConnectorHTML(day, pin, idx) {
           <div class="flex flex-wrap items-center gap-1">
             ${renderSegmentedTransitChips(info.segments, day.color)}
           </div>
-          <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center justify-between gap-1.5">
             <span class="text-[10.5px] font-semibold text-owl-subtext truncate tabular-nums-strict">${escapeHTML(info.leftSub)}</span>
-            <span class="text-[10px] font-bold shrink-0 px-1.5 py-0.5 rounded-md border bg-owl-card border-owl-cardBorder text-owl-primaryDeep">${escapeHTML(info.badge)}</span>
+            <div class="flex items-center gap-1 shrink-0">
+              ${costPill}
+              <span class="text-[10px] font-bold shrink-0 px-1.5 py-0.5 rounded-md border bg-owl-card border-owl-cardBorder text-owl-primaryDeep">${escapeHTML(info.badge)}</span>
+            </div>
           </div>
         </button>
       </div>
@@ -85,7 +93,10 @@ function renderConnectorHTML(day, pin, idx) {
             <div class="text-[10px] font-medium truncate ${isAlert ? 'text-[#847568]' : 'text-owl-subtext'}">${escapeHTML(info.leftSub)}</div>
           </div>
         </div>
-        <span class="text-[10px] font-bold shrink-0 px-1.5 py-0.5 rounded-md border ${isAlert ? 'bg-white/75 border-[#CFC5BA] text-[#78685B]' : 'bg-owl-card border-owl-cardBorder text-owl-primaryDeep'}">${escapeHTML(info.badge)}</span>
+        <div class="flex items-center gap-1 shrink-0">
+          ${costPill}
+          <span class="text-[10px] font-bold shrink-0 px-1.5 py-0.5 rounded-md border ${isAlert ? 'bg-white/75 border-[#CFC5BA] text-[#78685B]' : 'bg-owl-card border-owl-cardBorder text-owl-primaryDeep'}">${escapeHTML(info.badge)}</span>
+        </div>
       </button>
     </div>
   `;

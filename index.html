@@ -23,9 +23,20 @@
   <div id="app">
 
     <!-- ==================== 頂部導覽列（z-index: 2000） ==================== -->
-    <header class="app-header h-14 bg-owl-panel border-b border-owl-border px-3 sm:px-4 flex items-center justify-between gap-2 shrink-0 shadow-xs">
-      <!-- 左側品牌圖示（38×38 淺咖啡漸層圓角方塊＋白色單手拉大型傾斜行李箱） -->
-      <div class="flex items-center gap-2.5 shrink-0">
+    <header class="app-header h-14 bg-owl-panel border-b border-owl-border px-2.5 sm:px-4 flex items-center justify-between gap-2 shrink-0 shadow-xs">
+      <!-- 左側：三條短橫線多計畫選單 ＋ 38×38 淺咖啡漸層圓角方塊白色行李箱 ＋ 品牌文字 -->
+      <div class="flex items-center gap-2 shrink-0">
+        <!-- 三條短橫線：開啟／管理多個旅遊計畫 -->
+        <button
+          id="btn-open-trips-drawer"
+          type="button"
+          title="切換或新增旅遊計畫"
+          aria-label="開啟旅遊計畫清單"
+          class="w-9 h-9 rounded-xl bg-owl-softBg/85 hover:bg-owl-border/75 border border-owl-border text-owl-primaryDeep flex items-center justify-center shrink-0 transition active:scale-95"
+        >
+          <i data-lucide="menu" class="w-4 h-4"></i>
+        </button>
+
         <div
           class="w-[38px] h-[38px] rounded-[10px] flex items-center justify-center shadow-brand shrink-0 overflow-hidden"
           style="background: linear-gradient(135deg, #A68666 0%, #826447 100%);"
@@ -33,35 +44,31 @@
         >
           <!-- 單手拉大型傾斜硬殼滾輪行李箱 SVG（純白前景，無人形） -->
           <svg viewBox="0 0 38 38" class="w-[38px] h-[38px]" xmlns="http://www.w3.org/2000/svg" aria-label="手拉傾斜行李箱標誌">
-            <!-- 向右傾斜約 25deg 的大型滾輪行李箱與握把 -->
             <g transform="rotate(25 15 21.5)">
-              <!-- 雙管伸縮拉桿與橫握把 -->
               <line x1="12.7" y1="14.2" x2="12.7" y2="7.5" stroke="#FFFFFF" stroke-width="1.55" stroke-linecap="round" />
               <line x1="17.3" y1="14.2" x2="17.3" y2="7.5" stroke="#FFFFFF" stroke-width="1.55" stroke-linecap="round" />
               <line x1="11.4" y1="7.5" x2="18.6" y2="7.5" stroke="#FFFFFF" stroke-width="2.1" stroke-linecap="round" />
-              <!-- 大型圓角硬殼行李箱主體 -->
               <rect x="7.2" y="13.6" width="15.6" height="17.6" rx="3.4" fill="#FFFFFF" />
-              <!-- 箱面三條淺咖啡細緻凹槽紋理 -->
               <line x1="11.2" y1="16.7" x2="11.2" y2="28.1" stroke="#8D6E4F" stroke-width="1.25" stroke-linecap="round" />
               <line x1="15.0" y1="16.7" x2="15.0" y2="28.1" stroke="#8D6E4F" stroke-width="1.25" stroke-linecap="round" />
               <line x1="18.8" y1="16.7" x2="18.8" y2="28.1" stroke="#8D6E4F" stroke-width="1.25" stroke-linecap="round" />
-              <!-- 底部兩顆俐落白色小滾輪 -->
               <circle cx="10.3" cy="32.7" r="1.85" fill="#FFFFFF" />
               <circle cx="19.7" cy="32.7" r="1.85" fill="#FFFFFF" />
-              <!-- 緊握拉桿的俐落白色手掌（帶細緻指節線條） -->
               <rect x="12.0" y="4.9" width="6.2" height="4.4" rx="2.2" fill="#FFFFFF" stroke="#8D6E4F" stroke-width="0.7" />
               <line x1="14.0" y1="6.0" x2="14.0" y2="8.2" stroke="#8D6E4F" stroke-width="0.75" stroke-linecap="round" />
               <line x1="16.1" y1="6.0" x2="16.1" y2="8.2" stroke="#8D6E4F" stroke-width="0.75" stroke-linecap="round" />
             </g>
-            <!-- 從右上方自然延伸至手掌的簡約手腕線條 -->
             <path d="M24.2 8.7 C28.2 7.2 31.8 5.6 35.6 4.4" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" fill="none" />
           </svg>
         </div>
         <div class="leading-tight">
-          <h1 class="text-sm sm:text-base font-extrabold tracking-tight text-owl-text whitespace-nowrap">
-            漫步地圖 <span class="hidden sm:inline text-owl-primary">TripCanvas</span>
-          </h1>
-          <p class="hidden xl:block text-[11px] text-owl-subtext">自由行地圖標點 · 真實路網 · 多日圖層與支出</p>
+          <div class="flex items-center gap-1.5">
+            <h1 class="text-sm sm:text-base font-extrabold tracking-tight text-owl-text whitespace-nowrap">
+              漫步地圖 <span class="hidden sm:inline text-owl-primary">TripCanvas</span>
+            </h1>
+            <span id="header-active-trip-badge" class="hidden 2xl:inline-block max-w-[130px] truncate px-2 py-0.5 rounded-full bg-owl-softBg border border-owl-cardBorder text-[10px] font-bold text-owl-primaryDeep"></span>
+          </div>
+          <p class="hidden lg:block text-[11px] text-owl-subtext">獻給熱愛獨旅和自由行的你</p>
         </div>
       </div>
 
@@ -98,16 +105,16 @@
 
       <!-- 右側：JSON 匯出 / 匯入 / 重置示範 -->
       <div class="flex items-center gap-1.5 shrink-0">
-        <button id="btn-export-json" type="button" title="匯出行程 JSON" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-owl-subtext hover:text-owl-primaryDeep hover:bg-owl-softBg border border-owl-border bg-owl-card transition">
+        <button id="btn-export-json" type="button" title="匯出目前旅遊計畫 JSON" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-owl-subtext hover:text-owl-primaryDeep hover:bg-owl-softBg border border-owl-border bg-owl-card transition">
           <i data-lucide="download" class="w-3.5 h-3.5"></i>
           <span class="hidden md:inline">匯出</span>
         </button>
-        <label title="匯入行程 JSON" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-owl-subtext hover:text-owl-primaryDeep hover:bg-owl-softBg border border-owl-border bg-owl-card transition cursor-pointer">
+        <label title="匯入行程 JSON（將建立為新計畫）" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-owl-subtext hover:text-owl-primaryDeep hover:bg-owl-softBg border border-owl-border bg-owl-card transition cursor-pointer">
           <i data-lucide="upload" class="w-3.5 h-3.5"></i>
           <span class="hidden md:inline">匯入</span>
           <input id="input-import-json" type="file" accept="application/json,.json" class="hidden" />
         </label>
-        <button id="btn-restore-demo" type="button" title="重置並載入台北 2 日示範行程" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-owl-subtext hover:text-[#4F6F57] hover:bg-[#EBF2EC] border border-owl-border bg-owl-card transition">
+        <button id="btn-restore-demo" type="button" title="重置目前計畫並載入台北 2 日示範行程" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-owl-subtext hover:text-[#4F6F57] hover:bg-[#EBF2EC] border border-owl-border bg-owl-card transition">
           <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
           <span class="hidden md:inline">重置示範</span>
         </button>
@@ -181,19 +188,29 @@
         <!-- 中間最大化天數圖層列表（flex: 1 1 auto; min-height: 0; overflow-y: auto） -->
         <div id="day-layers-list" class="layers-list custom-scroll px-3 py-2.5 space-y-2"></div>
 
-        <!-- 底部防破圖精簡「旅程總支出」深貓頭鷹咖卡片 -->
+        <!-- 底部防破圖精簡「旅程總支出」深貓頭鷹咖卡片（附小三角形展開分類與各天開銷比例） -->
         <div class="expense-summary-wrap px-2.5 py-2.5 pb-20 lg:pb-2.5 border-t border-owl-border bg-owl-selectedBg/65">
           <div class="expense-summary-card shadow-soft">
-            <!-- 第 1 行：旅程總支出小標（附共 X 項小字）＋總金額 -->
-            <div class="expense-row-top">
-              <div class="flex items-baseline gap-1.5 min-w-0">
+            <!-- 第 1 行：旅程總支出小標＋展開小三角形按鈕＋總金額 -->
+            <button
+              id="btn-toggle-expense-breakdown"
+              type="button"
+              aria-expanded="false"
+              title="點擊展開／收合分類與各天數開銷比例"
+              class="expense-row-top w-full text-left group cursor-pointer focus:outline-none"
+            >
+              <div class="flex items-center gap-1.5 min-w-0">
                 <span class="text-[12px] font-bold text-[#F2E7D9] whitespace-nowrap">旅程總支出</span>
+                <span
+                  id="expense-toggle-arrow"
+                  class="inline-flex items-center justify-center w-4 h-4 rounded-md bg-white/12 group-hover:bg-white/22 text-owl-gold text-[9px] leading-none transition-transform duration-200 shrink-0"
+                >▼</span>
                 <span id="total-spots-count" class="text-[10px] font-medium text-[#CBB7A1] whitespace-nowrap">共 0 項</span>
               </div>
               <div id="grand-total-expense" class="text-[19px] leading-none font-bold tracking-tight text-owl-cream whitespace-nowrap tabular-nums-strict shrink-0">
                 NT$ 0
               </div>
-            </div>
+            </button>
 
             <!-- 第 2 行：高度 5px 圓角各天支出比例長條（移上透過 title 顯示各天名稱與佔比） -->
             <div id="expense-bar" class="expense-bar-track"></div>
@@ -208,6 +225,12 @@
                 NT$ 0
               </span>
             </div>
+
+            <!-- 可展開開銷比例明細（預設收合，展開時顯示交通／食物／購物／其他比例＋各天比例） -->
+            <div
+              id="expense-breakdown-panel"
+              class="hidden mt-2.5 pt-2.5 border-t border-white/15 max-h-[42vh] overflow-y-auto custom-scroll pr-0.5"
+            ></div>
           </div>
         </div>
       </aside>
@@ -229,6 +252,38 @@
         <span>天數與支出</span>
       </button>
     </nav>
+  </div>
+
+  <!-- ==================== 左側抽屜：多旅遊計畫管理（z-index: 2800） ==================== -->
+  <div id="drawer-trips" class="hidden fixed inset-0 z-[2800] flex">
+    <div id="drawer-trips-backdrop" class="fixed inset-0 bg-[#2B1F16]/45 backdrop-blur-xs"></div>
+    <div class="relative z-10 w-[86vw] max-w-[330px] h-full bg-owl-panel border-r border-owl-border shadow-2xl flex flex-col overflow-hidden">
+      <div class="px-4 py-3.5 border-b border-owl-border bg-owl-selectedBg/80 flex items-center justify-between gap-2 shrink-0">
+        <div class="min-w-0">
+          <h3 class="text-sm font-extrabold text-owl-text flex items-center gap-1.5">
+            <i data-lucide="folder-plus" class="w-4 h-4 text-owl-primary shrink-0"></i>
+            <span>我的旅遊計畫</span>
+          </h3>
+          <p id="trips-drawer-count" class="text-[11px] text-owl-subtext mt-0.5">共 1 個計畫</p>
+        </div>
+        <button id="btn-close-trips-drawer" type="button" class="w-8 h-8 rounded-full hover:bg-owl-softBg flex items-center justify-center text-owl-subtext transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="p-3 border-b border-owl-border/70 bg-owl-panel shrink-0">
+        <button id="btn-create-trip" type="button" class="w-full py-2.5 px-3.5 rounded-2xl bg-owl-primary hover:bg-owl-primaryHover text-white text-xs font-extrabold shadow-xs flex items-center justify-center gap-1.5 transition active:scale-95">
+          <i data-lucide="plus" class="w-4 h-4"></i>
+          新增旅遊計畫
+        </button>
+      </div>
+
+      <div id="trips-drawer-list" class="flex-1 overflow-y-auto custom-scroll p-3 space-y-2.5"></div>
+
+      <div class="px-4 py-3 border-t border-owl-border/80 bg-owl-selectedBg/60 text-[11px] text-owl-subtext leading-relaxed shrink-0">
+        所有旅遊計畫皆獨立自動儲存在本機瀏覽器中，新增或匯入新計畫不會覆蓋既有行程。
+      </div>
+    </div>
   </div>
 
   <!-- ==================== 彈窗 1：標點詳細設定視窗（z-index: 3000） ==================== -->
@@ -300,7 +355,7 @@
           <textarea id="detail-pin-notes" rows="3" placeholder="記錄開放時間、預約代號、拍照角度或美食推薦..." class="w-full px-3.5 py-2.5 rounded-xl border border-owl-border bg-white text-xs sm:text-sm text-owl-text leading-relaxed focus:outline-none focus:ring-2 focus:ring-owl-primary/35 focus:border-owl-accentBorder resize-y"></textarea>
         </div>
 
-        <!-- 小景點與支出清單 -->
+        <!-- 小景點與支出清單（含支出分類選擇） -->
         <div class="rounded-2xl border border-owl-cardBorder bg-owl-panel p-4 space-y-3">
           <div class="flex items-center justify-between gap-2">
             <label class="text-xs font-bold text-owl-text flex items-center gap-1.5">
@@ -314,10 +369,18 @@
 
           <div id="detail-subspots-list" class="space-y-2"></div>
 
-          <div class="flex flex-col sm:flex-row gap-2 pt-2 border-t border-owl-border/70">
-            <input id="input-new-subspot-name" type="text" placeholder="新增小景點（例：門票、牛肉麵、伴手禮）" class="flex-1 px-3 py-2 rounded-xl border border-owl-border bg-white text-xs text-owl-text placeholder-owl-muted focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
+          <div class="flex flex-col gap-2 pt-2 border-t border-owl-border/70">
             <div class="flex gap-2">
-              <div class="relative w-32 sm:w-28">
+              <select id="select-new-subspot-category" title="選擇支出分類" class="px-2.5 py-2 rounded-xl border border-owl-border bg-white text-xs font-bold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35 shrink-0">
+                <option value="food">🍜 食物</option>
+                <option value="transport">🚆 交通</option>
+                <option value="shopping">🛍️ 購物</option>
+                <option value="other" selected>✨ 其他</option>
+              </select>
+              <input id="input-new-subspot-name" type="text" placeholder="新增小景點（例：門票、牛肉麵、伴手禮）" class="flex-1 min-w-0 px-3 py-2 rounded-xl border border-owl-border bg-white text-xs text-owl-text placeholder-owl-muted focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
+            </div>
+            <div class="flex gap-2 justify-end">
+              <div class="relative flex-1 sm:flex-none sm:w-36">
                 <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-owl-muted">NT$</span>
                 <input id="input-new-subspot-cost" type="number" min="0" step="10" placeholder="支出 (NT$)" class="w-full pl-9 pr-2.5 py-2 rounded-xl border border-owl-border bg-white text-xs font-bold text-owl-text placeholder-owl-muted focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
               </div>
@@ -349,7 +412,7 @@
     </div>
   </div>
 
-  <!-- ==================== 彈窗 2：點與點之間交通方式設定（貼路實景與大眾運輸分段） ==================== -->
+  <!-- ==================== 彈窗 2：點與點之間交通方式設定（貼路實景、大眾運輸分段與交通支出） ==================== -->
   <div id="modal-transport" class="hidden fixed inset-0 z-[3000] bg-[#2B1F16]/55 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
     <div class="bg-owl-card w-full sm:max-w-lg max-h-[90vh] rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-owl-border">
       <!-- 標頭 -->
@@ -364,11 +427,38 @@
       </div>
 
       <!-- 內容 -->
-      <div class="flex-1 overflow-y-auto custom-scroll p-5 space-y-4 select-text">
+      <div class="flex-1 overflow-y-auto custom-scroll p-5 space-y-3.5 select-text">
         <!-- 五種交通方式選擇 -->
         <div>
           <label class="block text-xs font-bold text-owl-text mb-2">選擇交通方式</label>
           <div id="transport-mode-grid" class="grid grid-cols-5 gap-2"></div>
+        </div>
+
+        <!-- 交通支出卡片（置於上方，一眼檢視／修改；大眾運輸自動導入 Google 票價並將外幣換算新台幣） -->
+        <div class="rounded-2xl border border-owl-cardBorder bg-owl-panel px-3.5 py-3 space-y-2">
+          <div class="flex items-center justify-between gap-2">
+            <label for="input-transport-cost" class="text-xs font-bold text-owl-text flex items-center gap-1.5">
+              <i data-lucide="coins" class="w-3.5 h-3.5 text-[#5B758A]"></i>
+              此段交通支出
+            </label>
+            <span class="px-2 py-0.5 rounded-full bg-[#EBF0F4] border border-[#C8D4DE] text-[10px] font-bold text-[#435A6E]">
+              🚆 自動歸入「交通」分類
+            </span>
+          </div>
+
+          <div class="relative">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-owl-muted">NT$</span>
+            <input
+              id="input-transport-cost"
+              type="number"
+              min="0"
+              step="1"
+              placeholder="0（選填；大眾運輸有 Google 票價會自動帶入）"
+              class="w-full pl-11 pr-3 py-1.5 rounded-xl border border-owl-border bg-white text-sm font-extrabold text-owl-primaryDeep placeholder:font-normal placeholder:text-xs placeholder-owl-muted tabular-nums-strict focus:outline-none focus:ring-2 focus:ring-owl-primary/35"
+            />
+          </div>
+
+          <div id="transport-fare-hint"></div>
         </div>
 
         <!-- 陸路交通即時查詢結果面板（汽車 / 機車 / 自行車 / 步行） -->
@@ -401,7 +491,6 @@
 
         <!-- 大眾運輸面板：支援 Google Routes API 分段查詢與手動紀錄切換 -->
         <div id="transit-details-box" class="hidden rounded-2xl border border-owl-accentBorder/60 bg-owl-selectedBg p-4 space-y-3.5">
-          <!-- 分頁切換：Google 分段路線 / 手動填寫紀錄 -->
           <div class="flex items-center gap-1 p-1 rounded-2xl bg-owl-softBg border border-owl-border/80">
             <button id="btn-transit-tab-auto" type="button" class="flex-1 py-1.5 px-2.5 rounded-xl text-xs font-extrabold bg-owl-primary text-white shadow-2xs transition">
               Google 分段路線
@@ -413,7 +502,6 @@
 
           <!-- 分頁 A：Google Routes API 自動分段路線與班次 -->
           <div id="transit-auto-pane" class="space-y-3">
-            <!-- 出發時間與路線偏好 -->
             <div class="rounded-xl bg-owl-card border border-owl-cardBorder p-3 space-y-2.5">
               <div class="flex flex-wrap items-center gap-2">
                 <select id="select-transit-time-mode" class="px-2.5 py-1.5 rounded-lg border border-owl-border bg-white text-xs font-bold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35">
@@ -432,10 +520,8 @@
               </div>
             </div>
 
-            <!-- 狀態列（查詢中／成功／未設定金鑰／查無班次） -->
             <div id="transit-auto-status"></div>
 
-            <!-- 分段結果容器（多方案分頁＋垂直時間軸） -->
             <div id="transit-routes-wrap" class="hidden space-y-2.5">
               <div id="transit-route-tabs" class="hidden flex flex-wrap gap-1.5"></div>
               <div id="transit-timeline" class="pt-1"></div>

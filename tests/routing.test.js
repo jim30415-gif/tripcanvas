@@ -355,9 +355,9 @@ test('handleComputeRoutes 參數規範驗證（walk 不帶 routingPreference、s
   }
 });
 
-test('舊版 v4 JSON 匯入向下相容驗證（保留支出明細、備註與手動大眾運輸）', async () => {
+test('舊版 v4 JSON 匯入向下相容驗證（保留支出明細、備註與手動大眾運輸，無分類自動歸入其他）', async () => {
   const { parseImportedState } = await import('../src/state/store.js');
-  const { calcDayExpense } = await import('../src/state/selectors.js');
+  const { calcDayExpense, calcExpenseBreakdown } = await import('../src/state/selectors.js');
 
   const legacyJson = JSON.stringify({
     activeDayId: 'day_legacy',
@@ -406,13 +406,162 @@ test('舊版 v4 JSON 匯入向下相容驗證（保留支出明細、備註與�
   });
 
   const imported = parseImportedState(legacyJson);
-  assert.equal(imported.days.length, 1);
-  assert.equal(imported.addMode, false);
-  assert.equal(calcDayExpense(imported.days[0]), 665);
+  assert.equal(imported.data.days.length, 1);
+  assert.equal(imported.data.addMode, false);
+  assert.equal(calcDayExpense(imported.data.days[0]), 665);
 
-  const display = getTransportDisplayInfo(imported.days[0].pins[0].transportToNext);
+  const bd = calcExpenseBreakdown(imported.data);
+  assert.equal(bd.grandTotal, 665);
+  assert.equal(bd.categories.find((c) => c.id === 'other').amount, 665);
+
+  const display = getTransportDisplayInfo(imported.data.days[0].pins[0].transportToNext);
   assert.equal(display.kind, 'transit-manual');
   assert.equal(display.badge, '手動紀錄');
   assert.ok(display.leftTitle.includes('板南線'));
 });
+
+test('外幣大眾運輸票價自動換算新台幣（TWD 原幣、JPY 即時匯率與離線保底）', async () => {
+  const { convertMoneyToTwd } = await import('../server/currency.js');
+  const originalFetch = globalThis.fetch;
+
+  try {
+    // 1. 新台幣原幣不需換算
+    const twdFare = await convertMoneyToTwd({ currencyCode: 'TWD', units: '25', nanos: 0 }, 'NT$25');
+    assert.equal(twdFare.amountTwd, 25);
+    assert.equal(twdFare.originalCurrency, 'TWD');
+    assert.equal(twdFare.rateSource, 'native');
+
+    // 2. 模擬即時匯率 API（1 TWD = 4.5 JPY → 450 JPY = NT$ 100）
+    globalThis.fetch = async () => ({
+      ok: true,
+      json: async () => ({
+        result: 'success',
+        base_code: 'TWD',
+        rates: { TWD: 1, JPY: 4.5, USD: 0.03125 },
+      }),
+    });
+
+    const jpyFare = await convertMoneyToTwd({ currencyCode: 'JPY', units: '450', nanos: 0 }, '¥450');
+    assert.equal(jpyFare.amountTwd, 100);
+    assert.equal(jpyFare.originalCurrency, 'JPY');
+    assert.equal(jpyFare.originalAmount, 450);
+    assert.equal(jpyFare.rateSource, 'live');
+
+    // 3. 含 nanos 小數外幣（USD 2.50 @ 1/0.03125 = 32 → NT$ 80）
+    const usdFare = await convertMoneyToTwd(
+      { currencyCode: 'USD', units: '2', nanos: 500000000 },
+      '$2.50'
+    );
+    assert.equal(usdFare.amountTwd, 80);
+    assert.equal(usdFare.originalAmount, 2.5);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('分類開銷比例（交通／食物／購物／其他）與各天數開銷比例計算（含交通工具支出）', async () => {
+  const { calcExpenseBreakdown } = await import('../src/state/selectors.js');
+
+  const mockState = {
+    activeDayId: 'd1',
+    days: [
+      {
+        id: 'd1',
+        name: 'Day 1',
+        color: '#A46C49',
+        visible: true,
+        pins: [
+          {
+            id: 'p1',
+            subSpots: [
+              { id: 's1', name: '拉麵', cost: 300, category: 'food' },
+              { id: 's2', name: '伴手禮', cost: 200, category: 'shopping' },
+            ],
+            transportToNext: { mode: 'transit', status: 'ok', cost: 100 },
+          },
+          {
+            id: 'p2',
+            subSpots: [{ id: 's3', name: '門票', cost: 100, category: 'other' }],
+            transportToNext: null,
+          },
+        ],
+      },
+      {
+        id: 'd2',
+        name: 'Day 2',
+        color: '#5D8065',
+        visible: false,
+        pins: [
+          {
+            id: 'p3',
+            subSpots: [{ id: 's4', name: '咖啡', cost: 200, category: 'food' }],
+            transportToNext: { mode: 'car', status: 'ok', cost: 100 },
+          },
+          {
+            id: 'p4',
+            subSpots: [],
+            transportToNext: null,
+          },
+        ],
+      },
+    ],
+  };
+
+  const bd = calcExpenseBreakdown(mockState);
+  assert.equal(bd.grandTotal, 1000);
+  assert.equal(bd.visibleTotal, 700);
+  assert.equal(bd.totalItemCount, 6);
+
+  const byCat = Object.fromEntries(bd.categories.map((c) => [c.id, c]));
+  assert.equal(byCat.food.amount, 500);
+  assert.equal(byCat.food.pct, 50);
+  assert.equal(byCat.transport.amount, 200);
+  assert.equal(byCat.transport.pct, 20);
+  assert.equal(byCat.shopping.amount, 200);
+  assert.equal(byCat.shopping.pct, 20);
+  assert.equal(byCat.other.amount, 100);
+  assert.equal(byCat.other.pct, 10);
+
+  assert.equal(bd.days[0].amount, 700);
+  assert.equal(bd.days[0].pct, 70);
+  assert.equal(bd.days[1].amount, 300);
+  assert.equal(bd.days[1].pct, 30);
+});
+
+test('多旅遊計畫管理：新增、切換、改名、複製與保留舊計畫', async () => {
+  const {
+    getAllTrips,
+    getActiveTrip,
+    createNewTrip,
+    switchTrip,
+    renameTrip,
+    duplicateTrip,
+    deleteTrip,
+  } = await import('../src/state/store.js');
+
+  const initialCount = getAllTrips().length;
+  const firstId = getActiveTrip().id;
+
+  const tokyo = createNewTrip('東京 5 日獨旅', { blank: true });
+  assert.equal(getAllTrips().length, initialCount + 1);
+  assert.equal(getActiveTrip().id, tokyo.id);
+  assert.equal(getActiveTrip().name, '東京 5 日獨旅');
+
+  renameTrip(tokyo.id, '東京 6 日獨旅');
+  assert.equal(getActiveTrip().name, '東京 6 日獨旅');
+
+  const copy = duplicateTrip(tokyo.id);
+  assert.ok(copy.name.includes('副本'));
+  assert.equal(getAllTrips().length, initialCount + 2);
+
+  // 切換回原計畫確認資料完整保留
+  switchTrip(firstId);
+  assert.equal(getActiveTrip().id, firstId);
+
+  // 清理測試新增的計畫
+  assert.equal(deleteTrip(copy.id), true);
+  assert.equal(deleteTrip(tokyo.id), true);
+  assert.equal(getAllTrips().length, initialCount);
+});
+
 

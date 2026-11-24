@@ -1,27 +1,123 @@
 import { getState, saveState } from '../state/store.js';
-import { calcDayExpense } from '../state/selectors.js';
+import { calcDayExpense, calcExpenseBreakdown } from '../state/selectors.js';
 import { escapeHTML, formatTWD, refreshIcons } from '../utils/format.js';
 import { fitBoundsToPoints } from '../map/mapInit.js';
 import { openCustomDialog, showToast } from './dialog.js';
 
+let isBreakdownExpanded = false;
+let toggleBound = false;
+
+function formatPct(pct) {
+  if (!pct || pct <= 0) return '0%';
+  return Number.isInteger(pct) ? `${pct}%` : `${pct.toFixed(1)}%`;
+}
+
+function renderBreakdownPanel(breakdown) {
+  const panelEl = document.getElementById('expense-breakdown-panel');
+  const arrowEl = document.getElementById('expense-toggle-arrow');
+  const toggleBtn = document.getElementById('btn-toggle-expense-breakdown');
+  if (!panelEl || !arrowEl || !toggleBtn) return;
+
+  toggleBtn.setAttribute('aria-expanded', String(isBreakdownExpanded));
+  arrowEl.style.transform = isBreakdownExpanded ? 'rotate(180deg)' : 'rotate(0deg)';
+
+  if (!isBreakdownExpanded) {
+    panelEl.classList.add('hidden');
+    return;
+  }
+
+  panelEl.classList.remove('hidden');
+
+  if (breakdown.grandTotal <= 0) {
+    panelEl.innerHTML = `
+      <div class="text-[11px] text-[#CBB7A1] text-center py-2">
+        尚未記錄任何支出項目
+      </div>
+    `;
+    return;
+  }
+
+  const categoriesHtml = breakdown.categories
+    .map(
+      (c) => `
+      <div class="space-y-1">
+        <div class="flex items-center justify-between gap-2 text-[11px] leading-tight">
+          <span class="inline-flex items-center gap-1.5 text-[#F2E7D9] font-semibold">
+            <span>${c.emoji}</span>
+            <span>${escapeHTML(c.label)}</span>
+          </span>
+          <span class="tabular-nums-strict text-[#FAF4EC] font-bold">
+            ${formatTWD(c.amount)}
+            <span class="text-[#E5C59E] font-semibold ml-1">${formatPct(c.pct)}</span>
+          </span>
+        </div>
+        <div class="w-full h-1.5 rounded-full bg-white/15 overflow-hidden">
+          <div class="h-full rounded-full transition-all" style="width:${Math.min(100, c.pct)}%; background:${c.color};"></div>
+        </div>
+      </div>
+    `
+    )
+    .join('');
+
+  const daysHtml = breakdown.days
+    .map(
+      (d) => `
+      <div class="space-y-1 ${d.visible ? '' : 'opacity-60'}">
+        <div class="flex items-center justify-between gap-2 text-[11px] leading-tight">
+          <span class="inline-flex items-center gap-1.5 min-w-0 text-[#F2E7D9] font-semibold">
+            <span class="w-2 h-2 rounded-full shrink-0" style="background:${d.color};"></span>
+            <span class="truncate">${escapeHTML(d.name)}</span>
+          </span>
+          <span class="tabular-nums-strict text-[#FAF4EC] font-bold shrink-0">
+            ${formatTWD(d.amount)}
+            <span class="text-[#E5C59E] font-semibold ml-1">${formatPct(d.pct)}</span>
+          </span>
+        </div>
+        <div class="w-full h-1.5 rounded-full bg-white/15 overflow-hidden">
+          <div class="h-full rounded-full transition-all" style="width:${Math.min(100, d.pct)}%; background:${d.color};"></div>
+        </div>
+      </div>
+    `
+    )
+    .join('');
+
+  panelEl.innerHTML = `
+    <div class="space-y-3">
+      <div class="space-y-2">
+        <div class="text-[10.5px] font-bold tracking-wide text-[#CBB7A1]">分類開銷比例</div>
+        <div class="space-y-1.5">${categoriesHtml}</div>
+      </div>
+      <div class="border-t border-white/12 pt-2.5 space-y-2">
+        <div class="text-[10.5px] font-bold tracking-wide text-[#CBB7A1]">各天數開銷比例</div>
+        <div class="space-y-1.5">${daysHtml}</div>
+      </div>
+    </div>
+  `;
+}
+
+function ensureToggleBound() {
+  if (toggleBound) return;
+  const toggleBtn = document.getElementById('btn-toggle-expense-breakdown');
+  if (!toggleBtn) return;
+  toggleBound = true;
+  toggleBtn.addEventListener('click', () => {
+    isBreakdownExpanded = !isBreakdownExpanded;
+    renderBreakdownPanel(calcExpenseBreakdown(getState()));
+  });
+}
+
 export function renderRightPanel({ onStateChanged, onVisibilityChanged }) {
+  ensureToggleBound();
+
   const state = getState();
   const container = document.getElementById('day-layers-list');
   if (!container) return;
 
   let html = '';
-  let grandTotal = 0;
-  let visibleTotal = 0;
-  let totalSubSpots = 0;
 
   state.days.forEach((day) => {
     const isActive = day.id === state.activeDayId;
     const dayExpense = calcDayExpense(day);
-    grandTotal += dayExpense;
-    if (day.visible) visibleTotal += dayExpense;
-    day.pins.forEach((p) => {
-      totalSubSpots += (p.subSpots || []).length;
-    });
 
     const dimmedClass = day.visible ? 'opacity-100' : 'opacity-55 bg-owl-canvas/65';
     const activeBorder = isActive
@@ -67,26 +163,27 @@ export function renderRightPanel({ onStateChanged, onVisibilityChanged }) {
 
   container.innerHTML = html;
 
-  // 底部 3 行精簡「旅程總支出」深貓頭鷹咖卡片
-  document.getElementById('grand-total-expense').textContent = formatTWD(grandTotal);
-  document.getElementById('visible-total-expense').textContent = formatTWD(visibleTotal);
-  document.getElementById('total-spots-count').textContent = `共 ${totalSubSpots} 項`;
+  // 更新底部「旅程總支出」精簡卡片與可展開之分類／各天開銷比例
+  const breakdown = calcExpenseBreakdown(state);
+  document.getElementById('grand-total-expense').textContent = formatTWD(breakdown.grandTotal);
+  document.getElementById('visible-total-expense').textContent = formatTWD(breakdown.visibleTotal);
+  document.getElementById('total-spots-count').textContent = `共 ${breakdown.totalItemCount} 項`;
 
   const barEl = document.getElementById('expense-bar');
-  if (grandTotal > 0) {
-    barEl.innerHTML = state.days
+  if (breakdown.grandTotal > 0) {
+    barEl.innerHTML = breakdown.days
       .map((d) => {
-        const val = calcDayExpense(d);
-        if (val <= 0) return '';
-        const pct = (val / grandTotal) * 100;
+        if (d.amount <= 0) return '';
+        const pct = (d.amount / breakdown.grandTotal) * 100;
         const roundedPct = Math.round(pct);
-        return `<div class="h-full first:rounded-l-full last:rounded-r-full transition-all" style="width:${pct}%; background:${d.color}; opacity:${d.visible ? 1 : 0.32};" title="${escapeHTML(d.name)}：${formatTWD(val)}（佔 ${roundedPct}%）"></div>`;
+        return `<div class="h-full first:rounded-l-full last:rounded-r-full transition-all" style="width:${pct}%; background:${d.color}; opacity:${d.visible ? 1 : 0.32};" title="${escapeHTML(d.name)}：${formatTWD(d.amount)}（佔 ${roundedPct}%）"></div>`;
       })
       .join('');
   } else {
     barEl.innerHTML = '';
   }
 
+  renderBreakdownPanel(breakdown);
   refreshIcons();
 
   const promptRenameDay = async (dayId) => {

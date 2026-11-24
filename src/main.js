@@ -4,8 +4,9 @@ import '../styles/main.css';
 import { DAY_COLORS } from './config/constants.js';
 import {
   getState,
-  setState,
+  getActiveTrip,
   saveState,
+  createNewTrip,
   resetStateToDemo,
   serializeStateForExport,
   parseImportedState,
@@ -26,6 +27,7 @@ import { renderRightPanel } from './ui/rightPanel.js';
 import { openPinDetailModal, bindPinModalEvents } from './ui/pinModal.js';
 import { openTransportModal, bindTransportModalEvents } from './ui/transportModal.js';
 import { bindSearchBarEvents } from './ui/searchBar.js';
+import { bindTripsDrawerEvents } from './ui/tripsDrawer.js';
 import { setMobileTab, bindMobileNav } from './ui/mobileNav.js';
 import { openCustomDialog, showToast } from './ui/dialog.js';
 import { refreshIcons, uid } from './utils/format.js';
@@ -33,10 +35,17 @@ import { refreshIcons, uid } from './utils/format.js';
 function updateMapHeaderUI() {
   const state = getState();
   const day = getActiveDay(state);
+  const activeTrip = getActiveTrip();
   if (!day) return;
 
   document.getElementById('map-active-day-dot').style.backgroundColor = day.color;
   document.getElementById('map-active-day-name').textContent = day.name;
+
+  const tripBadge = document.getElementById('header-active-trip-badge');
+  if (tripBadge && activeTrip) {
+    tripBadge.textContent = activeTrip.name;
+    tripBadge.title = `目前計畫：${activeTrip.name}（點左側選單切換或新增計畫）`;
+  }
 
   const mapSection = document.getElementById('panel-map');
   const addBtn = document.getElementById('btn-toggle-add-mode');
@@ -150,12 +159,13 @@ function triggerBackgroundResolve(retryNetworkErrors = false) {
     retryNetworkErrors,
     onUpdated: () => {
       renderLeft();
+      renderRight();
       renderMapLayers();
     },
   });
 }
 
-function fitMapToVisiblePins() {
+function fitMapToVisiblePins(silentIfEmpty = false) {
   const state = getState();
   const pts = [];
   state.days.forEach((d) => {
@@ -163,7 +173,7 @@ function fitMapToVisiblePins() {
     d.pins.forEach((p) => pts.push([p.lat, p.lng]));
   });
   if (pts.length === 0) {
-    showToast('目前地圖上沒有可見的標點', 'info');
+    if (!silentIfEmpty) showToast('目前地圖上沒有可見的標點', 'info');
     return;
   }
   fitBoundsToPoints(pts, { padding: [70, 70], maxZoom: 15 });
@@ -211,16 +221,21 @@ function addPinAtCoordinate(lat, lng, customName = null) {
 }
 
 function exportJSON() {
+  const activeTrip = getActiveTrip();
+  const safeName = (activeTrip?.name || 'itinerary')
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .replace(/\s+/g, '-')
+    .slice(0, 32);
   const blob = new Blob([serializeStateForExport()], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `tripcanvas-itinerary-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `tripcanvas-${safeName}-${new Date().toISOString().slice(0, 10)}.json`;
   document.body.appendChild(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-  showToast('已匯出行程 JSON 檔案', 'success');
+  showToast('已匯出目前旅遊計畫 JSON 檔案', 'success');
 }
 
 function importJSON(file) {
@@ -228,13 +243,13 @@ function importJSON(file) {
   const reader = new FileReader();
   reader.onload = (e) => {
     try {
-      const nextState = parseImportedState(e.target.result);
-      setState(nextState);
-      saveState((msg) => showToast(msg, 'error'));
+      const { tripName, data } = parseImportedState(e.target.result);
+      const fallbackName = file.name.replace(/\.json$/i, '') || '匯入的旅遊計畫';
+      const created = createNewTrip(tripName || fallbackName, { initialData: data });
       renderAll();
       triggerBackgroundResolve(true);
-      fitMapToVisiblePins();
-      showToast('已成功匯入行程資料', 'success');
+      fitMapToVisiblePins(true);
+      showToast(`已匯入為新旅遊計畫「${created.name}」（原計畫皆已保留）`, 'success');
     } catch {
       showToast('匯入失敗：請確認選擇正確的 JSON 行程檔', 'error');
     }
@@ -254,7 +269,7 @@ function bindGlobalEvents() {
     );
   });
 
-  document.getElementById('btn-fit-bounds').addEventListener('click', fitMapToVisiblePins);
+  document.getElementById('btn-fit-bounds').addEventListener('click', () => fitMapToVisiblePins(false));
 
   document.getElementById('btn-add-day').addEventListener('click', () => {
     const state = getState();
@@ -281,18 +296,29 @@ function bindGlobalEvents() {
   });
 
   document.getElementById('btn-restore-demo').addEventListener('click', async () => {
+    const activeTrip = getActiveTrip();
     const ok = await openCustomDialog({
-      title: '重置為台北 2 日示範行程？',
-      message: '將重新載入「Day 1 台北城文青散步」與「Day 2 淡水古蹟與海港夕陽」完整範例。',
+      title: '重置目前計畫為台北 2 日示範？',
+      message: `將把目前計畫「${activeTrip?.name || ''}」重設為台北 2 日示範行程（其他旅遊計畫不受影響）。`,
       confirmText: '確認重置',
     });
     if (ok) {
       resetStateToDemo();
       renderAll();
       triggerBackgroundResolve(true);
-      fitMapToVisiblePins();
-      showToast('已重置為台北 2 日示範行程', 'success');
+      fitMapToVisiblePins(true);
+      showToast('已重置目前計畫為台北 2 日示範行程', 'success');
     }
+  });
+
+  bindTripsDrawerEvents({
+    onTripSwitched: (shouldRefit) => {
+      renderAll();
+      if (shouldRefit) {
+        triggerBackgroundResolve(true);
+        fitMapToVisiblePins(true);
+      }
+    },
   });
 
   bindSearchBarEvents({ onAddPinAtCoordinate: addPinAtCoordinate });
@@ -321,7 +347,7 @@ function boot() {
   bindGlobalEvents();
   renderAll();
   triggerBackgroundResolve(true);
-  setTimeout(fitMapToVisiblePins, 380);
+  setTimeout(() => fitMapToVisiblePins(true), 380);
   refreshIcons();
 }
 

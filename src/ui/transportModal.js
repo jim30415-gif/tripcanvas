@@ -7,6 +7,7 @@ import {
   escapeHTML,
   formatDistanceMetersZh,
   formatDurationZh,
+  formatTWD,
   refreshIcons,
 } from '../utils/format.js';
 import { showToast } from './dialog.js';
@@ -28,6 +29,84 @@ function toDatetimeLocalValue(isoString) {
   if (Number.isNaN(date.getTime())) return '';
   const pad = (n) => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function getSelectedGoogleTransitRoute(ctx) {
+  if (
+    !ctx ||
+    ctx.selectedMode !== 'transit' ||
+    ctx.transitResult?.status !== 'ok' ||
+    !Array.isArray(ctx.transitResult.routes) ||
+    ctx.transitResult.routes.length === 0
+  ) {
+    return null;
+  }
+  const idx = Math.min(ctx.selectedRouteIndex || 0, ctx.transitResult.routes.length - 1);
+  return ctx.transitResult.routes[idx] || null;
+}
+
+/**
+ * 同步交通支出輸入欄與 Google 票價提示（包含外幣自動換算新台幣說明）
+ */
+function renderTransportCostHint({ autoFillFare = false } = {}) {
+  const ctx = editingTransportContext;
+  const costInput = document.getElementById('input-transport-cost');
+  const hintEl = document.getElementById('transport-fare-hint');
+  if (!ctx || !costInput || !hintEl) return;
+
+  const selectedTransit = getSelectedGoogleTransitRoute(ctx);
+  const fare = selectedTransit?.fare || null;
+
+  if (autoFillFare && fare?.amountTwd && !ctx.userEditedCost) {
+    costInput.value = String(fare.amountTwd);
+  }
+
+  if (ctx.selectedMode === 'transit') {
+    if (fare?.amountTwd) {
+      const currentVal = Number(costInput.value);
+      const differs = Number.isFinite(currentVal) && Math.round(currentVal) !== fare.amountTwd;
+
+      if (fare.originalCurrency && fare.originalCurrency !== 'TWD') {
+        const rateTag = fare.rateSource === 'live' ? '即時匯率' : '參考匯率';
+        hintEl.innerHTML = `
+          <div class="flex flex-wrap items-center justify-between gap-1.5 text-[11px] text-[#4F6F57] bg-[#EBF2EC] border border-[#C7DCCB] rounded-xl px-2.5 py-1.5">
+            <span>💱 Google 票價 <strong>${escapeHTML(fare.originalText || `${fare.originalCurrency} ${fare.originalAmount}`)}</strong>（${escapeHTML(fare.originalCurrency)}）≈ <strong>${formatTWD(fare.amountTwd)}</strong>（${rateTag}自動換算）</span>
+            ${differs ? '<button type="button" id="btn-apply-google-fare" class="px-2 py-0.5 rounded-lg bg-white border border-[#B5D0BA] text-[#3E5C45] font-bold hover:bg-[#F5FAF6] transition">套用換算票價</button>' : ''}
+          </div>
+        `;
+      } else {
+        hintEl.innerHTML = `
+          <div class="flex flex-wrap items-center justify-between gap-1.5 text-[11px] text-[#4F6F57] bg-[#EBF2EC] border border-[#C7DCCB] rounded-xl px-2.5 py-1.5">
+            <span>🎫 Google 預估票價 <strong>${formatTWD(fare.amountTwd)}</strong>${differs ? '' : '（已自動帶入）'}</span>
+            ${differs ? '<button type="button" id="btn-apply-google-fare" class="px-2 py-0.5 rounded-lg bg-white border border-[#B5D0BA] text-[#3E5C45] font-bold hover:bg-[#F5FAF6] transition">套用 Google 票價</button>' : ''}
+          </div>
+        `;
+      }
+
+      document.getElementById('btn-apply-google-fare')?.addEventListener('click', () => {
+        costInput.value = String(fare.amountTwd);
+        ctx.userEditedCost = false;
+        renderTransportCostHint();
+      });
+      return;
+    }
+
+    if (selectedTransit) {
+      hintEl.innerHTML = `<div class="text-[11px] text-owl-muted">Google 未提供此段大眾運輸票價，可依實際刷卡或購票金額手動填寫。</div>`;
+      return;
+    }
+
+    hintEl.innerHTML = `<div class="text-[11px] text-owl-muted">可填寫單程票價或悠遊卡車資（將自動歸入「交通」支出分類）。</div>`;
+    return;
+  }
+
+  const modeHints = {
+    car: '可填寫油資、過路費、停車費或租車分攤（選填，自動歸入「交通」分類）。',
+    scooter: '可填寫油資、停車費或租機車費用（選填，自動歸入「交通」分類）。',
+    bike: '可填寫 YouBike 或單車租借費用（選填，自動歸入「交通」分類）。',
+    walk: '步行一般為 0 元，若有接駁或通行費也可手動補充。',
+  };
+  hintEl.innerHTML = `<div class="text-[11px] text-owl-muted">${modeHints[ctx.selectedMode] || ''}</div>`;
 }
 
 function renderTransitTypeChips() {
@@ -102,7 +181,7 @@ function renderTransitTabState() {
   }
 }
 
-function renderTransitAutoResults() {
+function renderTransitAutoResults({ autoFillFare = false } = {}) {
   const ctx = editingTransportContext;
   const statusEl = document.getElementById('transit-auto-status');
   const routesWrap = document.getElementById('transit-routes-wrap');
@@ -119,6 +198,7 @@ function renderTransitAutoResults() {
         <span>正在透過 Google Routes API 查詢實際大眾運輸分段與班次...</span>
       </div>
     `;
+    renderTransportCostHint();
     return;
   }
 
@@ -146,6 +226,7 @@ function renderTransitAutoResults() {
       </div>
     `;
     refreshIcons();
+    renderTransportCostHint();
     document.getElementById('btn-switch-to-manual-inline')?.addEventListener('click', () => {
       ctx.transitSubTab = 'manual';
       renderTransitTabState();
@@ -168,6 +249,7 @@ function renderTransitAutoResults() {
       </div>
     `;
     refreshIcons();
+    renderTransportCostHint();
     return;
   }
 
@@ -183,6 +265,7 @@ function renderTransitAutoResults() {
       </div>
     `;
     refreshIcons();
+    renderTransportCostHint();
     return;
   }
 
@@ -205,17 +288,17 @@ function renderTransitAutoResults() {
 
   routesWrap.classList.remove('hidden');
 
-  // 替代路線切換分頁（超過 1 條時顯示）
   if (routes.length > 1) {
     tabsEl.classList.remove('hidden');
     tabsEl.innerHTML = routes
       .map((r, idx) => {
         const active = idx === ctx.selectedRouteIndex;
         const transferLabel = r.transferCount > 0 ? `轉乘 ${r.transferCount} 次` : '免轉乘';
+        const fareLabel = r.fare?.amountTwd ? ` · ${formatTWD(r.fare.amountTwd)}` : '';
         return `
-          <button type="button" data-route-idx="${idx}" class="btn-pick-transit-route flex-1 min-w-[110px] px-2.5 py-1.5 rounded-xl border text-left transition ${active ? 'border-owl-primary bg-owl-card shadow-2xs ring-1 ring-owl-primary/25' : 'border-owl-cardBorder bg-owl-panel/70 hover:bg-owl-card'}">
+          <button type="button" data-route-idx="${idx}" class="btn-pick-transit-route flex-1 min-w-[115px] px-2.5 py-1.5 rounded-xl border text-left transition ${active ? 'border-owl-primary bg-owl-card shadow-2xs ring-1 ring-owl-primary/25' : 'border-owl-cardBorder bg-owl-panel/70 hover:bg-owl-card'}">
             <div class="text-[11px] font-extrabold ${active ? 'text-owl-primaryDeep' : 'text-owl-text'} tabular-nums-strict">
-              方案 ${idx + 1} · ${escapeHTML(formatDurationZh(r.durationMin))}
+              方案 ${idx + 1} · ${escapeHTML(formatDurationZh(r.durationMin))}${escapeHTML(fareLabel)}
             </div>
             <div class="text-[10px] text-owl-subtext truncate">
               步行 ${r.totalWalkMin || 0} 分 · ${transferLabel}
@@ -228,7 +311,7 @@ function renderTransitAutoResults() {
     tabsEl.querySelectorAll('.btn-pick-transit-route').forEach((btn) => {
       btn.addEventListener('click', () => {
         ctx.selectedRouteIndex = Number(btn.dataset.routeIdx);
-        renderTransitAutoResults();
+        renderTransitAutoResults({ autoFillFare: true });
       });
     });
   } else {
@@ -300,6 +383,7 @@ function renderTransitAutoResults() {
     .join('');
 
   refreshIcons();
+  renderTransportCostHint({ autoFillFare });
 }
 
 async function runModalTransitQuery(forceRefresh = false) {
@@ -326,7 +410,7 @@ async function runModalTransitQuery(forceRefresh = false) {
 
   if (!editingTransportContext || editingTransportContext !== ctx || ctx.queryToken !== token) return;
   ctx.transitResult = res;
-  renderTransitAutoResults();
+  renderTransitAutoResults({ autoFillFare: true });
 }
 
 async function runModalLandQuery(forceRefresh = false) {
@@ -424,6 +508,10 @@ function renderTransportModalControls() {
     btn.addEventListener('click', () => {
       if (ctx.selectedMode === btn.dataset.mode) return;
       ctx.selectedMode = btn.dataset.mode;
+      // 切換不同交通方式時允許重新自動帶入大眾運輸票價
+      if (ctx.selectedMode === 'transit') {
+        ctx.userEditedCost = false;
+      }
       renderTransportModalControls();
       if (ctx.selectedMode === 'transit') {
         if (ctx.transitSubTab === 'auto') runModalTransitQuery(false);
@@ -449,12 +537,15 @@ function renderTransportModalControls() {
     renderTransitPreferenceChips();
     renderTransitTypeChips();
     if (ctx.transitSubTab === 'auto' && ctx.transitResult) {
-      renderTransitAutoResults();
+      renderTransitAutoResults({ autoFillFare: false });
+    } else {
+      renderTransportCostHint();
     }
   } else {
     transitBox.classList.add('hidden');
     landBox.classList.remove('hidden');
     gmapsLandBtn.href = buildGoogleMapsDirUrl(ctx.pinA, ctx.pinB, ctx.selectedMode);
+    renderTransportCostHint();
   }
   refreshIcons();
 }
@@ -469,6 +560,7 @@ export function openTransportModal(dayId, pinIndex) {
   const existing = pinA.transportToNext;
 
   const existingHasSegmented = hasSegmentedTransit(existing);
+  const existingCost = Number(existing?.cost) > 0 ? Math.round(Number(existing.cost)) : '';
 
   editingTransportContext = {
     dayId,
@@ -481,6 +573,7 @@ export function openTransportModal(dayId, pinIndex) {
     transitPreference: existing?.transitPreference || 'DEFAULT',
     departureTime: existing?.departureTime || '',
     selectedRouteIndex: existing?.selectedRouteIndex || 0,
+    userEditedCost: Boolean(existingCost && !existing?.autoUpgradeOnGoogle),
     landResult: null,
     transitResult: existingHasSegmented
       ? {
@@ -496,6 +589,7 @@ export function openTransportModal(dayId, pinIndex) {
               departureTimeText: existing.departureTimeText || '',
               arrivalTimeText: existing.arrivalTimeText || '',
               encodedPolyline: existing.encodedPolyline || '',
+              fare: existing.fare || null,
               segments: existing.segments,
             },
           ],
@@ -509,6 +603,10 @@ export function openTransportModal(dayId, pinIndex) {
     <span>→</span>
     <span class="font-bold text-owl-text truncate max-w-[140px]">${escapeHTML(pinB.name)}</span>
   `;
+
+  // 還原交通支出金額
+  const costInput = document.getElementById('input-transport-cost');
+  costInput.value = existingCost !== '' ? String(existingCost) : '';
 
   // 還原出發時間控制項
   const timeModeSelect = document.getElementById('select-transit-time-mode');
@@ -556,6 +654,9 @@ async function saveTransportSetting() {
   const pinA = day?.pins[ctx.pinIndex];
   if (!pinA) return;
 
+  const rawCost = document.getElementById('input-transport-cost')?.value?.trim() || '';
+  const cost = rawCost ? Math.max(0, Math.round(Number(rawCost) || 0)) : 0;
+
   // 1. 大眾運輸模式
   if (ctx.selectedMode === 'transit') {
     const canSaveAuto =
@@ -571,16 +672,16 @@ async function saveTransportSetting() {
         departureTime: ctx.departureTime || '',
         transitPreference: ctx.transitPreference || 'DEFAULT',
         selectedRouteIndex: idx,
+        cost,
       });
 
       saveState((msg) => showToast(msg, 'error'));
       closeTransportModal();
       if (typeof onChangeCallback === 'function') onChangeCallback();
-      showToast('已套用大眾運輸分段路線與班次', 'success');
+      showToast('已套用大眾運輸分段路線與支出', 'success');
       return;
     }
 
-    // 手動紀錄（或是未設定 Google API Key 時的誠實保底）
     const line = document.getElementById('input-transit-line').value.trim();
     const schedule = document.getElementById('input-transit-schedule').value.trim();
     const rawDur = document.getElementById('input-transit-duration').value.trim();
@@ -592,6 +693,8 @@ async function saveTransportSetting() {
       provider: 'manual',
       duration,
       distanceKm: null,
+      cost,
+      fare: null,
       encodedPolyline: '',
       segments: [],
       transitType: ctx.selectedTransitType || '',
@@ -604,7 +707,7 @@ async function saveTransportSetting() {
     if (typeof onChangeCallback === 'function') onChangeCallback();
     showToast(
       hasManualTransitDetails(pinA.transportToNext)
-        ? '已儲存大眾運輸手動紀錄'
+        ? '已儲存大眾運輸手動紀錄與支出'
         : '已設為大眾運輸（待設定班次或手動補記）',
       'success'
     );
@@ -627,6 +730,7 @@ async function saveTransportSetting() {
     provider: res.provider || 'osrm',
     duration: res.status === 'ok' ? res.durationMin : null,
     distanceKm: res.status === 'ok' ? res.distanceKm : null,
+    cost,
     encodedPolyline: res.status === 'ok' ? res.encodedPolyline || '' : '',
     fallbackNote: res.status === 'ok' ? res.fallbackNote || '' : '',
     transitType: '',
@@ -639,7 +743,7 @@ async function saveTransportSetting() {
   if (typeof onChangeCallback === 'function') onChangeCallback();
 
   if (res.status === 'ok') {
-    showToast('已套用實際道路路線並貼路顯示於地圖', 'success');
+    showToast('已套用實際道路路線與交通支出', 'success');
   } else if (res.status === 'unsupported') {
     showToast('已標記：此兩點不支援陸路路線', 'warn');
   } else {
@@ -655,6 +759,12 @@ export function bindTransportModalEvents({ onStateChanged }) {
   document.getElementById('btn-save-transport').addEventListener('click', saveTransportSetting);
   document.getElementById('btn-retry-land').addEventListener('click', () => runModalLandQuery(true));
 
+  document.getElementById('input-transport-cost').addEventListener('input', () => {
+    if (!editingTransportContext) return;
+    editingTransportContext.userEditedCost = true;
+    renderTransportCostHint();
+  });
+
   document.getElementById('btn-transit-tab-auto').addEventListener('click', () => {
     if (!editingTransportContext) return;
     editingTransportContext.transitSubTab = 'auto';
@@ -662,7 +772,7 @@ export function bindTransportModalEvents({ onStateChanged }) {
     if (!editingTransportContext.transitResult) {
       runModalTransitQuery(false);
     } else {
-      renderTransitAutoResults();
+      renderTransitAutoResults({ autoFillFare: false });
     }
   });
 
@@ -670,6 +780,7 @@ export function bindTransportModalEvents({ onStateChanged }) {
     if (!editingTransportContext) return;
     editingTransportContext.transitSubTab = 'manual';
     renderTransitTabState();
+    renderTransportCostHint();
   });
 
   document.getElementById('select-transit-time-mode').addEventListener('change', (e) => {
@@ -683,6 +794,7 @@ export function bindTransportModalEvents({ onStateChanged }) {
   });
 
   document.getElementById('btn-query-transit').addEventListener('click', () => {
+    if (editingTransportContext) editingTransportContext.userEditedCost = false;
     runModalTransitQuery(true);
   });
 

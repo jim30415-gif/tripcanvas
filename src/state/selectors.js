@@ -1,4 +1,9 @@
-import { TRANSPORT_MODES, TRANSIT_TYPES } from '../config/constants.js';
+import {
+  TRANSPORT_MODES,
+  TRANSIT_TYPES,
+  EXPENSE_CATEGORIES,
+  EXPENSE_CATEGORY_MAP,
+} from '../config/constants.js';
 import { formatDurationZh } from '../utils/format.js';
 
 export function getActiveDay(state) {
@@ -9,8 +14,99 @@ export function calcPinExpense(pin) {
   return (pin.subSpots || []).reduce((sum, s) => sum + (Number(s.cost) || 0), 0);
 }
 
+export function calcTransportExpense(pin) {
+  return Math.max(0, Math.round(Number(pin?.transportToNext?.cost) || 0));
+}
+
 export function calcDayExpense(day) {
-  return (day.pins || []).reduce((sum, p) => sum + calcPinExpense(p), 0);
+  const pins = day?.pins || [];
+  return pins.reduce((sum, p, idx) => {
+    const spotSum = calcPinExpense(p);
+    // 僅非最後一個標點才可能有到下一點的交通支出
+    const transportCost = idx < pins.length - 1 ? calcTransportExpense(p) : 0;
+    return sum + spotSum + transportCost;
+  }, 0);
+}
+
+export function calcTripTotalExpense(tripData) {
+  return (tripData?.days || []).reduce((sum, d) => sum + calcDayExpense(d), 0);
+}
+
+export function calcTripPinCount(tripData) {
+  return (tripData?.days || []).reduce((sum, d) => sum + (d.pins || []).length, 0);
+}
+
+/**
+ * 計算整趟旅程的總支出、顯示中圖層小計、各分類開銷比例（交通／食物／購物／其他）與各天數開銷比例
+ */
+export function calcExpenseBreakdown(state) {
+  const catTotals = {};
+  EXPENSE_CATEGORIES.forEach((c) => {
+    catTotals[c.id] = 0;
+  });
+
+  let grandTotal = 0;
+  let visibleTotal = 0;
+  let totalItemCount = 0;
+
+  const dayItems = (state?.days || []).map((day) => {
+    let daySum = 0;
+    const pins = day.pins || [];
+
+    pins.forEach((pin, idx) => {
+      (pin.subSpots || []).forEach((s) => {
+        const cost = Math.max(0, Math.round(Number(s.cost) || 0));
+        const cat = EXPENSE_CATEGORY_MAP[s.category] ? s.category : 'other';
+        catTotals[cat] += cost;
+        daySum += cost;
+        totalItemCount++;
+      });
+
+      if (idx < pins.length - 1) {
+        const tCost = calcTransportExpense(pin);
+        if (tCost > 0) {
+          catTotals.transport += tCost;
+          daySum += tCost;
+          totalItemCount++;
+        }
+      }
+    });
+
+    grandTotal += daySum;
+    if (day.visible) visibleTotal += daySum;
+
+    return {
+      id: day.id,
+      name: day.name,
+      color: day.color,
+      visible: day.visible,
+      amount: daySum,
+      pct: 0,
+    };
+  });
+
+  const categories = EXPENSE_CATEGORIES.map((c) => {
+    const amount = catTotals[c.id] || 0;
+    const pct = grandTotal > 0 ? Math.round((amount / grandTotal) * 1000) / 10 : 0;
+    return {
+      ...c,
+      amount,
+      pct,
+    };
+  });
+
+  const days = dayItems.map((d) => ({
+    ...d,
+    pct: grandTotal > 0 ? Math.round((d.amount / grandTotal) * 1000) / 10 : 0,
+  }));
+
+  return {
+    grandTotal,
+    visibleTotal,
+    totalItemCount,
+    categories,
+    days,
+  };
 }
 
 export function hasManualTransitDetails(t) {
@@ -19,7 +115,8 @@ export function hasManualTransitDetails(t) {
     (t.transitType && t.transitType.trim()) ||
       (t.line && t.line.trim()) ||
       (t.schedule && t.schedule.trim()) ||
-      Number(t.duration) > 0
+      Number(t.duration) > 0 ||
+      Number(t.cost) > 0
   );
 }
 
@@ -34,11 +131,12 @@ export function hasSegmentedTransit(t) {
 }
 
 /**
- * 解析各類交通設定的誠實展示資訊（涵蓋 Google 分段大眾運輸、手動大眾運輸、陸路實查與異常提示）
+ * 解析各類交通設定的誠實展示資訊（涵蓋 Google 分段大眾運輸、手動大眾運輸、陸路實查與交通支出）
  */
 export function getTransportDisplayInfo(t) {
   if (!t) return null;
   const modeMeta = TRANSPORT_MODES[t.mode] || TRANSPORT_MODES.car;
+  const cost = Math.max(0, Math.round(Number(t.cost) || 0));
 
   // 1. 大眾運輸
   if (t.mode === 'transit') {
@@ -47,21 +145,17 @@ export function getTransportDisplayInfo(t) {
       const primaryEmoji = transitSegs[0]?.vehicleEmoji || '🚆';
       const durStr = formatDurationZh(t.duration);
       const lineNames = transitSegs.map((s) => s.displayLine).filter(Boolean);
-      const leftTitle =
-        lineNames.length > 0 ? lineNames.join(' → ') : '大眾運輸（步行）';
+      const leftTitle = lineNames.length > 0 ? lineNames.join(' → ') : '大眾運輸（步行）';
 
       const timeRange =
         t.departureTimeText && t.arrivalTimeText
           ? `${t.departureTimeText}–${t.arrivalTimeText}`
           : '';
-      const transferText =
-        transitSegs.length > 1 ? `轉乘 ${transitSegs.length - 1} 次` : '';
+      const transferText = transitSegs.length > 1 ? `轉乘 ${transitSegs.length - 1} 次` : '';
       const subParts = [durStr, timeRange, transferText].filter(Boolean);
 
       const pillLines = lineNames.length > 0 ? lineNames.slice(0, 2).join('→') : '大眾運輸';
-      const mapPill = durStr
-        ? `${primaryEmoji} ${pillLines} · ${durStr}`
-        : `${primaryEmoji} ${pillLines}`;
+      const mapPill = durStr ? `${primaryEmoji} ${pillLines} · ${durStr}` : `${primaryEmoji} ${pillLines}`;
 
       return {
         kind: 'transit-segmented',
@@ -71,6 +165,8 @@ export function getTransportDisplayInfo(t) {
         badge: '分段路線',
         mapPill,
         segments: t.segments,
+        cost,
+        fare: t.fare || null,
       };
     }
 
@@ -82,6 +178,7 @@ export function getTransportDisplayInfo(t) {
         leftSub: '正在查詢分段路線與班次...',
         badge: '查詢中',
         mapPill: '🚆 查詢大眾運輸中...',
+        cost,
       };
     }
 
@@ -93,6 +190,7 @@ export function getTransportDisplayInfo(t) {
         leftSub: '可調整出發時間、改手動紀錄或查 Google Maps',
         badge: '無班次',
         mapPill: '⚠️ 查無大眾運輸',
+        cost,
       };
     }
 
@@ -104,6 +202,7 @@ export function getTransportDisplayInfo(t) {
         leftSub: '點此查詢分段路線或手動記錄',
         badge: '未記錄',
         mapPill: '🚆 大眾運輸（點此設定）',
+        cost,
       };
     }
 
@@ -122,6 +221,7 @@ export function getTransportDisplayInfo(t) {
       leftSub: subParts.length ? subParts.join(' · ') : '手動紀錄',
       badge: '手動紀錄',
       mapPill: `${emoji} ${mapParts.join(' · ')}`,
+      cost,
     };
   }
 
@@ -134,6 +234,7 @@ export function getTransportDisplayInfo(t) {
       leftSub: '可能跨海或無可達道路',
       badge: '不支援',
       mapPill: '⚠️ 不支援陸路',
+      cost,
     };
   }
 
@@ -145,6 +246,7 @@ export function getTransportDisplayInfo(t) {
       leftSub: '點此重新查詢或改用 Google Maps',
       badge: '連線失敗',
       mapPill: '⚠️ 無法取得路線',
+      cost,
     };
   }
 
@@ -156,6 +258,7 @@ export function getTransportDisplayInfo(t) {
       leftSub: '正在查詢實際道路路線...',
       badge: '查詢中',
       mapPill: `${modeMeta.emoji} 查詢路線中...`,
+      cost,
     };
   }
 
@@ -174,5 +277,6 @@ export function getTransportDisplayInfo(t) {
     leftSub: `${durStr} · 約 ${distStr}${extraNote}`,
     badge: t.provider === 'google' ? 'Google 路網' : '道路路線',
     mapPill: `${modeMeta.emoji} ${modeMeta.label} · ${durStr}`,
+    cost,
   };
 }

@@ -1,5 +1,18 @@
 export const STORAGE_KEY = 'tripcanvas_travel_planner_owl_v4';
+export const WORKSPACE_STORAGE_KEY = 'tripcanvas_workspace_owl_v5';
 export const ROUTE_CACHE_STORAGE_KEY = 'tripcanvas_route_cache_v2';
+
+/* 支出分類定義（交通、食物、購物、其他） */
+export const EXPENSE_CATEGORIES = [
+  { id: 'transport', label: '交通', emoji: '🚆', color: '#5B758A' },
+  { id: 'food', label: '食物', emoji: '🍜', color: '#C48F3B' },
+  { id: 'shopping', label: '購物', emoji: '🛍️', color: '#A65D57' },
+  { id: 'other', label: '其他', emoji: '✨', color: '#8C6A5D' },
+];
+
+export const EXPENSE_CATEGORY_MAP = Object.fromEntries(
+  EXPENSE_CATEGORIES.map((c) => [c.id, c])
+);
 
 /* 天數圖層預設自然大地色系 */
 export const DAY_COLORS = [
