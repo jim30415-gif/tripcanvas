@@ -115,14 +115,87 @@ export function initMap({ onMapClick, onMapRightClick }) {
 
   mountTileSourceSilently(0);
 
+  let lastTouchLongPressAt = 0;
+
   mapInstance.on('click', (e) => {
+    if (Date.now() - lastTouchLongPressAt < 650) return;
     if (typeof onMapClick === 'function') onMapClick(e.latlng.lat, e.latlng.lng);
   });
 
   mapInstance.on('contextmenu', (e) => {
     L.DomEvent.preventDefault(e);
+    if (Date.now() - lastTouchLongPressAt < 650) return;
     if (typeof onMapRightClick === 'function') onMapRightClick(e.latlng.lat, e.latlng.lng);
   });
+
+  // 手機觸控長按地圖空處（520ms）即可新增標點（支援 iOS Safari 與 Android Chrome，不干擾標點長按移位與雙指縮放）
+  const mapContainer = mapInstance.getContainer();
+  if (mapContainer) {
+    let touchTimer = null;
+    let startX = 0;
+    let startY = 0;
+
+    const clearTouchTimer = () => {
+      if (touchTimer) {
+        clearTimeout(touchTimer);
+        touchTimer = null;
+      }
+    };
+
+    mapContainer.addEventListener(
+      'touchstart',
+      (ev) => {
+        if (!ev.touches || ev.touches.length !== 1) {
+          clearTouchTimer();
+          return;
+        }
+        const target = ev.target;
+        if (
+          target?.closest?.('.custom-pin-icon') ||
+          target?.closest?.('.route-pill-marker') ||
+          target?.closest?.('.leaflet-control') ||
+          target?.closest?.('button')
+        ) {
+          return;
+        }
+        const t = ev.touches[0];
+        startX = t.clientX;
+        startY = t.clientY;
+        clearTouchTimer();
+        touchTimer = setTimeout(() => {
+          touchTimer = null;
+          lastTouchLongPressAt = Date.now();
+          if (navigator.vibrate) navigator.vibrate(30);
+          const rect = mapContainer.getBoundingClientRect();
+          const latlng = mapInstance.containerPointToLatLng(
+            L.point(startX - rect.left, startY - rect.top)
+          );
+          if (typeof onMapRightClick === 'function') {
+            onMapRightClick(latlng.lat, latlng.lng);
+          }
+        }, 520);
+      },
+      { passive: true }
+    );
+
+    mapContainer.addEventListener(
+      'touchmove',
+      (ev) => {
+        if (!touchTimer || !ev.touches || ev.touches.length !== 1) {
+          clearTouchTimer();
+          return;
+        }
+        const t = ev.touches[0];
+        if (Math.hypot(t.clientX - startX, t.clientY - startY) > 9) {
+          clearTouchTimer();
+        }
+      },
+      { passive: true }
+    );
+
+    mapContainer.addEventListener('touchend', clearTouchTimer, { passive: true });
+    mapContainer.addEventListener('touchcancel', clearTouchTimer, { passive: true });
+  }
 
   mapInstance.invalidateSize();
   setTimeout(() => mapInstance && mapInstance.invalidateSize(), 150);
@@ -145,6 +218,15 @@ export function getMap() {
 
 export function getOverlayGroup() {
   return overlayGroup;
+}
+
+export function isMapAnimatingZoom() {
+  return Boolean(mapInstance && mapInstance._animatingZoom);
+}
+
+export function onNextMapZoomEnd(fn) {
+  if (!mapInstance || typeof fn !== 'function') return;
+  mapInstance.once('zoomend', fn);
 }
 
 export function invalidateMapSize() {

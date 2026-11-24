@@ -1,6 +1,7 @@
 import {
   handleComputeRoutes,
   handleRatesRequest,
+  handleReverseGeocode,
   handleStatusRequest,
 } from '../server/routesHandler.js';
 
@@ -13,6 +14,18 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
   if (req.method === 'GET') {
+    const wantsReverse =
+      req.query?.reverse === '1' ||
+      req.query?.action === 'reverse' ||
+      (typeof req.url === 'string' && /[?&](reverse=1|action=reverse)\b/.test(req.url));
+    if (wantsReverse) {
+      const parsed = new URL(req.url || '', 'http://localhost');
+      const lat = req.query?.lat ?? parsed.searchParams.get('lat');
+      const lng = req.query?.lng ?? parsed.searchParams.get('lng');
+      const result = await handleReverseGeocode(lat, lng, process.env);
+      return res.status(result.statusCode).json(result.body);
+    }
+
     const wantsRates =
       req.query?.rates === '1' ||
       req.query?.action === 'rates' ||

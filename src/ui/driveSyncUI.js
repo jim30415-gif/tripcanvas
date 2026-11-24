@@ -25,7 +25,7 @@ function renderHeaderSyncButton(state) {
   let label = '登入雲端';
   let title = '連結您的 Google 雲端硬碟，重開網頁或換手機都能自動保存行程';
   let classes =
-    'hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold border transition active:scale-95 shrink-0 ';
+    'hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-bold border transition active:scale-95 shrink-0 ';
   let dotClass = 'hidden';
 
   if (!state.configured) {
@@ -81,7 +81,7 @@ function renderHeaderSyncButton(state) {
   btn.title = title;
   const spinClass = icon === 'loader-2' ? ' animate-spin' : '';
   btn.innerHTML = `
-    <i data-lucide="${icon}" class="w-3.5 h-3.5 shrink-0${spinClass}"></i>
+    <i data-lucide="${icon}" class="w-4 h-4 shrink-0${spinClass}"></i>
     <span class="whitespace-nowrap">${escapeHTML(label)}</span>
   `;
 }
@@ -92,18 +92,18 @@ function renderDrawerDriveCard(state) {
 
   if (!state.configured) {
     container.innerHTML = `
-      <div class="rounded-2xl border border-owl-cardBorder bg-owl-card p-3 space-y-2">
-        <div class="flex items-center gap-2">
-          <span class="w-7 h-7 rounded-xl bg-owl-softBg text-owl-primaryDeep flex items-center justify-center shrink-0">
+      <div class="rounded-2xl border border-owl-cardBorder bg-owl-card p-3.5 space-y-2">
+        <div class="flex items-center gap-2.5">
+          <span class="w-8 h-8 rounded-xl bg-owl-softBg text-owl-primaryDeep flex items-center justify-center shrink-0">
             <i data-lucide="hard-drive" class="w-4 h-4"></i>
           </span>
           <div class="min-w-0">
-            <div class="text-xs font-extrabold text-owl-text">本機雙重備份運作中</div>
-            <div class="text-[10px] text-owl-subtext">localStorage + IndexedDB 自動保存</div>
+            <div class="text-sm font-extrabold text-owl-text">本機雙重備份運作中</div>
+            <div class="text-xs text-owl-subtext">localStorage + IndexedDB 自動保存</div>
           </div>
         </div>
-        <p class="text-[11px] text-owl-subtext leading-relaxed">
-          所有計畫已自動存於此瀏覽器。如需跨裝置同步至個人 Google 雲端硬碟，請於 Vercel 設定 <code class="px-1 py-0.5 rounded bg-owl-softBg text-owl-primaryDeep text-[10px]">GOOGLE_OAUTH_CLIENT_ID</code> 與 <code class="px-1 py-0.5 rounded bg-owl-softBg text-owl-primaryDeep text-[10px]">GOOGLE_OAUTH_CLIENT_SECRET</code>。
+        <p class="text-xs text-owl-subtext leading-relaxed">
+          所有計畫已自動存於此瀏覽器。如需跨裝置同步至個人 Google 雲端硬碟，請於 Vercel 設定 <code class="px-1 py-0.5 rounded bg-owl-softBg text-owl-primaryDeep text-[11px]">GOOGLE_OAUTH_CLIENT_ID</code> 與 <code class="px-1 py-0.5 rounded bg-owl-softBg text-owl-primaryDeep text-[11px]">GOOGLE_OAUTH_CLIENT_SECRET</code>。
         </p>
       </div>
     `;
@@ -113,24 +113,24 @@ function renderDrawerDriveCard(state) {
   if (!state.authenticated) {
     const expiredNote =
       state.status === 'auth_expired'
-        ? `<div class="text-[11px] font-semibold text-[#9B534B] bg-[#F9EDEC] border border-[#E3BDB8] rounded-xl px-2.5 py-1.5">${escapeHTML(
+        ? `<div class="text-xs font-semibold text-[#9B534B] bg-[#F9EDEC] border border-[#E3BDB8] rounded-xl px-2.5 py-2">${escapeHTML(
             state.lastError || 'Google 登入授權已過期，請重新登入以恢復雲端同步。'
           )}</div>`
         : '';
 
     container.innerHTML = `
-      <div class="rounded-2xl border border-owl-accentBorder/75 bg-owl-card p-3 space-y-2.5 shadow-2xs">
-        <div class="flex items-center gap-2">
+      <div class="rounded-2xl border border-owl-accentBorder/75 bg-owl-card p-3.5 space-y-2.5 shadow-2xs">
+        <div class="flex items-center gap-2.5">
           <span class="w-8 h-8 rounded-xl bg-owl-softBg text-owl-primaryDeep flex items-center justify-center shrink-0">
             <i data-lucide="cloud" class="w-4 h-4"></i>
           </span>
           <div class="min-w-0">
-            <div class="text-xs font-extrabold text-owl-text">Google 雲端硬碟個人同步</div>
-            <div class="text-[10px] text-owl-subtext">資料只存在你自己的 Google 雲端空間</div>
+            <div class="text-sm font-extrabold text-owl-text">Google 雲端硬碟個人同步</div>
+            <div class="text-xs text-owl-subtext">資料只存在你自己的 Google 雲端空間</div>
           </div>
         </div>
         ${expiredNote}
-        <p class="text-[11px] text-owl-subtext leading-relaxed">
+        <p class="text-xs text-owl-subtext leading-relaxed">
           登入後會自動將所有旅遊計畫存至你的 Google Drive「<span class="font-bold text-owl-text">${escapeHTML(
             state.driveFolderName
           )}</span>」，換手機或重開網站都不會消失，且 App 無法讀取你的其他檔案。
@@ -138,9 +138,9 @@ function renderDrawerDriveCard(state) {
         <button
           id="btn-drawer-drive-login"
           type="button"
-          class="w-full py-2 px-3 rounded-xl bg-owl-darkTop hover:bg-owl-darkBottom text-owl-cream text-xs font-extrabold flex items-center justify-center gap-1.5 shadow-xs transition active:scale-95"
+          class="w-full py-2.5 px-3 rounded-xl bg-owl-darkTop hover:bg-owl-darkBottom text-owl-cream text-sm font-extrabold flex items-center justify-center gap-1.5 shadow-xs transition active:scale-95"
         >
-          <i data-lucide="log-in" class="w-3.5 h-3.5 text-owl-gold"></i>
+          <i data-lucide="log-in" class="w-4 h-4 text-owl-gold"></i>
           <span>${state.status === 'auth_expired' ? '重新連結 Google 雲端硬碟' : '登入 Google 雲端硬碟同步'}</span>
         </button>
       </div>
@@ -153,64 +153,64 @@ function renderDrawerDriveCard(state) {
   const initial = (userName || userEmail || 'G').slice(0, 1).toUpperCase();
   const timeStr = formatSyncTime(state.lastSyncedAt);
 
-  let statusPill = `<span class="inline-flex items-center gap-1 text-[10px] font-bold text-[#3F6347] bg-[#EBF3EC] border border-[#BFD4C3] px-2 py-0.5 rounded-full"><i data-lucide="check" class="w-2.5 h-2.5"></i>已同步${timeStr ? ` ${timeStr}` : ''}</span>`;
+  let statusPill = `<span class="inline-flex items-center gap-1 text-xs font-bold text-[#3F6347] bg-[#EBF3EC] border border-[#BFD4C3] px-2 py-0.5 rounded-full"><i data-lucide="check" class="w-3 h-3"></i>已同步${timeStr ? ` ${timeStr}` : ''}</span>`;
   if (state.status === 'syncing') {
     statusPill =
-      '<span class="inline-flex items-center gap-1 text-[10px] font-bold text-owl-primaryDeep bg-owl-softBg border border-owl-accentBorder px-2 py-0.5 rounded-full"><i data-lucide="loader-2" class="w-2.5 h-2.5 animate-spin"></i>同步中…</span>';
+      '<span class="inline-flex items-center gap-1 text-xs font-bold text-owl-primaryDeep bg-owl-softBg border border-owl-accentBorder px-2 py-0.5 rounded-full"><i data-lucide="loader-2" class="w-3 h-3 animate-spin"></i>同步中…</span>';
   } else if (state.status === 'pending') {
     statusPill =
-      '<span class="inline-flex items-center gap-1 text-[10px] font-bold text-[#8C6226] bg-[#FBF4E5] border border-[#E7D4A9] px-2 py-0.5 rounded-full">即將自動上傳…</span>';
+      '<span class="inline-flex items-center gap-1 text-xs font-bold text-[#8C6226] bg-[#FBF4E5] border border-[#E7D4A9] px-2 py-0.5 rounded-full">即將自動上傳…</span>';
   } else if (state.status === 'error' || state.status === 'offline') {
-    statusPill = `<span class="inline-flex items-center gap-1 text-[10px] font-bold text-[#9B534B] bg-[#F9EDEC] border border-[#E3BDB8] px-2 py-0.5 rounded-full">${
+    statusPill = `<span class="inline-flex items-center gap-1 text-xs font-bold text-[#9B534B] bg-[#F9EDEC] border border-[#E3BDB8] px-2 py-0.5 rounded-full">${
       state.status === 'offline' ? '離線暫存本機' : '同步待重試'
     }</span>`;
   }
 
   const avatarHtml = state.user?.picture
-    ? `<img src="${escapeHTML(state.user.picture)}" alt="" referrerpolicy="no-referrer" class="w-8 h-8 rounded-full border border-owl-border object-cover shrink-0 bg-owl-softBg" />`
-    : `<span class="w-8 h-8 rounded-full bg-owl-primary text-white text-xs font-extrabold flex items-center justify-center shrink-0">${escapeHTML(
+    ? `<img src="${escapeHTML(state.user.picture)}" alt="" referrerpolicy="no-referrer" class="w-9 h-9 rounded-full border border-owl-border object-cover shrink-0 bg-owl-softBg" />`
+    : `<span class="w-9 h-9 rounded-full bg-owl-primary text-white text-sm font-extrabold flex items-center justify-center shrink-0">${escapeHTML(
         initial
       )}</span>`;
 
   container.innerHTML = `
-    <div class="rounded-2xl border border-[#BFD4C3] bg-owl-card p-3 space-y-2.5 shadow-2xs">
+    <div class="rounded-2xl border border-[#BFD4C3] bg-owl-card p-3.5 space-y-2.5 shadow-2xs">
       <div class="flex items-center gap-2.5 min-w-0">
         ${avatarHtml}
         <div class="min-w-0 flex-1">
           <div class="flex items-center justify-between gap-1.5">
-            <span class="text-xs font-extrabold text-owl-text truncate">${escapeHTML(userName)}</span>
+            <span class="text-sm font-extrabold text-owl-text truncate">${escapeHTML(userName)}</span>
             ${statusPill}
           </div>
-          <div class="text-[10px] text-owl-subtext truncate mt-0.5">${escapeHTML(userEmail)}</div>
+          <div class="text-xs text-owl-subtext truncate mt-0.5">${escapeHTML(userEmail)}</div>
         </div>
       </div>
 
-      <div class="text-[10px] text-owl-muted bg-owl-selectedBg/70 rounded-xl px-2.5 py-1.5 flex items-center gap-1.5">
-        <i data-lucide="folder" class="w-3 h-3 text-owl-primary shrink-0"></i>
+      <div class="text-xs text-owl-muted bg-owl-selectedBg/70 rounded-xl px-2.5 py-1.5 flex items-center gap-1.5">
+        <i data-lucide="folder" class="w-3.5 h-3.5 text-owl-primary shrink-0"></i>
         <span class="truncate">Google 雲端硬碟 / ${escapeHTML(state.driveFolderName)}</span>
       </div>
 
       ${
         state.lastError
-          ? `<div class="text-[10px] font-semibold text-[#9B534B] leading-relaxed">${escapeHTML(state.lastError)}</div>`
+          ? `<div class="text-xs font-semibold text-[#9B534B] leading-relaxed">${escapeHTML(state.lastError)}</div>`
           : ''
       }
 
-      <div class="flex items-center gap-1.5">
+      <div class="flex items-center gap-2">
         <button
           id="btn-drawer-drive-sync-now"
           type="button"
-          class="flex-1 py-1.5 px-2.5 rounded-xl bg-owl-softBg hover:bg-owl-border/70 border border-owl-border text-[11px] font-bold text-owl-primaryDeep flex items-center justify-center gap-1 transition active:scale-95"
+          class="flex-1 py-2 px-3 rounded-xl bg-owl-softBg hover:bg-owl-border/70 border border-owl-border text-xs font-bold text-owl-primaryDeep flex items-center justify-center gap-1.5 transition active:scale-95"
         >
-          <i data-lucide="refresh-cw" class="w-3 h-3${state.status === 'syncing' ? ' animate-spin' : ''}"></i>
+          <i data-lucide="refresh-cw" class="w-3.5 h-3.5${state.status === 'syncing' ? ' animate-spin' : ''}"></i>
           <span>立即同步</span>
         </button>
         <button
           id="btn-drawer-drive-logout"
           type="button"
-          class="py-1.5 px-2.5 rounded-xl bg-white hover:bg-[#F9EDEC] border border-owl-border hover:border-[#E3BDB8] text-[11px] font-bold text-owl-subtext hover:text-[#9B534B] flex items-center justify-center gap-1 transition active:scale-95"
+          class="py-2 px-3 rounded-xl bg-white hover:bg-[#F9EDEC] border border-owl-border hover:border-[#E3BDB8] text-xs font-bold text-owl-subtext hover:text-[#9B534B] flex items-center justify-center gap-1.5 transition active:scale-95"
         >
-          <i data-lucide="log-out" class="w-3 h-3"></i>
+          <i data-lucide="log-out" class="w-3.5 h-3.5"></i>
           <span>登出</span>
         </button>
       </div>

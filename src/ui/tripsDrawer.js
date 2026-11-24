@@ -7,8 +7,8 @@ import {
   duplicateTrip,
   deleteTrip,
 } from '../state/store.js';
-import { calcTripTotalExpense, calcTripPinCount } from '../state/selectors.js';
-import { escapeHTML, formatTWD, refreshIcons } from '../utils/format.js';
+import { calcTripPinCount } from '../state/selectors.js';
+import { escapeHTML, refreshIcons } from '../utils/format.js';
 import { openCustomDialog, showToast } from './dialog.js';
 
 let onTripSwitchedCallback = null;
@@ -38,12 +38,11 @@ export function renderTripsDrawer() {
       const isActive = trip.id === active?.id;
       const dayCount = trip.data?.days?.length || 0;
       const pinCount = calcTripPinCount(trip.data);
-      const totalExp = calcTripTotalExpense(trip.data);
       const updatedStr = formatUpdatedTime(trip.updatedAt);
 
       return `
         <div
-          class="trip-plan-card rounded-2xl border p-3 transition cursor-pointer ${
+          class="trip-plan-card rounded-2xl border p-3.5 transition cursor-pointer ${
             isActive
               ? 'border-owl-primary bg-owl-selectedBg ring-2 ring-owl-primary/20 shadow-xs'
               : 'border-owl-cardBorder bg-owl-card hover:border-owl-accentBorder hover:bg-owl-selectedBg/50'
@@ -58,18 +57,16 @@ export function renderTripsDrawer() {
                     ? '<span class="w-4 h-4 rounded-full bg-owl-primary text-white flex items-center justify-center shrink-0"><i data-lucide="check" class="w-2.5 h-2.5"></i></span>'
                     : '<span class="w-2 h-2 rounded-full bg-owl-border shrink-0 ml-1"></span>'
                 }
-                <h4 class="text-xs sm:text-sm font-extrabold text-owl-text truncate">${escapeHTML(trip.name)}</h4>
+                <h4 class="text-sm sm:text-base font-extrabold text-owl-text truncate">${escapeHTML(trip.name)}</h4>
               </div>
-              <div class="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-owl-subtext">
+              <div class="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-owl-subtext font-medium">
                 <span>${dayCount} 天</span>
                 <span class="text-owl-border">·</span>
                 <span>${pinCount} 個標點</span>
-                <span class="text-owl-border">·</span>
-                <span class="font-bold text-owl-primaryDeep tabular-nums-strict">支出 ${formatTWD(totalExp)}</span>
               </div>
               ${
                 updatedStr
-                  ? `<div class="mt-1 text-[10px] text-owl-muted">更新於 ${escapeHTML(updatedStr)}</div>`
+                  ? `<div class="mt-1 text-xs text-owl-muted">更新於 ${escapeHTML(updatedStr)}</div>`
                   : ''
               }
             </div>

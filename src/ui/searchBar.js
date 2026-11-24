@@ -50,8 +50,8 @@ export function bindSearchBarEvents({ onAddPinAtCoordinate }) {
     }
 
     resultsEl.innerHTML = `
-      <div class="p-4 text-xs font-semibold text-owl-subtext flex items-center justify-center gap-2">
-        <span class="w-3.5 h-3.5 rounded-full border-2 border-owl-primary border-t-transparent animate-spin"></span>
+      <div class="p-4 text-sm font-semibold text-owl-subtext flex items-center justify-center gap-2">
+        <span class="w-4 h-4 rounded-full border-2 border-owl-primary border-t-transparent animate-spin"></span>
         <span>搜尋「${escapeHTML(q)}」中...</span>
       </div>
     `;
@@ -61,15 +61,15 @@ export function bindSearchBarEvents({ onAddPinAtCoordinate }) {
       const list = await searchPlaces(q);
 
       if (!list.length) {
-        resultsEl.innerHTML = `<div class="p-4 text-xs text-owl-subtext text-center">找不到相符地點，請嘗試其他關鍵字</div>`;
+        resultsEl.innerHTML = `<div class="p-4 text-sm text-owl-subtext text-center">找不到相符地點，請嘗試其他關鍵字</div>`;
         return;
       }
 
       const activeDay = getActiveDay(getState());
       const headerBar = `
-        <div class="px-3.5 py-2 bg-owl-selectedBg border-b border-owl-border/80 flex items-center justify-between gap-2 text-[11px] text-owl-subtext">
+        <div class="px-3.5 py-2.5 bg-owl-selectedBg border-b border-owl-border/80 flex items-center justify-between gap-2 text-xs text-owl-subtext">
           <span class="font-semibold min-w-0">找到 ${list.length} 筆結果（可定位檢視或直接加入「${escapeHTML(activeDay?.name || '目前天數')}」）</span>
-          <button type="button" id="btn-close-search-dropdown" class="px-2 py-1 rounded-lg hover:bg-owl-softBg text-owl-muted hover:text-owl-text font-bold whitespace-nowrap shrink-0 transition">關閉</button>
+          <button type="button" id="btn-close-search-dropdown" class="px-2.5 py-1 rounded-lg hover:bg-owl-softBg text-owl-muted hover:text-owl-text font-bold whitespace-nowrap shrink-0 transition">關閉</button>
         </div>
       `;
 
@@ -79,19 +79,19 @@ export function bindSearchBarEvents({ onAddPinAtCoordinate }) {
           return `
             <div class="px-3.5 py-3 hover:bg-owl-selectedBg/80 border-b border-owl-cardBorder last:border-b-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 transition">
               <div class="min-w-0 flex-1">
-                <div class="text-xs font-extrabold text-owl-text truncate flex items-center gap-1.5">
-                  <i data-lucide="map-pin" class="w-3.5 h-3.5 text-owl-primary shrink-0"></i>
+                <div class="text-sm font-extrabold text-owl-text truncate flex items-center gap-1.5">
+                  <i data-lucide="map-pin" class="w-4 h-4 text-owl-primary shrink-0"></i>
                   <span class="truncate">${escapeHTML(shortTitle)}</span>
                 </div>
-                <div class="text-[11px] text-owl-subtext line-clamp-2 mt-0.5 leading-snug">${escapeHTML(item.display_name)}</div>
+                <div class="text-xs text-owl-subtext line-clamp-2 mt-0.5 leading-snug">${escapeHTML(item.display_name)}</div>
               </div>
               <div class="flex items-center gap-1.5 shrink-0">
-                <button type="button" data-view-idx="${i}" class="btn-search-locate inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-owl-softBg hover:bg-owl-border/75 text-owl-primaryDeep text-[11px] font-bold transition">
-                  <i data-lucide="eye" class="w-3 h-3"></i>
+                <button type="button" data-view-idx="${i}" class="btn-search-locate inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-owl-softBg hover:bg-owl-border/75 text-owl-primaryDeep text-xs font-bold transition">
+                  <i data-lucide="eye" class="w-3.5 h-3.5"></i>
                   定位檢視
                 </button>
-                <button type="button" data-add-idx="${i}" class="btn-search-add inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-owl-primary hover:bg-owl-primaryHover text-white text-[11px] font-bold shadow-2xs transition">
-                  <i data-lucide="plus" class="w-3 h-3"></i>
+                <button type="button" data-add-idx="${i}" class="btn-search-add inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-owl-primary hover:bg-owl-primaryHover text-white text-xs font-bold shadow-2xs transition">
+                  <i data-lucide="plus" class="w-3.5 h-3.5"></i>
                   加入目前天數
                 </button>
               </div>
@@ -133,7 +133,7 @@ export function bindSearchBarEvents({ onAddPinAtCoordinate }) {
         });
       });
     } catch {
-      resultsEl.innerHTML = `<div class="p-4 text-xs text-[#A65D57] text-center">搜尋服務暫時無法連線，您可直接點擊地圖任意位置新增標點</div>`;
+      resultsEl.innerHTML = `<div class="p-4 text-sm text-[#A65D57] text-center">搜尋服務暫時無法連線，您可直接右鍵或長按地圖任意位置新增標點</div>`;
     }
   });
 }

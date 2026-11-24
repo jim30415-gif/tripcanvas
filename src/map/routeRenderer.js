@@ -172,16 +172,16 @@ function drawSegmentedTransitRoute(overlayGroup, day, pinA, pinB, t, info, isAct
     .slice(0, 2)
     .map((s) => {
       const bg = pickReadableLineColor(s.lineColor, day.color);
-      return `<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-extrabold leading-none text-white" style="background:${bg};">${escapeHTML(s.displayLine)}</span>`;
+      return `<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[11px] font-extrabold leading-none text-white" style="background:${bg};">${escapeHTML(s.displayLine)}</span>`;
     })
-    .join('<span class="text-owl-muted text-[10px]">›</span>');
+    .join('<span class="text-owl-muted text-[11px]">›</span>');
 
   const durStr = formatDurationZh(t.duration);
   const pillHtml = `
-    <div class="route-pill-marker inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#FBF8F3]/96 backdrop-blur-sm shadow-float border text-[11px] font-bold text-[#3A2C21] whitespace-nowrap cursor-pointer" style="border-color:${day.color}; transform: translate(-50%, -50%);">
-      <span class="text-xs leading-none">${info.emoji}</span>
+    <div class="route-pill-marker inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#FBF8F3]/95 backdrop-blur-sm shadow-float border text-xs font-bold text-[#3A2C21] whitespace-nowrap cursor-pointer" style="border-color:${day.color}; transform: translate(-50%, -50%);">
+      <span class="text-sm leading-none">${info.emoji}</span>
       ${transitBadges || `<span>${escapeHTML(info.mapPill)}</span>`}
-      ${transitBadges && durStr ? `<span class="text-[10.5px] font-extrabold text-[#6B513A] tabular-nums-strict">${escapeHTML(durStr)}</span>` : ''}
+      ${transitBadges && durStr ? `<span class="text-[11px] font-extrabold text-[#6B513A] tabular-nums-strict">${escapeHTML(durStr)}</span>` : ''}
     </div>
   `;
 
@@ -230,7 +230,7 @@ export function drawRouteSegmentOnMap(overlayGroup, day, pinA, pinB, pinIdx, isA
 
     const midPt = getPolylineMidpoint(dashCoords);
     const pillHtml = `
-      <div class="route-pill-marker inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#F3EFEA]/95 border border-[#C9BEB2] shadow-sm text-[11px] font-bold text-[#6F6257] whitespace-nowrap cursor-pointer" style="transform: translate(-50%, -50%);">
+      <div class="route-pill-marker inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#F3EFEA]/95 border border-[#C9BEB2] shadow-sm text-xs font-bold text-[#6F6257] whitespace-nowrap cursor-pointer" style="transform: translate(-50%, -50%);">
         <span>${escapeHTML(info.mapPill)}</span>
       </div>
     `;
@@ -267,7 +267,7 @@ export function drawRouteSegmentOnMap(overlayGroup, day, pinA, pinB, pinIdx, isA
     const midPt = getPolylineMidpoint(transitCoords);
     const isEmpty = info.kind === 'transit-empty';
     const pillHtml = `
-      <div class="route-pill-marker inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full ${isEmpty ? 'bg-[#F5EFE6]/95 text-[#786454] border-[#CBBBA8]' : 'bg-[#FBF8F3]/95 text-[#3A2C21]'} backdrop-blur-sm shadow-float border text-[11px] font-bold whitespace-nowrap cursor-pointer" style="${isEmpty ? '' : `border-color:${day.color};`} transform: translate(-50%, -50%);">
+      <div class="route-pill-marker inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full ${isEmpty ? 'bg-[#F5EFE6]/95 text-[#786454] border-[#CBBBA8]' : 'bg-[#FBF8F3]/95 text-[#3A2C21]'} backdrop-blur-sm shadow-float border text-xs font-bold whitespace-nowrap cursor-pointer" style="${isEmpty ? '' : `border-color:${day.color};`} transform: translate(-50%, -50%);">
         <span class="w-2 h-2 rounded-full shrink-0" style="background:${day.color}; opacity:${isEmpty ? 0.55 : 1};"></span>
         <span>${escapeHTML(info.mapPill)}</span>
       </div>
@@ -303,7 +303,7 @@ export function drawRouteSegmentOnMap(overlayGroup, day, pinA, pinB, pinIdx, isA
 
     const midPt = getPolylineMidpoint(guideCoords);
     const pillHtml = `
-      <div class="route-pill-marker inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#FBF8F3]/92 border border-[#D8C7B4] shadow-sm text-[11px] font-bold text-[#786454] whitespace-nowrap cursor-pointer" style="transform: translate(-50%, -50%);">
+      <div class="route-pill-marker inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#FBF8F3]/95 border border-[#D8C7B4] shadow-sm text-xs font-bold text-[#786454] whitespace-nowrap cursor-pointer" style="transform: translate(-50%, -50%);">
         <span>${escapeHTML(info.mapPill)}</span>
       </div>
     `;
@@ -342,7 +342,7 @@ export function drawRouteSegmentOnMap(overlayGroup, day, pinA, pinB, pinIdx, isA
 
   const midPt = getPolylineMidpoint(roadCoords);
   const pillHtml = `
-    <div class="route-pill-marker inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#FBF8F3]/95 backdrop-blur-sm shadow-float border text-[11px] font-bold text-[#3A2C21] whitespace-nowrap cursor-pointer" style="border-color: ${day.color}; transform: translate(-50%, -50%);">
+    <div class="route-pill-marker inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#FBF8F3]/95 backdrop-blur-sm shadow-float border text-xs font-bold text-[#3A2C21] whitespace-nowrap cursor-pointer" style="border-color: ${day.color}; transform: translate(-50%, -50%);">
       <span class="w-2 h-2 rounded-full shrink-0" style="background:${day.color};"></span>
       <span>${escapeHTML(info.mapPill)}</span>
     </div>

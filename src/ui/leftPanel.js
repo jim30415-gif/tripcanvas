@@ -1,11 +1,11 @@
 import { getState } from '../state/store.js';
-import {
-  getActiveDay,
-  calcPinExpense,
-  calcDayExpense,
-  getTransportDisplayInfo,
-} from '../state/selectors.js';
-import { escapeHTML, formatTWD, refreshIcons, renderImageContent } from '../utils/format.js';
+import { getActiveDay, getTransportDisplayInfo } from '../state/selectors.js';
+import { buildGoogleMapsPlaceUrl } from '../utils/geo.js';
+import { escapeHTML, refreshIcons, renderImageContent } from '../utils/format.js';
+
+let isDayDropdownOpen = false;
+let dayDropdownEventsBound = false;
+let latestCallbacks = {};
 
 function pickReadableChipBg(color, fallback) {
   if (!color || !/^#[0-9A-Fa-f]{6}$/.test(color)) return fallback;
@@ -16,17 +16,137 @@ function pickReadableChipBg(color, fallback) {
   return luminance > 0.82 ? fallback : color;
 }
 
+function closeDayDropdown() {
+  isDayDropdownOpen = false;
+  const dropdown = document.getElementById('left-day-dropdown');
+  const switcher = document.getElementById('btn-left-day-switcher');
+  const chevron = document.getElementById('left-day-chevron');
+  dropdown?.classList.add('hidden');
+  switcher?.setAttribute('aria-expanded', 'false');
+  if (chevron) chevron.style.transform = 'rotate(0deg)';
+}
+
+function renderLeftDayDropdown() {
+  const dropdown = document.getElementById('left-day-dropdown');
+  const switcher = document.getElementById('btn-left-day-switcher');
+  const chevron = document.getElementById('left-day-chevron');
+  if (!dropdown) return;
+
+  switcher?.setAttribute('aria-expanded', String(isDayDropdownOpen));
+  if (chevron) {
+    chevron.style.transform = isDayDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)';
+  }
+
+  if (!isDayDropdownOpen) {
+    dropdown.classList.add('hidden');
+    return;
+  }
+
+  const state = getState();
+  const itemsHtml = state.days
+    .map((d, idx) => {
+      const active = d.id === state.activeDayId;
+      return `
+        <button
+          type="button"
+          data-quick-day-id="${d.id}"
+          class="btn-quick-switch-day w-full px-3.5 py-2.5 text-left flex items-center justify-between gap-2 transition ${
+            active
+              ? 'bg-owl-selectedBg text-owl-primaryDeep font-extrabold'
+              : 'hover:bg-owl-softBg/80 text-owl-text font-semibold'
+          }"
+        >
+          <div class="flex items-center gap-2.5 min-w-0">
+            <span class="w-3 h-3 rounded-full shrink-0" style="background:${d.color}; opacity:${d.visible ? 1 : 0.45};"></span>
+            <span class="text-sm truncate">${escapeHTML(d.name || `Day ${idx + 1}`)}</span>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <span class="text-xs text-owl-muted">${d.pins.length} 點</span>
+            ${active ? '<i data-lucide="check" class="w-4 h-4 text-owl-primary"></i>' : ''}
+          </div>
+        </button>
+      `;
+    })
+    .join('');
+
+  dropdown.innerHTML = `
+    <div class="divide-y divide-owl-border/50">
+      ${itemsHtml}
+    </div>
+    <div class="border-t border-owl-border/75 pt-1 mt-1 px-2">
+      <button
+        type="button"
+        id="btn-quick-add-day"
+        class="w-full py-2 px-2.5 rounded-xl text-xs sm:text-sm font-bold text-owl-primaryDeep hover:bg-owl-softBg flex items-center justify-center gap-1.5 transition"
+      >
+        <i data-lucide="plus" class="w-4 h-4"></i>
+        <span>新增天數</span>
+      </button>
+    </div>
+  `;
+  dropdown.classList.remove('hidden');
+  refreshIcons();
+
+  dropdown.querySelectorAll('.btn-quick-switch-day').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const dayId = btn.dataset.quickDayId;
+      closeDayDropdown();
+      if (typeof latestCallbacks.onSelectDay === 'function') {
+        latestCallbacks.onSelectDay(dayId);
+      }
+    });
+  });
+
+  dropdown.querySelector('#btn-quick-add-day')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeDayDropdown();
+    if (typeof latestCallbacks.onAddDay === 'function') {
+      latestCallbacks.onAddDay();
+    }
+  });
+}
+
+function ensureDayDropdownBound() {
+  if (dayDropdownEventsBound) return;
+  const switcher = document.getElementById('btn-left-day-switcher');
+  if (!switcher) return;
+  dayDropdownEventsBound = true;
+
+  switcher.addEventListener('click', (e) => {
+    e.stopPropagation();
+    isDayDropdownOpen = !isDayDropdownOpen;
+    renderLeftDayDropdown();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (
+      isDayDropdownOpen &&
+      !e.target.closest('#btn-left-day-switcher') &&
+      !e.target.closest('#left-day-dropdown')
+    ) {
+      closeDayDropdown();
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && isDayDropdownOpen) {
+      closeDayDropdown();
+    }
+  });
+}
+
 function renderSegmentedTransitChips(segments, dayColor) {
   const chips = segments.map((seg) => {
     if (seg.type === 'WALK') {
-      return `<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-owl-card border border-owl-cardBorder text-[10px] font-bold text-owl-subtext whitespace-nowrap">🚶 ${seg.durationMin}分</span>`;
+      return `<span class="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md bg-owl-card border border-owl-cardBorder text-xs font-bold text-owl-subtext whitespace-nowrap">🚶 ${seg.durationMin}分</span>`;
     }
     const bg = pickReadableChipBg(seg.lineColor, dayColor);
     const stopHint = seg.stopCount ? ` ${seg.stopCount}站` : '';
-    return `<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-bold text-white whitespace-nowrap shadow-2xs" style="background:${bg};">${seg.vehicleEmoji || '🚆'} ${escapeHTML(seg.displayLine || '大眾運輸')}${escapeHTML(stopHint)}</span>`;
+    return `<span class="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md text-xs font-bold text-white whitespace-nowrap shadow-2xs" style="background:${bg};">${seg.vehicleEmoji || '🚆'} ${escapeHTML(seg.displayLine || '大眾運輸')}${escapeHTML(stopHint)}</span>`;
   });
 
-  return chips.join('<span class="text-[10px] text-owl-muted font-bold">›</span>');
+  return chips.join('<span class="text-xs text-owl-muted font-bold">›</span>');
 }
 
 function renderConnectorHTML(day, pin, idx) {
@@ -35,7 +155,7 @@ function renderConnectorHTML(day, pin, idx) {
     return `
       <div class="relative flex items-center justify-center py-2.5">
         <div class="absolute top-0 bottom-0 left-[23px] w-0.5 border-l-2 border-dashed border-owl-border"></div>
-        <button type="button" data-transport-idx="${idx}" class="btn-open-transport relative z-10 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-owl-card hover:bg-owl-softBg border border-dashed border-owl-accentBorder/75 hover:border-owl-primary text-[11px] font-bold text-owl-subtext hover:text-owl-primaryDeep shadow-2xs transition active:scale-95">
+        <button type="button" data-transport-idx="${idx}" class="btn-open-transport relative z-10 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-owl-card hover:bg-owl-softBg border border-dashed border-owl-accentBorder/75 hover:border-owl-primary text-xs font-bold text-owl-subtext hover:text-owl-primaryDeep shadow-2xs transition active:scale-95">
           <span class="w-4 h-4 rounded-full bg-owl-softBg text-owl-primaryDeep flex items-center justify-center">
             <i data-lucide="plus" class="w-3 h-3"></i>
           </span>
@@ -50,12 +170,7 @@ function renderConnectorHTML(day, pin, idx) {
   const isUnrecorded = info.kind === 'transit-empty';
   const lineColor = isAlert ? '#C5BAB0' : `${day.color}55`;
 
-  const costPill =
-    info.cost > 0
-      ? `<span class="text-[10px] font-bold shrink-0 px-1.5 py-0.5 rounded-md bg-[#EBF0F4] border border-[#C8D4DE] text-[#435A6E] tabular-nums-strict">${escapeHTML(formatTWD(info.cost))}</span>`
-      : '';
-
-  // 分段大眾運輸專屬卡片：直覺呈現「步行 → 大眾運輸路線 → 步行」與交通支出
+  // 分段大眾運輸專屬卡片（支出統一由中央總支出檢視，卡片維持清爽）
   if (info.kind === 'transit-segmented' && Array.isArray(info.segments)) {
     return `
       <div class="transport-connector-row relative flex items-center pl-9 py-2">
@@ -65,11 +180,8 @@ function renderConnectorHTML(day, pin, idx) {
             ${renderSegmentedTransitChips(info.segments, day.color)}
           </div>
           <div class="flex items-center justify-between gap-1.5">
-            <span class="text-[10.5px] font-semibold text-owl-subtext truncate tabular-nums-strict">${escapeHTML(info.leftSub)}</span>
-            <div class="flex items-center gap-1 shrink-0">
-              ${costPill}
-              <span class="transport-status-badge text-[10px] font-bold shrink-0 px-1.5 py-0.5 rounded-md border bg-owl-card border-owl-cardBorder text-owl-primaryDeep">${escapeHTML(info.badge)}</span>
-            </div>
+            <span class="text-xs font-semibold text-owl-subtext truncate tabular-nums-strict">${escapeHTML(info.leftSub)}</span>
+            <span class="transport-status-badge text-[11px] font-bold shrink-0 px-2 py-0.5 rounded-md border bg-owl-card border-owl-cardBorder text-owl-primaryDeep">${escapeHTML(info.badge)}</span>
           </div>
         </button>
       </div>
@@ -85,18 +197,15 @@ function renderConnectorHTML(day, pin, idx) {
   return `
     <div class="transport-connector-row relative flex items-center pl-9 py-2">
       <div class="transport-connector-line absolute top-0 bottom-0 left-[23px] w-0.5" style="background: ${lineColor};"></div>
-      <button type="button" data-transport-idx="${idx}" class="btn-open-transport group relative z-10 w-full flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl border transition text-left ${cardClasses}">
+      <button type="button" data-transport-idx="${idx}" class="btn-open-transport group relative z-10 w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl border transition text-left ${cardClasses}">
         <div class="flex items-center gap-2 min-w-0">
           <span class="text-base leading-none shrink-0">${info.emoji}</span>
           <div class="min-w-0">
-            <div class="text-xs font-bold truncate ${isAlert ? 'text-[#63564B]' : 'text-owl-text'}">${escapeHTML(info.leftTitle)}</div>
-            <div class="text-[10px] font-medium truncate ${isAlert ? 'text-[#847568]' : 'text-owl-subtext'}">${escapeHTML(info.leftSub)}</div>
+            <div class="text-sm font-bold truncate ${isAlert ? 'text-[#63564B]' : 'text-owl-text'}">${escapeHTML(info.leftTitle)}</div>
+            <div class="text-xs font-medium truncate ${isAlert ? 'text-[#847568]' : 'text-owl-subtext'}">${escapeHTML(info.leftSub)}</div>
           </div>
         </div>
-        <div class="flex items-center gap-1 shrink-0">
-          ${costPill}
-          <span class="transport-status-badge text-[10px] font-bold shrink-0 px-1.5 py-0.5 rounded-md border ${isAlert ? 'bg-white/75 border-[#CFC5BA] text-[#78685B]' : 'bg-owl-card border-owl-cardBorder text-owl-primaryDeep'}">${escapeHTML(info.badge)}</span>
-        </div>
+        <span class="transport-status-badge text-[11px] font-bold shrink-0 px-2 py-0.5 rounded-md border ${isAlert ? 'bg-white/75 border-[#CFC5BA] text-[#78685B]' : 'bg-owl-card border-owl-cardBorder text-owl-primaryDeep'}">${escapeHTML(info.badge)}</span>
       </button>
     </div>
   `;
@@ -111,6 +220,12 @@ function bindItineraryInteractions(day, { onOpenPinDetail, onOpenTransport, onRe
       e.stopPropagation();
       onOpenTransport(day.id, Number(btn.dataset.transportIdx));
     });
+  });
+
+  // 單景點直接跳轉 Google Maps 按鈕（避免誤觸開詳情或長按拖曳）
+  listEl.querySelectorAll('.btn-card-gmaps').forEach((link) => {
+    link.addEventListener('pointerdown', (e) => e.stopPropagation());
+    link.addEventListener('click', (e) => e.stopPropagation());
   });
 
   listEl.querySelectorAll('.pin-card').forEach((card) => {
@@ -264,7 +379,7 @@ function bindItineraryInteractions(day, { onOpenPinDetail, onOpenTransport, onRe
       const wasDragging = isDragging;
       endDrag(true);
 
-      if (!wasDragging && moved < 9 && !e.target.closest('.drag-handle')) {
+      if (!wasDragging && moved < 9 && !e.target.closest('.drag-handle') && !e.target.closest('.btn-card-gmaps')) {
         onOpenPinDetail(day.id, pinId);
       }
     };
@@ -276,6 +391,7 @@ function bindItineraryInteractions(day, { onOpenPinDetail, onOpenTransport, onRe
 
     card.addEventListener('pointerdown', (e) => {
       if (e.button !== 0 && e.pointerType === 'mouse') return;
+      if (e.target.closest('.btn-card-gmaps')) return;
       startX = e.clientX;
       startY = e.clientY;
       pointerId = e.pointerId;
@@ -297,6 +413,9 @@ function bindItineraryInteractions(day, { onOpenPinDetail, onOpenTransport, onRe
 }
 
 export function renderLeftPanel(callbacks) {
+  latestCallbacks = callbacks || {};
+  ensureDayDropdownBound();
+
   const state = getState();
   const day = getActiveDay(state);
   const listEl = document.getElementById('itinerary-list');
@@ -305,7 +424,10 @@ export function renderLeftPanel(callbacks) {
   document.getElementById('left-day-dot').style.backgroundColor = day.color;
   document.getElementById('left-day-title').textContent = day.name;
   document.getElementById('left-pin-count').textContent = `${day.pins.length} 個標點`;
-  document.getElementById('left-day-expense').textContent = formatTWD(calcDayExpense(day));
+
+  if (isDayDropdownOpen) {
+    renderLeftDayDropdown();
+  }
 
   if (day.pins.length === 0) {
     listEl.innerHTML = `
@@ -313,8 +435,8 @@ export function renderLeftPanel(callbacks) {
         <div class="w-12 h-12 mx-auto rounded-2xl bg-owl-softBg text-owl-primaryDeep flex items-center justify-center mb-3">
           <i data-lucide="map-pin-plus" class="w-6 h-6"></i>
         </div>
-        <h3 class="text-sm font-bold text-owl-text">這一天還沒有標點</h3>
-        <p class="text-xs text-owl-subtext mt-1.5 leading-relaxed">開啟「標點模式」點擊地圖，或使用上方搜尋列加入景點<br/><span class="text-[11px] text-owl-muted">（瀏覽模式下：桌機可右鍵、手機可長按地圖空處新增）</span></p>
+        <h3 class="text-base font-bold text-owl-text">這一天還沒有標點</h3>
+        <p class="text-sm text-owl-subtext mt-1.5 leading-relaxed">電腦請「右鍵點擊」地圖、手機請「長按」地圖空處，<br/>或直接使用上方搜尋列加入景點！</p>
       </div>
     `;
     refreshIcons();
@@ -324,9 +446,9 @@ export function renderLeftPanel(callbacks) {
   let html = '';
   day.pins.forEach((pin, idx) => {
     const subCount = (pin.subSpots || []).length;
-    const pinExpense = calcPinExpense(pin);
     const hasNext = idx < day.pins.length - 1;
     const hasImg = Boolean(pin.image);
+    const gmapsUrl = buildGoogleMapsPlaceUrl(pin);
 
     html += `
       <div class="pin-item-block" data-pin-index="${idx}" data-pin-id="${pin.id}">
@@ -342,12 +464,12 @@ export function renderLeftPanel(callbacks) {
             ${
               hasImg
                 ? `
-              <div class="w-11 h-11 rounded-xl overflow-hidden border border-owl-cardBorder bg-owl-canvas shrink-0 shadow-2xs">
+              <div class="pin-thumb-box w-12 h-12 rounded-xl overflow-hidden border border-owl-cardBorder bg-owl-canvas shrink-0 shadow-2xs">
                 ${renderImageContent(pin.image, 'w-full h-full')}
               </div>
             `
                 : `
-              <div class="w-11 h-11 rounded-xl border border-dashed border-owl-border bg-owl-selectedBg/60 text-owl-muted flex items-center justify-center shrink-0">
+              <div class="pin-thumb-box w-12 h-12 rounded-xl border border-dashed border-owl-border bg-owl-selectedBg/60 text-owl-muted flex items-center justify-center shrink-0">
                 <i data-lucide="image-plus" class="w-4 h-4"></i>
               </div>
             `
@@ -355,19 +477,34 @@ export function renderLeftPanel(callbacks) {
 
             <div class="flex-1 min-w-0">
               <div class="flex items-center justify-between gap-1">
-                <h3 class="text-sm font-bold text-owl-text truncate">${escapeHTML(pin.name)}</h3>
-                <i data-lucide="chevron-right" class="w-4 h-4 text-owl-muted group-hover:text-owl-primary shrink-0 transition"></i>
+                <h3 class="text-[15px] font-bold text-owl-text truncate">${escapeHTML(pin.name)}</h3>
+                <div class="flex items-center gap-0.5 shrink-0">
+                  <a
+                    href="${escapeHTML(gmapsUrl)}"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="在 Google Maps 開啟此景點"
+                    aria-label="在 Google Maps 開啟 ${escapeHTML(pin.name)}"
+                    class="btn-card-gmaps w-7 h-7 rounded-lg text-[#4F6F57] hover:bg-[#EBF2EC] flex items-center justify-center transition"
+                  >
+                    <i data-lucide="navigation" class="w-3.5 h-3.5"></i>
+                  </a>
+                  <i data-lucide="chevron-right" class="pin-card-chevron w-4 h-4 text-owl-muted group-hover:text-owl-primary shrink-0 transition"></i>
+                </div>
               </div>
-              ${pin.notes ? `<p class="text-[11px] text-owl-subtext truncate mt-0.5">${escapeHTML(pin.notes)}</p>` : ''}
-              <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
-                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-owl-softBg text-[10px] font-semibold text-owl-subtext">
-                  <i data-lucide="sparkles" class="w-3 h-3 text-[#C48F3B]"></i>
-                  ${subCount} 個小景點
-                </span>
-                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#F2E9DE] border border-owl-cardBorder/80 text-[10px] font-bold text-owl-primaryDeep tabular-nums-strict">
-                  支出 ${formatTWD(pinExpense)}
-                </span>
-              </div>
+              ${pin.notes ? `<p class="text-xs text-owl-subtext truncate mt-0.5">${escapeHTML(pin.notes)}</p>` : ''}
+              ${
+                subCount > 0
+                  ? `
+                <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-owl-softBg text-xs font-semibold text-owl-subtext">
+                    <i data-lucide="sparkles" class="w-3 h-3 text-[#C48F3B]"></i>
+                    ${subCount} 個小景點
+                  </span>
+                </div>
+              `
+                  : ''
+              }
             </div>
           </div>
         </div>

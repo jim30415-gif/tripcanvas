@@ -36,6 +36,19 @@ export function buildGoogleMapsDirUrl(pinA, pinB, mode) {
   return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(pinA.lat + ',' + pinA.lng)}&destination=${encodeURIComponent(pinB.lat + ',' + pinB.lng)}&travelmode=${travelmode}`;
 }
 
+export function buildGoogleMapsPlaceUrl(pin) {
+  if (!pin || pin.lat == null || pin.lng == null) {
+    return 'https://www.google.com/maps';
+  }
+  const coords = `${Number(pin.lat).toFixed(6)},${Number(pin.lng).toFixed(6)}`;
+  const cleanName = (pin.name || '').trim();
+  const hasRealName = cleanName && !/^自訂景點\s*\d*$/.test(cleanName);
+  if (pin.placeId && hasRealName) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cleanName)}&query_place_id=${encodeURIComponent(pin.placeId)}`;
+  }
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(coords)}`;
+}
+
 export function makeRouteCacheKey(mode, pinA, pinB, extra = {}) {
   const base = `${mode}|${Number(pinA.lat).toFixed(5)},${Number(pinA.lng).toFixed(5)}|${Number(pinB.lat).toFixed(5)},${Number(pinB.lng).toFixed(5)}`;
   if (mode === 'transit') {

@@ -742,3 +742,167 @@ export async function handleComputeRoutes(body, env = process.env) {
     };
   }
 }
+
+const NON_POI_GOOGLE_TYPES = new Set([
+  'route',
+  'street_address',
+  'intersection',
+  'political',
+  'country',
+  'administrative_area_level_1',
+  'administrative_area_level_2',
+  'administrative_area_level_3',
+  'administrative_area_level_4',
+  'locality',
+  'sublocality',
+  'sublocality_level_1',
+  'postal_code',
+  'plus_code',
+]);
+
+/**
+ * 依「Google 地圖標點名稱優先，無標點則取路名」原則選出最適合的標點預設名稱
+ */
+export function pickBestPlaceFromGoogle(placesData, geocodeData) {
+  const places = Array.isArray(placesData?.places) ? placesData.places : [];
+  for (const place of places) {
+    const name = place?.displayName?.text?.trim();
+    if (!name) continue;
+    const types = Array.isArray(place?.types) ? place.types : [];
+    const primary = place?.primaryType || '';
+    const isGenericArea =
+      (primary && NON_POI_GOOGLE_TYPES.has(primary)) ||
+      (types.length > 0 && types.every((t) => NON_POI_GOOGLE_TYPES.has(t)));
+    if (!isGenericArea) {
+      return {
+        name,
+        placeId: place.id || '',
+        source: 'google_poi',
+      };
+    }
+  }
+
+  const results = Array.isArray(geocodeData?.results) ? geocodeData.results : [];
+  // 1. 先檢查 Geocoding 結果中有無明確地標／POI
+  for (const r of results) {
+    const types = Array.isArray(r?.types) ? r.types : [];
+    const isPoi = types.some((t) =>
+      [
+        'point_of_interest',
+        'establishment',
+        'premise',
+        'park',
+        'natural_feature',
+        'transit_station',
+        'train_station',
+        'subway_station',
+        'bus_station',
+        'airport',
+      ].includes(t)
+    );
+    if (!isPoi) continue;
+    const comp = (r.address_components || []).find((c) =>
+      (c.types || []).some((t) =>
+        ['point_of_interest', 'establishment', 'premise', 'park', 'natural_feature'].includes(t)
+      )
+    );
+    const poiName = comp?.long_name?.trim();
+    if (poiName) {
+      return {
+        name: poiName,
+        placeId: r.place_id || '',
+        source: 'google_poi',
+      };
+    }
+  }
+
+  // 2. 次順位：取路名（route）
+  for (const r of results) {
+    const routeComp = (r.address_components || []).find((c) => (c.types || []).includes('route'));
+    const road = routeComp?.long_name?.trim();
+    if (road && road !== 'Unnamed Road') {
+      return {
+        name: road,
+        placeId: '',
+        source: 'google_road',
+      };
+    }
+  }
+
+  return null;
+}
+
+export async function handleReverseGeocode(lat, lng, env = process.env) {
+  const numLat = Number(lat);
+  const numLng = Number(lng);
+  if (!isValidCoord({ lat: numLat, lng: numLng })) {
+    return { statusCode: 400, body: { status: 'invalid', name: null } };
+  }
+
+  const apiKey = (env?.GOOGLE_MAPS_API_KEY || '').trim();
+  if (!apiKey) {
+    return { statusCode: 200, body: { status: 'unconfigured', name: null } };
+  }
+
+  let placesData = null;
+  let geocodeData = null;
+
+  // 1. 優先以 Google Places API (New) 搜尋 35 公尺內最近的 Google 地圖標點
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 3500);
+    const res = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'places.id,places.displayName,places.primaryType,places.types',
+      },
+      body: JSON.stringify({
+        maxResultCount: 3,
+        rankPreference: 'DISTANCE',
+        languageCode: 'zh-TW',
+        locationRestriction: {
+          circle: {
+            center: { latitude: numLat, longitude: numLng },
+            radius: 35.0,
+          },
+        },
+      }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    if (res.ok) {
+      placesData = await res.json();
+    }
+  } catch {
+    // 若金鑰僅開通 Routes API 未開 Places API，靜默降級
+  }
+
+  const fromPlaces = pickBestPlaceFromGoogle(placesData, null);
+  if (fromPlaces) {
+    return { statusCode: 200, body: { status: 'ok', ...fromPlaces } };
+  }
+
+  // 2. 次順位：Google Geocoding API（POI 優先，其次取路名）
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 3500);
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${numLat},${numLng}&language=zh-TW&key=${encodeURIComponent(apiKey)}`;
+    const res = await fetch(url, { signal: ctrl.signal });
+    clearTimeout(timer);
+    if (res.ok) {
+      geocodeData = await res.json();
+    }
+  } catch {
+    // ignore
+  }
+
+  const picked = pickBestPlaceFromGoogle(null, geocodeData);
+  if (picked) {
+    return { statusCode: 200, body: { status: 'ok', ...picked } };
+  }
+
+  return { statusCode: 200, body: { status: 'not_found', name: null } };
+}
+

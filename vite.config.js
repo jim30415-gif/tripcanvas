@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from 'vite';
 import {
   handleComputeRoutes,
   handleRatesRequest,
+  handleReverseGeocode,
   handleStatusRequest,
 } from './server/routesHandler.js';
 import {
@@ -131,6 +132,15 @@ function createRoutesApiPlugin(env) {
       res.setHeader('Cache-Control', 'no-store');
 
       if (req.method === 'GET') {
+        const wantsReverse = /[?&](reverse=1|action=reverse)\b/.test(fullUrl);
+        if (wantsReverse) {
+          const lat = parsedUrl.searchParams.get('lat');
+          const lng = parsedUrl.searchParams.get('lng');
+          const result = await handleReverseGeocode(lat, lng, env);
+          res.statusCode = result.statusCode;
+          res.end(JSON.stringify(result.body));
+          return;
+        }
         const wantsRates = /[?&](rates=1|action=rates)\b/.test(fullUrl);
         if (wantsRates) {
           const result = await handleRatesRequest();

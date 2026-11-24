@@ -63,6 +63,28 @@ html, body {
   background: #EDE5D8;
 }
 
+/* 電腦版（>= 1024px）左右欄獨立收合狀態：隱藏側欄並立即釋放地圖全寬空間 */
+@media (min-width: 1024px) {
+  #panel-left.desktop-collapsed,
+  #panel-right.desktop-collapsed {
+    display: none !important;
+  }
+}
+
+.sidebar-edge-tab {
+  background: rgba(251, 248, 243, 0.94);
+  border: 1px solid #DFD2C0;
+  color: #6B513A;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 8px 22px -6px rgba(58, 44, 33, 0.22);
+}
+.sidebar-edge-tab:hover {
+  background: #F4EBDF;
+  color: #4A382B;
+  border-color: #C7B299;
+}
+
 #map {
   position: absolute;
   inset: 0;
@@ -72,7 +94,7 @@ html, body {
   z-index: 1;
 }
 
-/* 右側欄嚴格 Flex 垂直結構：標題精簡、圖層列表最大化、底部總支出卡片絕不破圖 */
+/* 右側欄：100% 專注呈現天數圖層清單（總支出移至地圖下方中央膠囊） */
 aside.right-panel {
   flex-direction: column;
   min-height: 0;
@@ -86,50 +108,15 @@ aside.right-panel {
   overflow-y: auto;
 }
 
-.expense-summary-wrap {
-  flex: 0 0 auto;
-}
-
-.expense-summary-card {
-  flex: 0 0 auto;
-  height: auto;
-  overflow: visible;
-  padding: 11px 14px;
-  border-radius: 16px;
-  background: linear-gradient(135deg, #4A382B 0%, #3D2E23 100%);
-  border: 1px solid rgba(107, 81, 58, 0.72);
-  color: #FAF4EC;
-}
-
-.expense-row-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-}
-
 .expense-bar-track {
   width: 100%;
-  height: 5px;
+  height: 6px;
   margin: 7px 0;
   overflow: hidden;
   border-radius: 999px;
   display: flex;
   gap: 2px;
   background: rgba(255, 255, 255, 0.16);
-}
-
-.expense-row-bottom {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  font-size: 11.5px;
-  line-height: 1.25;
-  padding-top: 6px;
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
-  min-width: 0;
 }
 
 .tabular-nums-strict {
@@ -158,9 +145,6 @@ aside.right-panel {
   background: #EDE5D8;
   width: 100% !important;
   height: 100% !important;
-}
-.map-add-mode .leaflet-container {
-  cursor: crosshair !important;
 }
 .leaflet-div-icon {
   background: transparent !important;
@@ -199,9 +183,9 @@ aside.right-panel {
   border-radius: 10px !important;
   color: #3A2C21 !important;
   font-family: 'Inter', 'Noto Sans TC', system-ui, sans-serif !important;
-  font-size: 11px !important;
+  font-size: 12px !important;
   font-weight: 700 !important;
-  padding: 4px 8px !important;
+  padding: 5px 9px !important;
   box-shadow: 0 6px 18px -4px rgba(58, 44, 33, 0.2) !important;
 }
 .transit-stop-tooltip::before {
@@ -389,23 +373,40 @@ aside.right-panel {
     -webkit-backdrop-filter: blur(10px) saturate(1.1);
     transition: width 0.22s cubic-bezier(0.22, 1, 0.36, 1), left 0.22s cubic-bezier(0.22, 1, 0.36, 1);
   }
+  #desktop-expense-sheet {
+    display: none !important;
+  }
+
   /* 點擊天數正方形時：行程表自動稍微變窄並往左靠，為右側天數正方形＋眼睛／齒輪小圓留出俐落空間 */
   #panel-left.mobile-sheet-narrow {
     left: 10px !important;
-    width: calc(100vw - 122px) !important;
-    max-width: 276px !important;
+    width: calc(100vw - 126px) !important;
+    max-width: 274px !important;
   }
   #panel-left.mobile-sheet-narrow #panel-left-header {
-    padding: 9px 12px !important;
+    padding: 9px 10px !important;
+  }
+  #panel-left.mobile-sheet-narrow #left-pin-count {
+    display: none !important;
   }
   #panel-left.mobile-sheet-narrow #itinerary-list {
-    padding: 10px !important;
-  }
-  #panel-left.mobile-sheet-narrow .pin-card {
     padding: 9px !important;
   }
+  #panel-left.mobile-sheet-narrow .pin-card {
+    padding: 8px 9px !important;
+  }
   #panel-left.mobile-sheet-narrow .drag-handle {
-    min-width: 34px !important;
+    min-width: 28px !important;
+    margin-left: -2px !important;
+    padding-left: 2px !important;
+    padding-right: 2px !important;
+  }
+  #panel-left.mobile-sheet-narrow .pin-thumb-box {
+    width: 40px !important;
+    height: 40px !important;
+  }
+  #panel-left.mobile-sheet-narrow .pin-card-chevron {
+    display: none !important;
   }
   #panel-left.mobile-sheet-narrow .transport-connector-row {
     padding-left: 20px !important;

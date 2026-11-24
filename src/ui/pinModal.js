@@ -6,7 +6,7 @@ import {
   ensureFxRatesLoaded,
   formatCurrencyAmount,
 } from '../services/currencyClient.js';
-import { isJapanCoord } from '../utils/geo.js';
+import { buildGoogleMapsPlaceUrl, isJapanCoord } from '../utils/geo.js';
 import { escapeHTML, formatTWD, refreshIcons, renderImageContent, uid } from '../utils/format.js';
 import { flyToPoint } from '../map/mapInit.js';
 import { openCustomDialog, showToast } from './dialog.js';
@@ -62,7 +62,7 @@ function renderDetailImagePreview() {
     preview.classList.add('border-solid', 'border-owl-accentBorder');
     removeBtn.classList.remove('hidden');
   } else {
-    preview.innerHTML = `<span class="text-[11px] text-owl-muted text-center px-2">尚未設定圖片</span>`;
+    preview.innerHTML = `<span class="text-xs text-owl-muted text-center px-2">尚未設定圖片</span>`;
     preview.classList.add('border-dashed');
     preview.classList.remove('border-solid', 'border-owl-accentBorder');
     removeBtn.classList.add('hidden');
@@ -78,9 +78,9 @@ function renderPresetGallery() {
     .map(([key, art]) => {
       const selected = currentVal === key;
       return `
-        <button type="button" data-preset-key="${key}" title="${art.name}" class="btn-pick-preset flex flex-col items-center gap-1 p-1 rounded-xl border-2 transition ${selected ? 'border-owl-primary bg-owl-softBg scale-105' : 'border-owl-cardBorder bg-white hover:border-owl-accentBorder'}">
+        <button type="button" data-preset-key="${key}" title="${art.name}" class="btn-pick-preset flex flex-col items-center gap-1 p-1.5 rounded-xl border-2 transition ${selected ? 'border-owl-primary bg-owl-softBg scale-105' : 'border-owl-cardBorder bg-white hover:border-owl-accentBorder'}">
           <div class="w-full aspect-square rounded-lg overflow-hidden">${art.svg}</div>
-          <span class="text-[10px] font-bold text-owl-subtext leading-none pb-0.5">${art.name}</span>
+          <span class="text-xs font-bold text-owl-subtext leading-none pb-0.5">${art.name}</span>
         </button>
       `;
     })
@@ -110,7 +110,7 @@ function renderDetailSubSpots() {
   updateSubSpotsSubtotalDisplay();
 
   if (spots.length === 0) {
-    listEl.innerHTML = `<div class="text-xs text-owl-muted text-center py-3 bg-owl-card rounded-xl border border-dashed border-owl-border">尚未新增小景點或支出項目</div>`;
+    listEl.innerHTML = `<div class="text-sm text-owl-muted text-center py-3 bg-owl-card rounded-xl border border-dashed border-owl-border">尚未新增小景點或支出項目</div>`;
     return;
   }
 
@@ -128,23 +128,23 @@ function renderDetailSubSpots() {
       const fxText = showFxBadge ? `≈ ${formatTWD(Number(spot.cost) || 0)}` : '';
 
       return `
-      <div class="subspot-row bg-owl-card border border-owl-cardBorder rounded-xl p-2 space-y-1.5" data-row-idx="${i}">
+      <div class="subspot-row bg-owl-card border border-owl-cardBorder rounded-xl p-2.5 space-y-1.5" data-row-idx="${i}">
         <div class="flex flex-wrap sm:flex-nowrap items-center gap-1.5 sm:gap-2">
-          <select data-sub-idx="${i}" data-field="category" title="支出分類" class="subspot-input bg-owl-softBg/70 hover:bg-owl-softBg px-2 py-1.5 rounded-lg border border-owl-border text-[11px] font-bold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/30 shrink-0">
+          <select data-sub-idx="${i}" data-field="category" title="支出分類" class="subspot-input bg-owl-softBg/70 hover:bg-owl-softBg px-2 py-1.5 rounded-lg border border-owl-border text-xs font-bold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/30 shrink-0">
             ${buildCategoryOptionsHTML(spot.category || 'other')}
           </select>
-          <input type="text" data-sub-idx="${i}" data-field="name" value="${escapeHTML(spot.name)}" class="subspot-input flex-1 min-w-[110px] bg-white px-2.5 py-1.5 rounded-lg border border-owl-border text-xs font-semibold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
+          <input type="text" data-sub-idx="${i}" data-field="name" value="${escapeHTML(spot.name)}" class="subspot-input flex-1 min-w-[110px] bg-white px-2.5 py-1.5 rounded-lg border border-owl-border text-sm font-semibold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
           <div class="flex items-center rounded-lg border border-owl-border bg-white overflow-hidden focus-within:ring-2 focus-within:ring-owl-primary/30 shrink-0">
-            <select data-sub-idx="${i}" data-field="currency" title="選擇幣別（外幣自動換算新台幣）" class="subspot-input bg-owl-softBg/80 hover:bg-owl-softBg px-1.5 py-1.5 border-r border-owl-border text-[10.5px] font-extrabold text-owl-primaryDeep focus:outline-none shrink-0">
+            <select data-sub-idx="${i}" data-field="currency" title="選擇幣別（外幣自動換算新台幣）" class="subspot-input bg-owl-softBg/80 hover:bg-owl-softBg px-1.5 py-1.5 border-r border-owl-border text-xs font-extrabold text-owl-primaryDeep focus:outline-none shrink-0">
               ${buildCurrencyOptionsHTML(activeCurrency)}
             </select>
-            <input type="number" inputmode="decimal" min="0" step="any" data-sub-idx="${i}" data-field="amount" value="${displayAmount}" class="subspot-input w-20 sm:w-24 bg-white px-2 py-1.5 text-xs font-bold text-owl-primaryDeep tabular-nums-strict focus:outline-none" />
+            <input type="number" inputmode="decimal" min="0" step="any" data-sub-idx="${i}" data-field="amount" value="${displayAmount}" class="subspot-input w-20 sm:w-24 bg-white px-2 py-1.5 text-sm font-bold text-owl-primaryDeep tabular-nums-strict focus:outline-none" />
           </div>
-          <button type="button" data-del-sub-idx="${i}" class="btn-del-subspot w-7 h-7 rounded-lg text-owl-muted hover:text-[#A65D57] hover:bg-[#F9EDEC] flex items-center justify-center shrink-0 transition">
+          <button type="button" data-del-sub-idx="${i}" class="btn-del-subspot w-8 h-8 rounded-lg text-owl-muted hover:text-[#A65D57] hover:bg-[#F9EDEC] flex items-center justify-center shrink-0 transition">
             <i data-lucide="x" class="w-4 h-4"></i>
           </button>
         </div>
-        <div data-fx-badge-idx="${i}" class="${showFxBadge ? '' : 'hidden '}text-right text-[10.5px] font-bold text-[#4F6F57] tabular-nums-strict pr-9">
+        <div data-fx-badge-idx="${i}" class="${showFxBadge ? '' : 'hidden '}text-right text-xs font-bold text-[#4F6F57] tabular-nums-strict pr-9">
           💱 自動換算新台幣：<span class="fx-twd-val">${escapeHTML(fxText)}</span>
         </div>
       </div>
@@ -305,6 +305,10 @@ export function openPinDetailModal(dayId, pinId) {
   document.getElementById('detail-pin-name').value = pin.name;
   document.getElementById('detail-pin-notes').value = pin.notes || '';
   document.getElementById('input-pin-image-url').value = pin.image?.type === 'url' ? pin.image.value : '';
+  const gmapsLink = document.getElementById('btn-open-pin-gmaps');
+  if (gmapsLink) {
+    gmapsLink.href = buildGoogleMapsPlaceUrl(pin);
+  }
   document.getElementById('input-new-subspot-name').value = '';
   document.getElementById('input-new-subspot-cost').value = '';
   const currencySel = document.getElementById('select-new-subspot-currency');

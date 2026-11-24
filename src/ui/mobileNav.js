@@ -1,18 +1,12 @@
-import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_MAP } from '../config/constants.js';
 import { getState, saveState } from '../state/store.js';
-import {
-  calcDayExpense,
-  calcExpenseBreakdown,
-  calcTransportExpense,
-  getActiveDay,
-} from '../state/selectors.js';
+import { calcExpenseBreakdown, getActiveDay } from '../state/selectors.js';
 import { escapeHTML, formatTWD, refreshIcons } from '../utils/format.js';
 import { fitBoundsToPoints, invalidateMapSize } from '../map/mapInit.js';
 import { openCustomDialog, showToast } from './dialog.js';
 
 let activeOverlay = 'none'; // 'none' | 'itinerary' | 'days' | 'expense'
 let splitDayId = null; // 點擊天數正方形後，左側同步展開變窄行程表，並在該天旁顯示眼睛＋齒輪小圓
-let gearSettingsDayId = null; // 點擊齒輪小圓後展開的詳細設定卡（更名、刪除、單日預算檢視）
+let gearSettingsDayId = null; // 點擊齒輪小圓後展開的詳細設定卡（更名、刪除、顯隱）
 let callbacks = {
   onStateChanged: () => {},
   onVisibilityChanged: () => {},
@@ -26,38 +20,6 @@ function isMobileViewport() {
 function formatPct(pct) {
   if (!pct || pct <= 0) return '0%';
   return Number.isInteger(pct) ? `${pct}%` : `${pct.toFixed(1)}%`;
-}
-
-function calcSingleDayCategoryBreakdown(day) {
-  const totals = {};
-  EXPENSE_CATEGORIES.forEach((c) => {
-    totals[c.id] = 0;
-  });
-  const pins = day?.pins || [];
-  let sum = 0;
-  pins.forEach((pin, idx) => {
-    (pin.subSpots || []).forEach((s) => {
-      const cost = Math.max(0, Math.round(Number(s.cost) || 0));
-      const cat = EXPENSE_CATEGORY_MAP[s.category] ? s.category : 'other';
-      totals[cat] += cost;
-      sum += cost;
-    });
-    if (idx < pins.length - 1) {
-      const tCost = calcTransportExpense(pin);
-      if (tCost > 0) {
-        totals.transport += tCost;
-        sum += tCost;
-      }
-    }
-  });
-  return {
-    total: sum,
-    categories: EXPENSE_CATEGORIES.map((c) => ({
-      ...c,
-      amount: totals[c.id] || 0,
-      pct: sum > 0 ? Math.round(((totals[c.id] || 0) / sum) * 1000) / 10 : 0,
-    })),
-  };
 }
 
 function syncOrbsAndPanels() {
@@ -139,13 +101,13 @@ function renderMobileExpenseSheet(breakdown) {
           .join('')
       : '';
 
-  let detailBody = `<div class="text-xs text-[#CBB7A1] text-center py-3">尚未記錄任何支出項目</div>`;
+  let detailBody = `<div class="text-sm text-[#CBB7A1] text-center py-3">尚未記錄任何支出項目</div>`;
   if (breakdown.grandTotal > 0) {
     const categoriesHtml = breakdown.categories
       .map(
         (c) => `
         <div class="space-y-1">
-          <div class="flex items-center justify-between gap-2 text-[11px] leading-tight">
+          <div class="flex items-center justify-between gap-2 text-xs sm:text-[13px] leading-tight">
             <span class="inline-flex items-center gap-1.5 text-[#F2E7D9] font-semibold">
               <span>${c.emoji}</span>
               <span>${escapeHTML(c.label)}</span>
@@ -167,9 +129,9 @@ function renderMobileExpenseSheet(breakdown) {
       .map(
         (d) => `
         <div class="space-y-1 ${d.visible ? '' : 'opacity-60'}">
-          <div class="flex items-center justify-between gap-2 text-[11px] leading-tight">
+          <div class="flex items-center justify-between gap-2 text-xs sm:text-[13px] leading-tight">
             <span class="inline-flex items-center gap-1.5 min-w-0 text-[#F2E7D9] font-semibold">
-              <span class="w-2 h-2 rounded-full shrink-0" style="background:${d.color};"></span>
+              <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${d.color};"></span>
               <span class="truncate">${escapeHTML(d.name)}</span>
             </span>
             <span class="tabular-nums-strict text-[#FAF4EC] font-bold shrink-0">
@@ -186,14 +148,14 @@ function renderMobileExpenseSheet(breakdown) {
       .join('');
 
     detailBody = `
-      <div class="space-y-3 pt-2.5 border-t border-white/15">
-        <div class="space-y-1.5">
-          <div class="text-[10.5px] font-bold tracking-wide text-[#CBB7A1]">分類開銷比例</div>
-          <div class="space-y-1.5">${categoriesHtml}</div>
+      <div class="space-y-3.5 pt-3 border-t border-white/15">
+        <div class="space-y-2">
+          <div class="text-xs font-bold tracking-wide text-[#CBB7A1]">分類開銷比例</div>
+          <div class="space-y-2">${categoriesHtml}</div>
         </div>
-        <div class="border-t border-white/12 pt-2.5 space-y-1.5">
-          <div class="text-[10.5px] font-bold tracking-wide text-[#CBB7A1]">各天數開銷比例</div>
-          <div class="space-y-1.5">${daysHtml}</div>
+        <div class="border-t border-white/12 pt-3 space-y-2">
+          <div class="text-xs font-bold tracking-wide text-[#CBB7A1]">各天數開銷比例</div>
+          <div class="space-y-2">${daysHtml}</div>
         </div>
       </div>
     `;
@@ -203,20 +165,20 @@ function renderMobileExpenseSheet(breakdown) {
     <div class="space-y-2.5">
       <div class="flex items-center justify-between gap-2">
         <div class="flex items-baseline gap-2 min-w-0">
-          <span class="text-xs font-bold text-[#F2E7D9]">旅程總支出</span>
-          <span class="text-[10px] text-[#CBB7A1]">共 ${breakdown.totalItemCount} 項</span>
+          <span class="text-sm font-bold text-[#F2E7D9]">旅程總支出</span>
+          <span class="text-xs text-[#CBB7A1]">共 ${breakdown.totalItemCount} 項</span>
         </div>
         <div class="flex items-center gap-2 shrink-0">
-          <span class="text-lg font-extrabold text-owl-cream tabular-nums-strict">${formatTWD(breakdown.grandTotal)}</span>
+          <span class="text-xl font-extrabold text-owl-cream tabular-nums-strict">${formatTWD(breakdown.grandTotal)}</span>
           <button type="button" id="btn-close-mobile-expense" aria-label="關閉支出明細" class="w-9 h-9 rounded-full bg-white/12 hover:bg-white/22 text-[#F2E7D9] flex items-center justify-center transition active:scale-95">
             <i data-lucide="x" class="w-4 h-4"></i>
           </button>
         </div>
       </div>
       <div class="expense-bar-track !my-0">${barHtml}</div>
-      <div class="flex items-center justify-between text-[11px] text-[#D8C7B4]">
-        <span class="inline-flex items-center gap-1">
-          <i data-lucide="eye" class="w-3 h-3 text-owl-gold"></i>
+      <div class="flex items-center justify-between text-xs text-[#D8C7B4]">
+        <span class="inline-flex items-center gap-1.5">
+          <i data-lucide="eye" class="w-3.5 h-3.5 text-owl-gold"></i>
           <span>顯示中圖層小計</span>
         </span>
         <span class="font-bold text-owl-gold tabular-nums-strict">${formatTWD(breakdown.visibleTotal)}</span>
@@ -244,32 +206,14 @@ function renderMobileDayDetailSheet() {
     return;
   }
 
-  const dayExpense = calcDayExpense(day);
-  const dayCatStats = calcSingleDayCategoryBreakdown(day);
-  const catChipsHtml =
-    dayCatStats.total > 0
-      ? dayCatStats.categories
-          .filter((c) => c.amount > 0)
-          .map(
-            (c) => `
-            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-owl-softBg/85 border border-owl-cardBorder text-[10.5px] font-bold text-owl-text tabular-nums-strict">
-              <span>${c.emoji}</span>
-              <span>${escapeHTML(c.label)}</span>
-              <span class="text-owl-primaryDeep">${formatTWD(c.amount)}</span>
-            </span>
-          `
-          )
-          .join('')
-      : `<span class="text-[11px] text-owl-muted">這一天尚未記錄支出</span>`;
-
   sheet.innerHTML = `
-    <div class="space-y-3">
+    <div class="space-y-3.5">
       <div class="flex items-start justify-between gap-2">
-        <div class="flex items-center gap-2 min-w-0">
-          <span class="w-3 h-3 rounded-full shrink-0 ring-2 ring-owl-card shadow-2xs" style="background:${day.color};"></span>
+        <div class="flex items-center gap-2.5 min-w-0">
+          <span class="w-3.5 h-3.5 rounded-full shrink-0 ring-2 ring-owl-card shadow-2xs" style="background:${day.color};"></span>
           <div class="min-w-0">
-            <div class="text-[10px] font-bold text-owl-muted leading-none">第 ${dayIndex + 1} 天 · 詳細設定</div>
-            <h4 class="text-xs font-extrabold text-owl-text truncate mt-1">${escapeHTML(day.name)}</h4>
+            <div class="text-xs font-bold text-owl-muted leading-none">第 ${dayIndex + 1} 天 · 圖層設定（${day.pins.length} 個標點）</div>
+            <h4 class="text-base font-extrabold text-owl-text truncate mt-1">${escapeHTML(day.name)}</h4>
           </div>
         </div>
         <button type="button" id="btn-close-mobile-day-detail" aria-label="關閉單日詳細設定" class="w-9 h-9 rounded-full bg-owl-softBg hover:bg-owl-border/70 text-owl-subtext flex items-center justify-center shrink-0 transition active:scale-95">
@@ -277,45 +221,35 @@ function renderMobileDayDetailSheet() {
         </button>
       </div>
 
-      <div class="rounded-2xl bg-owl-card/90 border border-owl-cardBorder p-2.5 space-y-2">
-        <div class="flex items-center justify-between gap-2 text-[11px]">
-          <span class="text-owl-subtext font-semibold">${day.pins.length} 個標點 · 當日支出預算</span>
-          <span class="text-xs font-extrabold text-owl-primaryDeep tabular-nums-strict">${formatTWD(dayExpense)}</span>
-        </div>
-        <div class="flex flex-wrap gap-1.5">
-          ${catChipsHtml}
-        </div>
-      </div>
-
-      <div class="grid grid-cols-3 gap-1.5">
+      <div class="grid grid-cols-3 gap-2">
         <button
           type="button"
           id="btn-mobile-day-eye"
-          class="py-2.5 px-2 rounded-xl border text-[11px] font-bold flex items-center justify-center gap-1 transition active:scale-95 ${
+          class="py-2.5 px-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-1 transition active:scale-95 ${
             day.visible
               ? 'bg-owl-softBg border-owl-accentBorder text-owl-primaryDeep'
               : 'bg-owl-canvas/80 border-owl-border text-owl-muted'
           }"
         >
-          <i data-lucide="${day.visible ? 'eye' : 'eye-off'}" class="w-3.5 h-3.5 shrink-0"></i>
+          <i data-lucide="${day.visible ? 'eye' : 'eye-off'}" class="w-4 h-4 shrink-0"></i>
           <span>${day.visible ? '顯示中' : '已隱藏'}</span>
         </button>
 
         <button
           type="button"
           id="btn-mobile-day-rename"
-          class="py-2.5 px-2 rounded-xl bg-owl-card hover:bg-owl-softBg border border-owl-border text-[11px] font-bold text-owl-text flex items-center justify-center gap-1 transition active:scale-95"
+          class="py-2.5 px-2 rounded-xl bg-owl-card hover:bg-owl-softBg border border-owl-border text-xs font-bold text-owl-text flex items-center justify-center gap-1 transition active:scale-95"
         >
-          <i data-lucide="pencil" class="w-3 h-3 shrink-0"></i>
+          <i data-lucide="pencil" class="w-3.5 h-3.5 shrink-0"></i>
           <span>重新命名</span>
         </button>
 
         <button
           type="button"
           id="btn-mobile-day-delete"
-          class="py-2.5 px-2 rounded-xl bg-owl-card hover:bg-[#F9EDEC] border border-owl-border hover:border-[#E3BDB8] text-[11px] font-bold text-[#9B534B] flex items-center justify-center gap-1 transition active:scale-95"
+          class="py-2.5 px-2 rounded-xl bg-owl-card hover:bg-[#F9EDEC] border border-owl-border hover:border-[#E3BDB8] text-xs font-bold text-[#9B534B] flex items-center justify-center gap-1 transition active:scale-95"
         >
-          <i data-lucide="trash-2" class="w-3 h-3 shrink-0"></i>
+          <i data-lucide="trash-2" class="w-3.5 h-3.5 shrink-0"></i>
           <span>刪除</span>
         </button>
       </div>
@@ -406,10 +340,10 @@ function renderMobileDaysPopup() {
         title="新增天數"
         aria-label="新增天數"
         style="animation-delay: ${Math.min(totalCount, 6) * 24}ms;"
-        class="mobile-day-square-animate mobile-day-tile-add w-[54px] h-[54px] rounded-2xl shadow-float flex flex-col items-center justify-center gap-0.5 shrink-0 transition active:scale-95"
+        class="mobile-day-square-animate mobile-day-tile-add w-[58px] h-[58px] rounded-2xl shadow-float flex flex-col items-center justify-center gap-0.5 shrink-0 transition active:scale-95"
       >
         <i data-lucide="plus" class="w-4 h-4"></i>
-        <span class="text-[10px] font-bold leading-none">新增</span>
+        <span class="text-xs font-bold leading-none">新增</span>
       </button>
     </div>
   `;
@@ -445,7 +379,7 @@ function renderMobileDaysPopup() {
             <button
               type="button"
               data-inline-gear-day-id="${day.id}"
-              title="單日詳細設定（更名、刪除、預算查看）"
+              title="單日詳細設定（更名、刪除、顯示切換）"
               aria-label="單日詳細設定"
               class="btn-mobile-inline-gear mobile-hit-expand w-[32px] h-[32px] rounded-full shadow-float flex items-center justify-center transition active:scale-90 ${
                 isGearOpen ? 'mobile-mini-orb-active' : 'mobile-mini-orb'
@@ -465,10 +399,10 @@ function renderMobileDaysPopup() {
             data-mobile-day-id="${day.id}"
             title="${escapeHTML(day.name)}（點擊切換至這一天並顯示行程）"
             style="animation-delay: ${delayMs}ms;"
-            class="mobile-day-square mobile-day-square-animate w-[54px] h-[54px] rounded-2xl shadow-float flex flex-col items-center justify-center gap-1 shrink-0 transition active:scale-95 ${tileClass} ${dimClass}"
+            class="mobile-day-square mobile-day-square-animate w-[58px] h-[58px] rounded-2xl shadow-float flex flex-col items-center justify-center gap-1 shrink-0 transition active:scale-95 ${tileClass} ${dimClass}"
           >
-            <span class="w-2 h-2 rounded-full shrink-0 shadow-2xs" style="background:${day.color};"></span>
-            <span class="text-[11px] font-extrabold text-owl-text leading-none tracking-tight whitespace-nowrap">第 ${idx + 1} 天</span>
+            <span class="w-2.5 h-2.5 rounded-full shrink-0 shadow-2xs" style="background:${day.color};"></span>
+            <span class="text-xs font-extrabold text-owl-text leading-none tracking-tight whitespace-nowrap">第 ${idx + 1} 天</span>
           </button>
         </div>
       `;

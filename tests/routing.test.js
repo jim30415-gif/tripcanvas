@@ -15,6 +15,7 @@ import {
   normalizeLandRoute,
   normalizeTransitRoute,
   parseDurationSeconds,
+  pickBestPlaceFromGoogle,
 } from '../server/routesHandler.js';
 import { getTransportDisplayInfo, hasSegmentedTransit } from '../src/state/selectors.js';
 import { buildTransitTransportRecord } from '../src/services/routeManager.js';
@@ -896,6 +897,104 @@ test('新增支出分類（住宿）與 11 款內建預設圖示（含機場／�
   assert.equal(lodgingCat.amount, 3600);
   assert.equal(lodgingCat.pct, 90);
 });
+
+test('單景點 Google Maps 跳轉連結與「標點優先、次順位路名」命名邏輯', async () => {
+  const { buildGoogleMapsPlaceUrl } = await import('../src/utils/geo.js');
+  const { pickPlaceNameFromNominatim } = await import('../src/services/geocoder.js');
+
+  // 1. 單景點 Google Maps URL
+  assert.equal(
+    buildGoogleMapsPlaceUrl({
+      name: '華山 1914 文化創意產業園區',
+      lat: 25.0441,
+      lng: 121.5294,
+      placeId: 'ChIJ_abc123',
+    }),
+    'https://www.google.com/maps/search/?api=1&query=%E8%8F%AF%E5%B1%B1%201914%20%E6%96%87%E5%8C%96%E5%89%B5%E6%84%8F%E7%94%A2%E6%A5%AD%E5%9C%92%E5%8D%80&query_place_id=ChIJ_abc123'
+  );
+  assert.equal(
+    buildGoogleMapsPlaceUrl({
+      name: '自訂景點 1',
+      lat: 25.0441,
+      lng: 121.5294,
+      placeId: 'ChIJ_abc123',
+    }),
+    'https://www.google.com/maps/search/?api=1&query=25.044100%2C121.529400'
+  );
+  assert.equal(
+    buildGoogleMapsPlaceUrl({ name: '忠孝東路二段', lat: 25.042, lng: 121.531 }),
+    'https://www.google.com/maps/search/?api=1&query=25.042000%2C121.531000'
+  );
+  assert.equal(buildGoogleMapsPlaceUrl(null), 'https://www.google.com/maps');
+
+  // 2. Google Places / Geocoding：略過純行政區與道路，優先取 POI，無 POI 時取路名
+  const gPoi = pickBestPlaceFromGoogle(
+    {
+      places: [
+        { id: 'area1', displayName: { text: '中正區' }, primaryType: 'sublocality', types: ['sublocality', 'political'] },
+        { id: 'poi1', displayName: { text: '興波咖啡 Simple Kaffa' }, primaryType: 'cafe', types: ['cafe', 'point_of_interest'] },
+      ],
+    },
+    null
+  );
+  assert.deepEqual(gPoi, { name: '興波咖啡 Simple Kaffa', placeId: 'poi1', source: 'google_poi' });
+
+  const gRoad = pickBestPlaceFromGoogle(
+    { places: [{ id: 'area2', displayName: { text: '台北市' }, primaryType: 'locality', types: ['locality', 'political'] }] },
+    {
+      results: [
+        {
+          types: ['route'],
+          address_components: [
+            { long_name: '忠孝東路二段', types: ['route'] },
+            { long_name: '中正區', types: ['administrative_area_level_3', 'political'] },
+          ],
+        },
+      ],
+    }
+  );
+  assert.deepEqual(gRoad, { name: '忠孝東路二段', placeId: '', source: 'google_road' });
+
+  const gUnnamed = pickBestPlaceFromGoogle(null, {
+    results: [{ types: ['route'], address_components: [{ long_name: 'Unnamed Road', types: ['route'] }] }],
+  });
+  assert.equal(gUnnamed, null);
+
+  // 3. Nominatim：POI 優先 → 路名次之 → 街區保底
+  assert.equal(
+    pickPlaceNameFromNominatim({
+      category: 'tourism',
+      name: '國立中正紀念堂',
+      address: { road: '中山南路', suburb: '中正區' },
+    }),
+    '國立中正紀念堂'
+  );
+  assert.equal(
+    pickPlaceNameFromNominatim({
+      category: 'highway',
+      name: '仁愛路二段',
+      address: { road: '仁愛路二段', suburb: '中正區' },
+    }),
+    '仁愛路二段'
+  );
+  assert.equal(
+    pickPlaceNameFromNominatim({
+      category: 'place',
+      name: '',
+      address: { pedestrian: '迪化街一段', suburb: '大同區' },
+    }),
+    '迪化街一段'
+  );
+  assert.equal(
+    pickPlaceNameFromNominatim({
+      category: 'boundary',
+      name: '陽明山',
+      address: { suburb: '北投區' },
+    }),
+    '北投區'
+  );
+});
+
 
 
 
