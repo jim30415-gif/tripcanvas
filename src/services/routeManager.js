@@ -261,7 +261,7 @@ export async function resolvePendingSegments({ onUpdated, retryNetworkErrors = f
               selectedRouteIndex: chosenIdx,
               cost: autoCost,
             });
-            saveState();
+            saveState(null, { markEdited: false, skipCloudSync: true });
             if (typeof onUpdated === 'function') onUpdated();
           }
           return;
@@ -277,7 +277,7 @@ export async function resolvePendingSegments({ onUpdated, retryNetworkErrors = f
           fallbackNote: res.status === 'ok' ? res.fallbackNote || '' : '',
           cost: Math.max(0, Math.round(Number(afterPin.transportToNext.cost) || 0)),
         };
-        saveState();
+        saveState(null, { markEdited: false, skipCloudSync: true });
         if (typeof onUpdated === 'function') onUpdated();
       })
     );

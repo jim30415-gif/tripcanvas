@@ -5,7 +5,9 @@ import { DAY_COLORS } from './config/constants.js';
 import {
   getState,
   getActiveTrip,
+  getWorkspace,
   saveState,
+  hydrateFromIndexedDBIfNeeded,
   createNewTrip,
   resetStateToDemo,
   serializeStateForExport,
@@ -13,6 +15,7 @@ import {
 } from './state/store.js';
 import { getActiveDay } from './state/selectors.js';
 import { resolvePendingSegments } from './services/routeManager.js';
+import { initDriveSync } from './services/driveSync.js';
 import { reverseGeocode } from './services/geocoder.js';
 import {
   initMap,
@@ -27,7 +30,8 @@ import { renderRightPanel } from './ui/rightPanel.js';
 import { openPinDetailModal, bindPinModalEvents } from './ui/pinModal.js';
 import { openTransportModal, bindTransportModalEvents } from './ui/transportModal.js';
 import { bindSearchBarEvents } from './ui/searchBar.js';
-import { bindTripsDrawerEvents } from './ui/tripsDrawer.js';
+import { bindTripsDrawerEvents, renderTripsDrawer } from './ui/tripsDrawer.js';
+import { bindDriveSyncUI } from './ui/driveSyncUI.js';
 import { setMobileTab, bindMobileNav } from './ui/mobileNav.js';
 import { openCustomDialog, showToast } from './ui/dialog.js';
 import { refreshIcons, uid } from './utils/format.js';
@@ -89,6 +93,8 @@ function renderMapLayers() {
     renderDayPinsOnMap(overlayGroup, day, isActive, (dId, pId) => {
       if (state.activeDayId !== dId) {
         state.activeDayId = dId;
+        const edited = !getWorkspace().isPristineDemo;
+        saveState(null, { markEdited: edited, skipCloudSync: !edited });
         renderLeft();
         renderRight();
         updateMapHeaderUI();
@@ -324,9 +330,35 @@ function bindGlobalEvents() {
   bindSearchBarEvents({ onAddPinAtCoordinate: addPinAtCoordinate });
   bindPinModalEvents({ onStateChanged: renderAll });
   bindTransportModalEvents({ onStateChanged: renderAll });
+  bindDriveSyncUI();
   bindMobileNav();
 
   window.addEventListener('resize', () => invalidateMapSize());
+}
+
+async function hydratePersistedWorkspace() {
+  try {
+    const restoredFromIdb = await hydrateFromIndexedDBIfNeeded();
+    if (restoredFromIdb) {
+      renderAll();
+      renderTripsDrawer();
+      fitMapToVisiblePins(true);
+    }
+
+    await initDriveSync({
+      onWorkspaceUpdated: (shouldRefit) => {
+        renderAll();
+        renderTripsDrawer();
+        if (shouldRefit) {
+          triggerBackgroundResolve(true);
+          fitMapToVisiblePins(true);
+        }
+      },
+      onToast: (msg, type) => showToast(msg, type),
+    });
+  } finally {
+    triggerBackgroundResolve(true);
+  }
 }
 
 function boot() {
@@ -346,9 +378,9 @@ function boot() {
 
   bindGlobalEvents();
   renderAll();
-  triggerBackgroundResolve(true);
   setTimeout(() => fitMapToVisiblePins(true), 380);
   refreshIcons();
+  void hydratePersistedWorkspace();
 }
 
 if (document.readyState === 'loading') {

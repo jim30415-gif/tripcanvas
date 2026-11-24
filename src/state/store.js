@@ -1,12 +1,16 @@
 import {
   STORAGE_KEY,
   WORKSPACE_STORAGE_KEY,
+  ROUTE_CACHE_STORAGE_KEY,
   DAY_COLORS,
   EXPENSE_CATEGORY_MAP,
 } from '../config/constants.js';
 import { createDemoState, createBlankTripState } from '../config/demoData.js';
+import { saveWorkspaceToIndexedDB, loadWorkspaceFromIndexedDB } from './localBackup.js';
 
+const FX_CACHE_KEY = 'tripcanvas_fx_rates_twd_v1';
 const VALID_CATEGORIES = new Set(Object.keys(EXPENSE_CATEGORY_MAP));
+const mutationListeners = new Set();
 
 function makeId(prefix = 'trip') {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
@@ -89,7 +93,18 @@ function createTripEntry(name, data) {
   };
 }
 
-function normalizeWorkspace(rawWs) {
+function normalizeDeletedTripIds(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const clean = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (typeof k === 'string' && k && typeof v === 'string' && Number.isFinite(Date.parse(v))) {
+      clean[k] = v;
+    }
+  }
+  return clean;
+}
+
+export function normalizeWorkspace(rawWs) {
   if (!rawWs || !Array.isArray(rawWs.trips) || rawWs.trips.length === 0) {
     return null;
   }
@@ -109,17 +124,42 @@ function normalizeWorkspace(rawWs) {
 
   if (trips.length === 0) return null;
   const activeTripId = trips.some((t) => t.id === rawWs.activeTripId) ? rawWs.activeTripId : trips[0].id;
+  const latestTripTs = trips.reduce((acc, t) => {
+    const ms = Date.parse(t.updatedAt);
+    return Number.isFinite(ms) && ms > acc ? ms : acc;
+  }, 0);
+  const wsUpdatedAt =
+    typeof rawWs.updatedAt === 'string' && Number.isFinite(Date.parse(rawWs.updatedAt))
+      ? rawWs.updatedAt
+      : latestTripTs > 0
+        ? new Date(latestTripTs).toISOString()
+        : new Date().toISOString();
+
   return {
     version: 5,
     activeTripId,
+    updatedAt: wsUpdatedAt,
+    isPristineDemo: rawWs.isPristineDemo === true,
+    deletedTripIds: normalizeDeletedTripIds(rawWs.deletedTripIds),
     trips,
+  };
+}
+
+function createPristineDemoWorkspace() {
+  const demo = createTripEntry('台北 2 日示範行程', createDemoState());
+  return {
+    version: 5,
+    activeTripId: demo.id,
+    updatedAt: demo.updatedAt,
+    isPristineDemo: true,
+    deletedTripIds: {},
+    trips: [demo],
   };
 }
 
 function loadWorkspaceFromStorage() {
   if (typeof localStorage === 'undefined') {
-    const demo = createTripEntry('台北 2 日示範行程', createDemoState());
-    return { version: 5, activeTripId: demo.id, trips: [demo] };
+    return createPristineDemoWorkspace();
   }
 
   // 1. 優先讀取 v5 多旅遊計畫工作區
@@ -140,7 +180,14 @@ function loadWorkspaceFromStorage() {
       const migratedData = normalizeState(JSON.parse(rawV4));
       if (migratedData) {
         const entry = createTripEntry('我的自由行計畫', migratedData);
-        const ws = { version: 5, activeTripId: entry.id, trips: [entry] };
+        const ws = {
+          version: 5,
+          activeTripId: entry.id,
+          updatedAt: entry.updatedAt,
+          isPristineDemo: false,
+          deletedTripIds: {},
+          trips: [entry],
+        };
         try {
           localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(ws));
         } catch {
@@ -153,12 +200,47 @@ function loadWorkspaceFromStorage() {
     console.warn('遷移舊版行程資料失敗：', err);
   }
 
-  // 3. 全新使用者載入預設台北 2 日示範行程
-  const demo = createTripEntry('台北 2 日示範行程', createDemoState());
-  return { version: 5, activeTripId: demo.id, trips: [demo] };
+  // 3. 全新瀏覽器載入預設台北 2 日示範行程（標記為 isPristineDemo，避免誤覆蓋雲端既有行程）
+  return createPristineDemoWorkspace();
 }
 
 let workspace = loadWorkspaceFromStorage();
+
+function writeWorkspaceToLocalStorage(ws) {
+  if (typeof localStorage === 'undefined') return true;
+  const serialized = JSON.stringify(ws);
+  try {
+    localStorage.setItem(WORKSPACE_STORAGE_KEY, serialized);
+    return true;
+  } catch (firstErr) {
+    // 空間不足時先自動清除可重建的路線／匯率快取並重試一次
+    try {
+      localStorage.removeItem(ROUTE_CACHE_STORAGE_KEY);
+      localStorage.removeItem(FX_CACHE_KEY);
+      localStorage.setItem(WORKSPACE_STORAGE_KEY, serialized);
+      return true;
+    } catch (retryErr) {
+      console.error('寫入 localStorage 失敗（已嘗試清理快取並降級為 IndexedDB 備份）：', firstErr, retryErr);
+      return false;
+    }
+  }
+}
+
+function notifyWorkspaceMutated() {
+  for (const fn of mutationListeners) {
+    try {
+      fn(workspace);
+    } catch (err) {
+      console.warn('Workspace mutation listener error:', err);
+    }
+  }
+}
+
+export function onWorkspaceMutated(listener) {
+  if (typeof listener !== 'function') return () => {};
+  mutationListeners.add(listener);
+  return () => mutationListeners.delete(listener);
+}
 
 export function getWorkspace() {
   return workspace;
@@ -178,26 +260,76 @@ export function getState() {
 
 export function setState(nextState) {
   const active = getActiveTrip();
+  const nowIso = new Date().toISOString();
   active.data = nextState;
-  active.updatedAt = new Date().toISOString();
+  active.updatedAt = nowIso;
+  workspace.updatedAt = nowIso;
+  workspace.isPristineDemo = false;
 }
 
-export function saveState(onQuotaError) {
+export function saveState(onQuotaError, { markEdited = true, skipCloudSync = false } = {}) {
+  const nowIso = new Date().toISOString();
   const active = getActiveTrip();
-  if (active) {
-    active.updatedAt = new Date().toISOString();
+  if (markEdited) {
+    if (active) active.updatedAt = nowIso;
+    workspace.updatedAt = nowIso;
+    workspace.isPristineDemo = false;
   }
-  if (typeof localStorage === 'undefined') return true;
-  try {
-    localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(workspace));
-    return true;
-  } catch (err) {
-    console.error('寫入 localStorage 失敗：', err);
-    if (typeof onQuotaError === 'function') {
-      onQuotaError('儲存空間已滿，建議匯出 JSON 備份或移除過大圖片');
-    }
+
+  const localOk = writeWorkspaceToLocalStorage(workspace);
+  // 雙重備份：同步鏡像至較大容量的 IndexedDB
+  void saveWorkspaceToIndexedDB(workspace);
+
+  if (!localOk && typeof onQuotaError === 'function') {
+    onQuotaError('瀏覽器快捷空間已滿，已改存至擴充本機空間，建議登入 Google 雲端或精簡圖片');
+  }
+
+  if (!skipCloudSync && !workspace.isPristineDemo) {
+    notifyWorkspaceMutated();
+  }
+
+  return localOk;
+}
+
+export async function flushLocalBackupNow() {
+  writeWorkspaceToLocalStorage(workspace);
+  await saveWorkspaceToIndexedDB(workspace);
+}
+
+export function replaceWorkspace(nextRawWs, { markEdited = false, skipCloudSync = true } = {}) {
+  const normalized = normalizeWorkspace(nextRawWs);
+  if (!normalized) return false;
+  if (markEdited) {
+    normalized.isPristineDemo = false;
+    normalized.updatedAt = new Date().toISOString();
+  }
+  workspace = normalized;
+  writeWorkspaceToLocalStorage(workspace);
+  void saveWorkspaceToIndexedDB(workspace);
+  if (!skipCloudSync && !workspace.isPristineDemo) {
+    notifyWorkspaceMutated();
+  }
+  return true;
+}
+
+/**
+ * 啟動時檢查 IndexedDB 備份：
+ * 若 localStorage 被清掉或超過 5 MB 上限（目前僅為預設示範行程），
+ * 自動從 IndexedDB 還原使用者的所有旅遊計畫。
+ */
+export async function hydrateFromIndexedDBIfNeeded() {
+  if (!workspace.isPristineDemo) {
+    void saveWorkspaceToIndexedDB(workspace);
     return false;
   }
+  const backup = await loadWorkspaceFromIndexedDB();
+  const normalized = normalizeWorkspace(backup);
+  if (!normalized || normalized.isPristineDemo) {
+    return false;
+  }
+  workspace = normalized;
+  writeWorkspaceToLocalStorage(workspace);
+  return true;
 }
 
 export function createNewTrip(name, { blank = true, initialData = null } = {}) {
@@ -213,7 +345,7 @@ export function switchTrip(tripId) {
   const target = workspace.trips.find((t) => t.id === tripId);
   if (!target) return null;
   workspace.activeTripId = target.id;
-  saveState();
+  saveState(null, { markEdited: !workspace.isPristineDemo });
   return target;
 }
 
@@ -241,6 +373,10 @@ export function duplicateTrip(tripId) {
 export function deleteTrip(tripId) {
   if (workspace.trips.length <= 1) return false;
   workspace.trips = workspace.trips.filter((t) => t.id !== tripId);
+  if (!workspace.deletedTripIds || typeof workspace.deletedTripIds !== 'object') {
+    workspace.deletedTripIds = {};
+  }
+  workspace.deletedTripIds[tripId] = new Date().toISOString();
   if (workspace.activeTripId === tripId) {
     workspace.activeTripId = workspace.trips[0].id;
   }
