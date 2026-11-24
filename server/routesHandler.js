@@ -1,5 +1,6 @@
 import { decodePolyline, encodePolyline, stitchEncodedPolylines } from '../src/services/polyline.js';
-import { convertMoneyToTwd } from './currency.js';
+import { convertMoneyToTwd, getTwdRatesSummary } from './currency.js';
+import { isJapanTrip, queryNavitimeTransit } from './navitime.js';
 
 const GOOGLE_ROUTES_ENDPOINT = 'https://routes.googleapis.com/directions/v2:computeRoutes';
 
@@ -419,14 +420,30 @@ function buildWaypoint(pt) {
   };
 }
 
+function getNavitimeApiKey(env = process.env) {
+  return String(
+    env?.RAPIDAPI_NAVITIME_KEY || env?.NAVITIME_RAPIDAPI_KEY || env?.RAPIDAPI_KEY || ''
+  ).trim();
+}
+
 export function handleStatusRequest(env = process.env) {
   const apiKey = (env?.GOOGLE_MAPS_API_KEY || '').trim();
+  const navitimeKey = getNavitimeApiKey(env);
   return {
     statusCode: 200,
     body: {
       configured: Boolean(apiKey),
+      navitimeConfigured: Boolean(navitimeKey),
       provider: 'google_routes_v2',
     },
+  };
+}
+
+export async function handleRatesRequest() {
+  const summary = await getTwdRatesSummary();
+  return {
+    statusCode: 200,
+    body: summary,
   };
 }
 
@@ -435,16 +452,7 @@ export function handleStatusRequest(env = process.env) {
  */
 export async function handleComputeRoutes(body, env = process.env) {
   const apiKey = (env?.GOOGLE_MAPS_API_KEY || '').trim();
-  if (!apiKey) {
-    return {
-      statusCode: 503,
-      body: {
-        status: 'api_unconfigured',
-        error: 'API_KEY_NOT_CONFIGURED',
-        message: '尚未設定 GOOGLE_MAPS_API_KEY 環境變數，已自動改用備援方案。',
-      },
-    };
-  }
+  const navitimeKey = getNavitimeApiKey(env);
 
   const { origin, destination, mode, departureTime, transitPreference } = body || {};
   if (!isValidCoord(origin) || !isValidCoord(destination) || !VALID_MODES.has(mode)) {
@@ -458,8 +466,46 @@ export async function handleComputeRoutes(body, env = process.env) {
     };
   }
 
+  // 日本大眾運輸專屬分流：Google 開發者 API 因日本鐵路授權限制不提供日本大眾運輸，
+  // 自動改由日本 NAVITIME (RapidAPI) 查詢；若尚未設定金鑰則回傳明確的日本指引與備援入口。
+  if (mode === 'transit' && isJapanTrip(origin, destination)) {
+    if (navitimeKey) {
+      return queryNavitimeTransit({
+        apiKey: navitimeKey,
+        origin,
+        destination,
+        departureTime,
+        transitPreference,
+      });
+    }
+    return {
+      statusCode: 200,
+      body: {
+        status: 'japan_transit_requires_navitime',
+        provider: 'google',
+        region: 'JP',
+        mode: 'transit',
+        navitimeConfigured: false,
+        routes: [],
+        message:
+          'Google 開發者 API 因日本鐵路授權限制，不支援自動抓取日本大眾運輸。可於 Vercel 免費設定 NAVITIME（RapidAPI 每月 500 次免費硬上限）啟用日本電車自動查詢，或一鍵開啟 Google Maps 查詢並手動填寫日圓自動換台幣。',
+      },
+    };
+  }
+
+  if (!apiKey) {
+    return {
+      statusCode: 503,
+      body: {
+        status: 'api_unconfigured',
+        error: 'API_KEY_NOT_CONFIGURED',
+        message: '尚未設定 GOOGLE_MAPS_API_KEY 環境變數，已自動改用備援方案。',
+      },
+    };
+  }
+
   try {
-    // ==================== A. 大眾運輸分段路線 ====================
+    // ==================== A. 大眾運輸分段路線（台灣與日本以外全球地區） ====================
     if (mode === 'transit') {
       const payload = {
         origin: buildWaypoint(origin),

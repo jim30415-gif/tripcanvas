@@ -157,12 +157,13 @@ export function getTransportDisplayInfo(t) {
       const pillLines = lineNames.length > 0 ? lineNames.slice(0, 2).join('→') : '大眾運輸';
       const mapPill = durStr ? `${primaryEmoji} ${pillLines} · ${durStr}` : `${primaryEmoji} ${pillLines}`;
 
+      const isNavitime = t.provider === 'navitime';
       return {
         kind: 'transit-segmented',
         emoji: primaryEmoji,
         leftTitle,
-        leftSub: subParts.join(' · ') || 'Google 分段路線',
-        badge: '分段路線',
+        leftSub: subParts.join(' · ') || (isNavitime ? '日本 NAVITIME 分段路線' : 'Google 分段路線'),
+        badge: isNavitime ? '日本分段' : '分段路線',
         mapPill,
         segments: t.segments,
         cost,

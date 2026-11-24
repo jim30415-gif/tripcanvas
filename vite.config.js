@@ -1,5 +1,9 @@
 import { defineConfig, loadEnv } from 'vite';
-import { handleComputeRoutes, handleStatusRequest } from './server/routesHandler.js';
+import {
+  handleComputeRoutes,
+  handleRatesRequest,
+  handleStatusRequest,
+} from './server/routesHandler.js';
 
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
@@ -25,7 +29,8 @@ function readJsonBody(req) {
 function createRoutesApiPlugin(env) {
   const attachMiddleware = (middlewares) => {
     middlewares.use(async (req, res, next) => {
-      const urlPath = (req.url || '').split('?')[0];
+      const fullUrl = req.url || '';
+      const urlPath = fullUrl.split('?')[0];
       if (urlPath !== '/api/routes' && urlPath !== '/api/routes/status') {
         return next();
       }
@@ -34,6 +39,13 @@ function createRoutesApiPlugin(env) {
       res.setHeader('Cache-Control', 'no-store');
 
       if (req.method === 'GET') {
+        const wantsRates = /[?&](rates=1|action=rates)\b/.test(fullUrl);
+        if (wantsRates) {
+          const result = await handleRatesRequest();
+          res.statusCode = result.statusCode;
+          res.end(JSON.stringify(result.body));
+          return;
+        }
         const result = handleStatusRequest(env);
         res.statusCode = result.statusCode;
         res.end(JSON.stringify(result.body));

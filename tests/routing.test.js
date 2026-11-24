@@ -564,4 +564,214 @@ test('多旅遊計畫管理：新增、切換、改名、複製與保留舊計�
   assert.equal(getAllTrips().length, initialCount);
 });
 
+test('日本座標判斷與 JST 時間格式化（涵蓋本州／北海道／沖繩，精準排除台灣與韓國）', async () => {
+  const { isJapanCoord, isJapanTrip, formatJstDateTime } = await import('../server/navitime.js');
+
+  assert.equal(isJapanCoord({ lat: 35.6812, lng: 139.7671 }), true); // 東京車站
+  assert.equal(isJapanCoord({ lat: 34.9858, lng: 135.7588 }), true); // 京都車站
+  assert.equal(isJapanCoord({ lat: 34.7025, lng: 135.496 }), true); // 大阪車站
+  assert.equal(isJapanCoord({ lat: 43.0687, lng: 141.3508 }), true); // 札幌車站
+  assert.equal(isJapanCoord({ lat: 26.2124, lng: 127.6809 }), true); // 沖繩那霸
+
+  assert.equal(isJapanCoord({ lat: 25.0478, lng: 121.517 }), false); // 台北車站
+  assert.equal(isJapanCoord({ lat: 25.1276, lng: 121.7392 }), false); // 基隆
+  assert.equal(isJapanCoord({ lat: 37.5665, lng: 126.978 }), false); // 首爾
+  assert.equal(isJapanCoord({ lat: 35.1796, lng: 129.0756 }), false); // 釜山
+
+  assert.equal(
+    isJapanTrip({ lat: 35.6812, lng: 139.7671 }, { lat: 35.7148, lng: 139.7967 }),
+    true
+  );
+  assert.equal(
+    isJapanTrip({ lat: 25.0478, lng: 121.517 }, { lat: 35.6812, lng: 139.7671 }),
+    false
+  );
+
+  // UTC 2026-11-24T01:30:00Z 應為 JST 2026-11-24T10:30:00（無時區後綴）
+  assert.equal(formatJstDateTime('2026-11-24T01:30:00.000Z'), '2026-11-24T10:30:00');
+});
+
+test('NAVITIME 日本大眾運輸正規化與分流（含轉乘分段、官方代表色、GeoJSON 折線與日圓票價自動換算）', async () => {
+  const { handleRatesRequest } = await import('../server/routesHandler.js');
+  const { convertToTwdSync } = await import('../src/services/currencyClient.js');
+
+  const tokyo = { lat: 35.6812, lng: 139.7671 };
+  const sensoji = { lat: 35.7148, lng: 139.7967 };
+
+  // 1. 狀態端點回報 navitimeConfigured
+  assert.equal(handleStatusRequest({ GOOGLE_MAPS_API_KEY: 'g', RAPIDAPI_NAVITIME_KEY: '' }).body.navitimeConfigured, false);
+  assert.equal(handleStatusRequest({ GOOGLE_MAPS_API_KEY: 'g', RAPIDAPI_NAVITIME_KEY: 'nav-key' }).body.navitimeConfigured, true);
+
+  // 2. 日本大眾運輸未設定 NAVITIME Key 時，應直接回傳 japan_transit_requires_navitime（不浪費 Google 配額）
+  const originalFetch = globalThis.fetch;
+  let fetchCalled = 0;
+  try {
+    globalThis.fetch = async () => {
+      fetchCalled++;
+      throw new Error('不應呼叫外部 API');
+    };
+    const noKeyRes = await handleComputeRoutes(
+      { mode: 'transit', origin: tokyo, destination: sensoji },
+      { GOOGLE_MAPS_API_KEY: 'g-only', RAPIDAPI_NAVITIME_KEY: '' }
+    );
+    assert.equal(fetchCalled, 0);
+    assert.equal(noKeyRes.statusCode, 200);
+    assert.equal(noKeyRes.body.status, 'japan_transit_requires_navitime');
+    assert.equal(noKeyRes.body.region, 'JP');
+
+    // 3. 設定 RAPIDAPI_NAVITIME_KEY 時，自動分流至 NAVITIME 並回傳標準分段路線＋日圓換台幣
+    let requestedUrl = '';
+    let requestedHeaders = {};
+    globalThis.fetch = async (url, init) => {
+      if (String(url).includes('open.er-api.com')) {
+        return {
+          ok: true,
+          json: async () => ({
+            result: 'success',
+            rates: { TWD: 1, JPY: 5.0, USD: 0.03125 },
+          }),
+        };
+      }
+      requestedUrl = String(url);
+      requestedHeaders = init?.headers || {};
+      return {
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            items: [
+              {
+                summary: {
+                  move: {
+                    time: 23,
+                    distance: 5400,
+                    transit_count: 1,
+                    from_time: '2026-11-24T10:00:00+09:00',
+                    to_time: '2026-11-24T10:23:00+09:00',
+                    reference_fare: { lowest_total_ic: 350, lowest_total_ticket: 360 },
+                  },
+                },
+                sections: [
+                  { type: 'point', name: 'start', coord: { lat: 35.6812, lon: 139.7671 } },
+                  { type: 'move', move: 'walk', time: 2, distance: 150, from_time: '2026-11-24T10:00:00+09:00', to_time: '2026-11-24T10:02:00+09:00' },
+                  { type: 'point', name: '東京', coord: { lat: 35.6814, lon: 139.7672 }, node_types: ['station'] },
+                  {
+                    type: 'move',
+                    move: 'local_train',
+                    line_name: 'JR山手線',
+                    time: 3,
+                    distance: 1300,
+                    from_time: '2026-11-24T10:03:00+09:00',
+                    to_time: '2026-11-24T10:06:00+09:00',
+                    transport: {
+                      color: '#80C241',
+                      company: { name: 'JR東日本' },
+                      links: [{ destination: { name: '上野・池袋方面' } }],
+                    },
+                  },
+                  { type: 'point', name: '神田', coord: { lat: 35.6917, lon: 139.7709 }, node_types: ['station'] },
+                  {
+                    type: 'move',
+                    move: 'local_train',
+                    line_name: '東京メトロ銀座線',
+                    time: 10,
+                    distance: 3500,
+                    from_time: '2026-11-24T10:08:00+09:00',
+                    to_time: '2026-11-24T10:18:00+09:00',
+                    transport: {
+                      company: { name: '東京メトロ' },
+                      links: [{ destination: { name: '浅草' } }],
+                    },
+                  },
+                  { type: 'point', name: '浅草', coord: { lat: 35.7119, lon: 139.7982 }, node_types: ['station'] },
+                  { type: 'move', move: 'walk', time: 5, distance: 450, from_time: '2026-11-24T10:18:00+09:00', to_time: '2026-11-24T10:23:00+09:00' },
+                  { type: 'point', name: 'goal', coord: { lat: 35.7148, lon: 139.7967 } },
+                ],
+                shapes: {
+                  type: 'FeatureCollection',
+                  features: [
+                    {
+                      type: 'Feature',
+                      geometry: { type: 'LineString', coordinates: [[139.7671, 35.6812], [139.7672, 35.6814]] },
+                      properties: { ways: 'walk', inline: { color: '#BFBFBF' } },
+                    },
+                    {
+                      type: 'Feature',
+                      geometry: { type: 'LineString', coordinates: [[139.7672, 35.6814], [139.769, 35.686], [139.7709, 35.6917]] },
+                      properties: { ways: 'transport', inline: { color: '#80C241' } },
+                    },
+                    {
+                      type: 'Feature',
+                      geometry: { type: 'LineString', coordinates: [[139.7709, 35.6917], [139.785, 35.702], [139.7982, 35.7119]] },
+                      properties: { ways: 'transport', inline: { color: '#FF9500' } },
+                    },
+                    {
+                      type: 'Feature',
+                      geometry: { type: 'LineString', coordinates: [[139.7982, 35.7119], [139.7975, 35.7135], [139.7967, 35.7148]] },
+                      properties: { ways: 'walk', inline: { color: '#BFBFBF' } },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+      };
+    };
+
+    const jpRes = await handleComputeRoutes(
+      {
+        mode: 'transit',
+        origin: tokyo,
+        destination: sensoji,
+        departureTime: '2026-11-24T01:00:00.000Z',
+        transitPreference: 'FEWER_TRANSFERS',
+      },
+      { GOOGLE_MAPS_API_KEY: '', RAPIDAPI_NAVITIME_KEY: 'test-navitime-key' }
+    );
+
+    assert.equal(jpRes.statusCode, 200);
+    assert.equal(jpRes.body.status, 'ok');
+    assert.equal(jpRes.body.provider, 'navitime');
+    assert.ok(requestedUrl.includes('navitime-route-totalnavi.p.rapidapi.com/route_transit'));
+    assert.ok(requestedUrl.includes('datum=wgs84'));
+    assert.ok(requestedUrl.includes('coord_unit=degree'));
+    assert.ok(requestedUrl.includes('shape_color=railway_line'));
+    assert.ok(requestedUrl.includes('order=transit'));
+    assert.equal(requestedHeaders['x-rapidapi-key'], 'test-navitime-key');
+
+    const route = jpRes.body.routes[0];
+    assert.equal(route.segments.length, 4);
+    assert.equal(route.segments[0].type, 'WALK');
+    assert.equal(route.segments[1].displayLine, 'JR山手線');
+    assert.equal(route.segments[1].lineColor, '#80C241');
+    assert.equal(route.segments[1].departureStop.timeText, '10:03');
+    assert.equal(route.segments[2].displayLine, '東京メトロ銀座線');
+    assert.equal(route.segments[2].vehicleType, 'SUBWAY');
+    // 銀座線 transport.color 未填時應自動從 GeoJSON inline.color 取得代表色 #FF9500
+    assert.equal(route.segments[2].lineColor, '#FF9500');
+    assert.equal(decodePolyline(route.segments[2].encodedPolyline).length, 3);
+    // 350 JPY 應自動換算為新台幣正整數並標示原幣 ¥350
+    assert.equal(route.fare.originalCurrency, 'JPY');
+    assert.equal(route.fare.originalAmount, 350);
+    assert.ok(route.fare.amountTwd > 0);
+
+    const record = buildTransitTransportRecord(route, { provider: 'navitime' });
+    assert.equal(record.provider, 'navitime');
+    assert.equal(getTransportDisplayInfo(record).badge, '日本分段');
+
+    // 4. 匯率摘要端點與前端同步換算工具
+    const ratesRes = await handleRatesRequest();
+    assert.equal(ratesRes.statusCode, 200);
+    assert.equal(ratesRes.body.base, 'TWD');
+    assert.ok(ratesRes.body.twdPerUnit.JPY > 0);
+
+    const manualJpy = convertToTwdSync(1000, 'JPY', { JPY: 0.21 });
+    assert.equal(manualJpy.amountTwd, 210);
+    assert.equal(manualJpy.originalCurrency, 'JPY');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+
 

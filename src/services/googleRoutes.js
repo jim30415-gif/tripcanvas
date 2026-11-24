@@ -24,18 +24,19 @@ export async function getGoogleRoutesStatus(forceRefresh = false) {
       });
       clearTimeout(timer);
       if (!res.ok) {
-        cachedStatus = { configured: false, reachable: false };
+        cachedStatus = { configured: false, navitimeConfigured: false, reachable: false };
         return cachedStatus;
       }
       const data = await res.json();
       cachedStatus = {
         configured: Boolean(data?.configured),
+        navitimeConfigured: Boolean(data?.navitimeConfigured),
         reachable: true,
         provider: data?.provider || 'google_routes_v2',
       };
       return cachedStatus;
     } catch {
-      cachedStatus = { configured: false, reachable: false };
+      cachedStatus = { configured: false, navitimeConfigured: false, reachable: false };
       return cachedStatus;
     } finally {
       statusPromise = null;
@@ -76,7 +77,11 @@ export async function queryGoogleRoutesProxy({
     const data = await res.json().catch(() => ({}));
 
     if (res.status === 503 || data?.status === 'api_unconfigured') {
-      cachedStatus = { configured: false, reachable: true };
+      cachedStatus = {
+        configured: false,
+        navitimeConfigured: Boolean(cachedStatus?.navitimeConfigured),
+        reachable: true,
+      };
       return {
         status: 'api_unconfigured',
         error: data?.error || 'API_KEY_NOT_CONFIGURED',
@@ -87,12 +92,28 @@ export async function queryGoogleRoutesProxy({
     if (!res.ok) {
       return {
         status: data?.status || 'network_error',
+        provider: data?.provider,
+        region: data?.region,
         error: data?.error || `HTTP_${res.status}`,
         message: data?.message || '無法連線至路線代理服務',
       };
     }
 
-    cachedStatus = { configured: true, reachable: true, provider: 'google_routes_v2' };
+    if (data?.provider === 'navitime') {
+      cachedStatus = {
+        configured: Boolean(cachedStatus?.configured),
+        navitimeConfigured: true,
+        reachable: true,
+        provider: 'google_routes_v2',
+      };
+    } else if (data?.status === 'ok') {
+      cachedStatus = {
+        configured: true,
+        navitimeConfigured: Boolean(cachedStatus?.navitimeConfigured),
+        reachable: true,
+        provider: 'google_routes_v2',
+      };
+    }
     return data;
   } catch (err) {
     return {

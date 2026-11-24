@@ -131,3 +131,34 @@ export async function convertMoneyToTwd(moneyObj, localizedText = '') {
     rateSource,
   };
 }
+
+/**
+ * 提供前端手動填寫外幣支出用的即時／保底匯率表（每 1 單位外幣可換算的新台幣）
+ */
+export async function getTwdRatesSummary() {
+  const liveRates = await fetchLiveRatesFromTwd();
+  const twdPerUnit = { ...FALLBACK_TWD_PER_UNIT };
+  let source = 'fallback';
+
+  if (liveRates && typeof liveRates === 'object') {
+    source = 'live';
+    for (const code of Object.keys(FALLBACK_TWD_PER_UNIT)) {
+      if (code === 'TWD') {
+        twdPerUnit.TWD = 1;
+        continue;
+      }
+      const perTwd = Number(liveRates[code]);
+      if (Number.isFinite(perTwd) && perTwd > 0) {
+        twdPerUnit[code] = Number((1 / perTwd).toFixed(6));
+      }
+    }
+  }
+
+  return {
+    base: 'TWD',
+    source,
+    twdPerUnit,
+    updatedAt: new Date().toISOString(),
+  };
+}
+

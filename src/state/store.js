@@ -40,12 +40,24 @@ function normalizeDay(day, index) {
           image: pin?.image || null,
           notes: typeof pin?.notes === 'string' ? pin.notes : '',
           subSpots: Array.isArray(pin?.subSpots)
-            ? pin.subSpots.map((s, sIdx) => ({
-                id: s?.id || `sub_${pIdx}_${sIdx}`,
-                name: typeof s?.name === 'string' ? s.name : '',
-                cost: Math.max(0, Number(s?.cost) || 0),
-                category: normalizeCategory(s?.category),
-              }))
+            ? pin.subSpots.map((s, sIdx) => {
+                const sub = {
+                  id: s?.id || `sub_${pIdx}_${sIdx}`,
+                  name: typeof s?.name === 'string' ? s.name : '',
+                  cost: Math.max(0, Number(s?.cost) || 0),
+                  category: normalizeCategory(s?.category),
+                };
+                if (
+                  typeof s?.originalCurrency === 'string' &&
+                  s.originalCurrency &&
+                  s.originalCurrency !== 'TWD' &&
+                  Number(s?.originalAmount) > 0
+                ) {
+                  sub.originalCurrency = s.originalCurrency.toUpperCase();
+                  sub.originalAmount = Number(s.originalAmount);
+                }
+                return sub;
+              })
             : [],
           transportToNext: normalizeTransport(pin?.transportToNext),
         }))

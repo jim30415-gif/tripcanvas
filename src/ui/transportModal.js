@@ -2,7 +2,12 @@ import { TRANSPORT_MODES, TRANSIT_PREFERENCES, TRANSIT_TYPES } from '../config/c
 import { getState, saveState } from '../state/store.js';
 import { hasManualTransitDetails, hasSegmentedTransit } from '../state/selectors.js';
 import { computeSegmentRoute, buildTransitTransportRecord } from '../services/routeManager.js';
-import { buildGoogleMapsDirUrl } from '../utils/geo.js';
+import {
+  convertToTwdSync,
+  ensureFxRatesLoaded,
+  formatCurrencyAmount,
+} from '../services/currencyClient.js';
+import { buildGoogleMapsDirUrl, isJapanTrip, NAVITIME_JP_WEB_URL } from '../utils/geo.js';
 import {
   escapeHTML,
   formatDistanceMetersZh,
@@ -31,7 +36,7 @@ function toDatetimeLocalValue(isoString) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function getSelectedGoogleTransitRoute(ctx) {
+function getSelectedAutoTransitRoute(ctx) {
   if (
     !ctx ||
     ctx.selectedMode !== 'transit' ||
@@ -45,45 +50,103 @@ function getSelectedGoogleTransitRoute(ctx) {
   return ctx.transitResult.routes[idx] || null;
 }
 
+function resolveTransportInputCost() {
+  const costInput = document.getElementById('input-transport-cost');
+  const currencySel = document.getElementById('select-transport-currency');
+  const currency = currencySel?.value || 'TWD';
+  const rawStr = costInput?.value?.trim() || '';
+  const rawNum = rawStr ? Number(rawStr) : 0;
+
+  if (!Number.isFinite(rawNum) || rawNum <= 0) {
+    return {
+      costTwd: 0,
+      originalCost: 0,
+      originalCurrency: currency,
+      rateSource: 'native',
+    };
+  }
+
+  const conv = convertToTwdSync(rawNum, currency);
+  return {
+    costTwd: conv.amountTwd,
+    originalCost: rawNum,
+    originalCurrency: currency,
+    rateSource: conv.rateSource,
+  };
+}
+
 /**
- * 同步交通支出輸入欄與 Google 票價提示（包含外幣自動換算新台幣說明）
+ * 同步交通支出輸入欄、外幣手動換算新台幣預覽，與 Google / NAVITIME 自動票價提示
  */
 function renderTransportCostHint({ autoFillFare = false } = {}) {
   const ctx = editingTransportContext;
   const costInput = document.getElementById('input-transport-cost');
+  const currencySel = document.getElementById('select-transport-currency');
   const hintEl = document.getElementById('transport-fare-hint');
   if (!ctx || !costInput || !hintEl) return;
 
-  const selectedTransit = getSelectedGoogleTransitRoute(ctx);
+  const selectedTransit = getSelectedAutoTransitRoute(ctx);
   const fare = selectedTransit?.fare || null;
+  const providerLabel =
+    (selectedTransit?.provider || ctx.transitResult?.provider) === 'navitime' ? 'NAVITIME' : 'Google';
 
   if (autoFillFare && fare?.amountTwd && !ctx.userEditedCost) {
+    if (currencySel) currencySel.value = 'TWD';
     costInput.value = String(fare.amountTwd);
+  }
+
+  const currentCurrency = currencySel?.value || 'TWD';
+  const rawVal = Number(costInput.value);
+  const hasForeignInput = currentCurrency !== 'TWD' && Number.isFinite(rawVal) && rawVal > 0;
+
+  // 若使用者正在以日圓或其他外幣手動輸入金額，即時顯示新台幣換算結果
+  if (hasForeignInput) {
+    const conv = convertToTwdSync(rawVal, currentCurrency);
+    const rateTag = conv.rateSource === 'live' ? '即時匯率' : '參考匯率';
+    const fareApplyBtn =
+      ctx.selectedMode === 'transit' && fare?.amountTwd
+        ? `<button type="button" id="btn-apply-google-fare" class="px-2 py-0.5 rounded-lg bg-white border border-[#B5D0BA] text-[#3E5C45] font-bold hover:bg-[#F5FAF6] transition">改套用 ${providerLabel} 票價</button>`
+        : '';
+
+    hintEl.innerHTML = `
+      <div class="flex flex-wrap items-center justify-between gap-1.5 text-[11px] text-[#4F6F57] bg-[#EBF2EC] border border-[#C7DCCB] rounded-xl px-2.5 py-1.5">
+        <span>💱 <strong>${escapeHTML(formatCurrencyAmount(rawVal, currentCurrency))}</strong>（${escapeHTML(currentCurrency)}）≈ <strong>${formatTWD(conv.amountTwd)}</strong>（${rateTag}，儲存後計入台幣總支出）</span>
+        ${fareApplyBtn}
+      </div>
+    `;
+    document.getElementById('btn-apply-google-fare')?.addEventListener('click', () => {
+      if (currencySel) currencySel.value = 'TWD';
+      costInput.value = String(fare.amountTwd);
+      ctx.userEditedCost = false;
+      renderTransportCostHint();
+    });
+    return;
   }
 
   if (ctx.selectedMode === 'transit') {
     if (fare?.amountTwd) {
-      const currentVal = Number(costInput.value);
-      const differs = Number.isFinite(currentVal) && Math.round(currentVal) !== fare.amountTwd;
+      const currentTwd = resolveTransportInputCost().costTwd;
+      const differs = currentTwd !== fare.amountTwd;
 
       if (fare.originalCurrency && fare.originalCurrency !== 'TWD') {
         const rateTag = fare.rateSource === 'live' ? '即時匯率' : '參考匯率';
         hintEl.innerHTML = `
           <div class="flex flex-wrap items-center justify-between gap-1.5 text-[11px] text-[#4F6F57] bg-[#EBF2EC] border border-[#C7DCCB] rounded-xl px-2.5 py-1.5">
-            <span>💱 Google 票價 <strong>${escapeHTML(fare.originalText || `${fare.originalCurrency} ${fare.originalAmount}`)}</strong>（${escapeHTML(fare.originalCurrency)}）≈ <strong>${formatTWD(fare.amountTwd)}</strong>（${rateTag}自動換算）</span>
+            <span>💱 ${providerLabel} 票價 <strong>${escapeHTML(fare.originalText || `${fare.originalCurrency} ${fare.originalAmount}`)}</strong>（${escapeHTML(fare.originalCurrency)}）≈ <strong>${formatTWD(fare.amountTwd)}</strong>（${rateTag}自動換算）</span>
             ${differs ? '<button type="button" id="btn-apply-google-fare" class="px-2 py-0.5 rounded-lg bg-white border border-[#B5D0BA] text-[#3E5C45] font-bold hover:bg-[#F5FAF6] transition">套用換算票價</button>' : ''}
           </div>
         `;
       } else {
         hintEl.innerHTML = `
           <div class="flex flex-wrap items-center justify-between gap-1.5 text-[11px] text-[#4F6F57] bg-[#EBF2EC] border border-[#C7DCCB] rounded-xl px-2.5 py-1.5">
-            <span>🎫 Google 預估票價 <strong>${formatTWD(fare.amountTwd)}</strong>${differs ? '' : '（已自動帶入）'}</span>
-            ${differs ? '<button type="button" id="btn-apply-google-fare" class="px-2 py-0.5 rounded-lg bg-white border border-[#B5D0BA] text-[#3E5C45] font-bold hover:bg-[#F5FAF6] transition">套用 Google 票價</button>' : ''}
+            <span>🎫 ${providerLabel} 預估票價 <strong>${formatTWD(fare.amountTwd)}</strong>${differs ? '' : '（已自動帶入）'}</span>
+            ${differs ? `<button type="button" id="btn-apply-google-fare" class="px-2 py-0.5 rounded-lg bg-white border border-[#B5D0BA] text-[#3E5C45] font-bold hover:bg-[#F5FAF6] transition">套用 ${providerLabel} 票價</button>` : ''}
           </div>
         `;
       }
 
       document.getElementById('btn-apply-google-fare')?.addEventListener('click', () => {
+        if (currencySel) currencySel.value = 'TWD';
         costInput.value = String(fare.amountTwd);
         ctx.userEditedCost = false;
         renderTransportCostHint();
@@ -92,18 +155,18 @@ function renderTransportCostHint({ autoFillFare = false } = {}) {
     }
 
     if (selectedTransit) {
-      hintEl.innerHTML = `<div class="text-[11px] text-owl-muted">Google 未提供此段大眾運輸票價，可依實際刷卡或購票金額手動填寫。</div>`;
+      hintEl.innerHTML = `<div class="text-[11px] text-owl-muted">${providerLabel} 未提供此段票價，可直接輸入金額（支援切換日圓等外幣自動換台幣）。</div>`;
       return;
     }
 
-    hintEl.innerHTML = `<div class="text-[11px] text-owl-muted">可填寫單程票價或悠遊卡車資（將自動歸入「交通」支出分類）。</div>`;
+    hintEl.innerHTML = `<div class="text-[11px] text-owl-muted">${ctx.isJapan ? '可直接輸入日圓（¥ JPY）或台幣車資，系統將即時換算新台幣並歸入「交通」分類。' : '可填寫單程票價或悠遊卡車資（支援外幣自動換台幣，歸入「交通」分類）。'}</div>`;
     return;
   }
 
   const modeHints = {
-    car: '可填寫油資、過路費、停車費或租車分攤（選填，自動歸入「交通」分類）。',
-    scooter: '可填寫油資、停車費或租機車費用（選填，自動歸入「交通」分類）。',
-    bike: '可填寫 YouBike 或單車租借費用（選填，自動歸入「交通」分類）。',
+    car: '可填寫油資、過路費、停車費或租車分攤（支援切換外幣自動換台幣，歸入「交通」分類）。',
+    scooter: '可填寫油資、停車費或租機車費用（支援切換外幣自動換台幣，歸入「交通」分類）。',
+    bike: '可填寫 YouBike 或單車租借費用（支援切換外幣自動換台幣，歸入「交通」分類）。',
     walk: '步行一般為 0 元，若有接駁或通行費也可手動補充。',
   };
   hintEl.innerHTML = `<div class="text-[11px] text-owl-muted">${modeHints[ctx.selectedMode] || ''}</div>`;
@@ -192,13 +255,62 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
   const res = ctx.transitResult;
   if (!res || res.status === 'pending') {
     routesWrap.classList.add('hidden');
+    const loadingText = ctx.isJapan
+      ? '正在查詢日本大眾運輸分段路線與日圓票價...'
+      : '正在透過 Google Routes API 查詢實際大眾運輸分段與班次...';
     statusEl.innerHTML = `
       <div class="flex items-center gap-2 text-owl-subtext font-semibold py-2 text-xs">
         <span class="w-3.5 h-3.5 rounded-full border-2 border-owl-primary border-t-transparent animate-spin shrink-0"></span>
-        <span>正在透過 Google Routes API 查詢實際大眾運輸分段與班次...</span>
+        <span>${loadingText}</span>
       </div>
     `;
     renderTransportCostHint();
+    return;
+  }
+
+  if (res.status === 'japan_transit_requires_navitime') {
+    routesWrap.classList.add('hidden');
+    const gmapsUrl = buildGoogleMapsDirUrl(ctx.pinA, ctx.pinB, 'transit');
+    statusEl.innerHTML = `
+      <div class="rounded-xl bg-owl-card border border-owl-accentBorder/80 p-3.5 space-y-2.5 text-xs">
+        <div class="flex items-start gap-2 text-owl-text">
+          <span class="text-base leading-none shrink-0 mt-0.5">🇯🇵</span>
+          <div class="leading-relaxed">
+            <div class="font-extrabold text-owl-text">日本大眾運輸需啟用 NAVITIME 引擎</div>
+            <p class="text-[11px] text-owl-subtext mt-0.5">
+              Google 開發者 API 因日本鐵路業者授權限制，不提供日本大眾運輸路線（步行／開車／騎車皆正常）。你可直接點下方查詢日本路線並手動填寫日圓自動換台幣，或免費開啟 NAVITIME 自動抓取電車！
+            </p>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-1.5 pt-0.5">
+          <button type="button" id="btn-jp-switch-manual" class="px-3 py-1.5 rounded-lg bg-owl-primary hover:bg-owl-primaryHover text-white text-[11px] font-bold transition">
+            改用手動記錄（可填日圓換台幣）
+          </button>
+          <a href="${gmapsUrl}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-owl-darkTop hover:bg-owl-darkBottom text-owl-cream text-[11px] font-bold transition">
+            Google Maps 查車 ↗
+          </a>
+          <a href="${NAVITIME_JP_WEB_URL}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#EBF2EC] hover:bg-[#DCE9DE] border border-[#C7DCCB] text-[#3E5C45] text-[11px] font-bold transition">
+            NAVITIME 繁中 ↗
+          </a>
+        </div>
+        <details class="rounded-lg bg-owl-softBg/70 border border-owl-border/80 px-2.5 py-2 text-[11px] text-owl-subtext">
+          <summary class="font-bold text-owl-primaryDeep cursor-pointer select-none">
+            如何 2 分鐘免費啟用日本電車自動查詢？（每月 500 次硬上限不扣款）
+          </summary>
+          <ol class="list-decimal pl-4 mt-1.5 space-y-1 leading-relaxed">
+            <li>前往 RapidAPI 訂閱 <strong>NAVITIME Route(totalnavi)</strong> 的 <strong>Basic（$0／月，Hard Limit 硬上限）</strong>方案。</li>
+            <li>複製 <code class="px-1 rounded bg-white text-owl-primaryDeep font-mono">X-RapidAPI-Key</code>，到 Vercel 專案 <strong>Settings → Environment Variables</strong> 新增 <code class="px-1 rounded bg-white text-owl-primaryDeep font-mono">RAPIDAPI_NAVITIME_KEY</code> 並 Redeploy 即可自動生效！</li>
+          </ol>
+        </details>
+      </div>
+    `;
+    refreshIcons();
+    renderTransportCostHint();
+    document.getElementById('btn-jp-switch-manual')?.addEventListener('click', () => {
+      ctx.transitSubTab = 'manual';
+      renderTransitTabState();
+      document.getElementById('input-transit-line')?.focus();
+    });
     return;
   }
 
@@ -243,7 +355,7 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
       <div class="rounded-xl bg-[#EFECE7] border border-[#CFC5BA] p-3 flex items-start gap-2 text-xs text-[#5E5248]">
         <i data-lucide="alert-triangle" class="w-4 h-4 text-[#A65D57] shrink-0 mt-0.5"></i>
         <div class="leading-relaxed">
-          <div class="font-extrabold">此時段查無大眾運輸班次</div>
+          <div class="font-extrabold">${ctx.isJapan ? '查無日本鐵道／地鐵分段路線' : '此時段查無大眾運輸班次'}</div>
           <p class="text-[11px] text-[#7D6E62] mt-0.5">${escapeHTML(res.message || '請調整上方出發時間、改查 Google Maps，或切換至手動紀錄填寫。')}</p>
         </div>
       </div>
@@ -269,20 +381,24 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
     return;
   }
 
-  // 成功取得 Google 分段大眾運輸路線！
+  // 成功取得分段大眾運輸路線（全球 Google 或日本 NAVITIME）！
   const routes = res.routes;
   ctx.selectedRouteIndex = Math.min(ctx.selectedRouteIndex || 0, routes.length - 1);
   const selected = routes[ctx.selectedRouteIndex];
+  const isNavitime = (selected.provider || res.provider) === 'navitime';
 
   statusEl.innerHTML = `
-    <div class="flex items-center justify-between gap-2 text-xs">
-      <div class="flex items-center gap-1.5 text-[#4F6F57] font-bold">
-        <i data-lucide="check-circle-2" class="w-4 h-4 shrink-0"></i>
-        <span>已取得 Google 分段路線與班次</span>
+    <div class="space-y-1">
+      <div class="flex items-center justify-between gap-2 text-xs">
+        <div class="flex items-center gap-1.5 text-[#4F6F57] font-bold">
+          <i data-lucide="check-circle-2" class="w-4 h-4 shrink-0"></i>
+          <span>${isNavitime ? '已取得日本 NAVITIME 分段路線' : '已取得 Google 分段路線與班次'}</span>
+        </div>
+        <span class="text-[11px] font-extrabold text-owl-primaryDeep tabular-nums-strict">
+          總計 ${escapeHTML(formatDurationZh(selected.durationMin))}${selected.distanceKm ? ` · ${selected.distanceKm.toFixed(1)} km` : ''}
+        </span>
       </div>
-      <span class="text-[11px] font-extrabold text-owl-primaryDeep tabular-nums-strict">
-        總計 ${escapeHTML(formatDurationZh(selected.durationMin))}${selected.distanceKm ? ` · ${selected.distanceKm.toFixed(1)} km` : ''}
-      </span>
+      ${isNavitime ? '<div class="text-[10.5px] text-owl-muted">涵蓋日本 JR／新幹線／地鐵／私鐵與步行（平均車程估算）；若需搭地方公車可點下方 Google Maps 對照。</div>' : ''}
     </div>
   `;
 
@@ -525,6 +641,8 @@ function renderTransportModalControls() {
   const transitBox = document.getElementById('transit-details-box');
   const gmapsTransitBtn = document.getElementById('btn-gmaps-transit');
   const gmapsTransitAutoBtn = document.getElementById('btn-gmaps-transit-auto');
+  const navitimeAutoBtn = document.getElementById('btn-navitime-transit-auto');
+  const navitimeManualBtn = document.getElementById('btn-navitime-transit-manual');
   const gmapsLandBtn = document.getElementById('btn-gmaps-land');
 
   if (ctx.selectedMode === 'transit') {
@@ -533,6 +651,14 @@ function renderTransportModalControls() {
     const url = buildGoogleMapsDirUrl(ctx.pinA, ctx.pinB, 'transit');
     if (gmapsTransitBtn) gmapsTransitBtn.href = url;
     if (gmapsTransitAutoBtn) gmapsTransitAutoBtn.href = url;
+    if (navitimeAutoBtn) {
+      navitimeAutoBtn.href = NAVITIME_JP_WEB_URL;
+      navitimeAutoBtn.classList.toggle('hidden', !ctx.isJapan);
+    }
+    if (navitimeManualBtn) {
+      navitimeManualBtn.href = NAVITIME_JP_WEB_URL;
+      navitimeManualBtn.classList.toggle('hidden', !ctx.isJapan);
+    }
     renderTransitTabState();
     renderTransitPreferenceChips();
     renderTransitTypeChips();
@@ -561,12 +687,14 @@ export function openTransportModal(dayId, pinIndex) {
 
   const existingHasSegmented = hasSegmentedTransit(existing);
   const existingCost = Number(existing?.cost) > 0 ? Math.round(Number(existing.cost)) : '';
+  const inJapan = isJapanTrip(pinA, pinB);
 
   editingTransportContext = {
     dayId,
     pinIndex,
     pinA,
     pinB,
+    isJapan: inJapan,
     selectedMode: existing?.mode || 'car',
     selectedTransitType: existing?.mode === 'transit' ? existing.transitType || '' : '',
     transitSubTab: 'auto',
@@ -578,9 +706,10 @@ export function openTransportModal(dayId, pinIndex) {
     transitResult: existingHasSegmented
       ? {
           status: 'ok',
-          provider: 'google',
+          provider: existing.provider || 'google',
           routes: [
             {
+              provider: existing.provider || 'google',
               durationMin: existing.duration,
               distanceKm: existing.distanceKm,
               totalWalkMin: existing.totalWalkMin || 0,
@@ -604,9 +733,29 @@ export function openTransportModal(dayId, pinIndex) {
     <span class="font-bold text-owl-text truncate max-w-[140px]">${escapeHTML(pinB.name)}</span>
   `;
 
-  // 還原交通支出金額
+  // 還原交通支出金額與輸入幣別（日本路段若尚未填寫金額則預設 ¥ JPY，填寫即即時換算台幣）
   const costInput = document.getElementById('input-transport-cost');
-  costInput.value = existingCost !== '' ? String(existingCost) : '';
+  const currencySel = document.getElementById('select-transport-currency');
+  if (
+    existing?.originalCurrency &&
+    existing.originalCurrency !== 'TWD' &&
+    Number(existing?.originalCost) > 0
+  ) {
+    if (currencySel) currencySel.value = existing.originalCurrency;
+    costInput.value = String(existing.originalCost);
+  } else if (existingCost !== '') {
+    if (currencySel) currencySel.value = 'TWD';
+    costInput.value = String(existingCost);
+  } else {
+    if (currencySel) currencySel.value = inJapan ? 'JPY' : 'TWD';
+    costInput.value = '';
+  }
+
+  ensureFxRatesLoaded().then(() => {
+    if (editingTransportContext?.pinA?.id === pinA.id) {
+      renderTransportCostHint();
+    }
+  });
 
   // 還原出發時間控制項
   const timeModeSelect = document.getElementById('select-transit-time-mode');
@@ -654,8 +803,15 @@ async function saveTransportSetting() {
   const pinA = day?.pins[ctx.pinIndex];
   if (!pinA) return;
 
-  const rawCost = document.getElementById('input-transport-cost')?.value?.trim() || '';
-  const cost = rawCost ? Math.max(0, Math.round(Number(rawCost) || 0)) : 0;
+  const resolvedCost = resolveTransportInputCost();
+  const cost = resolvedCost.costTwd;
+  const foreignMeta =
+    resolvedCost.originalCurrency !== 'TWD' && resolvedCost.originalCost > 0
+      ? {
+          originalCost: resolvedCost.originalCost,
+          originalCurrency: resolvedCost.originalCurrency,
+        }
+      : {};
 
   // 1. 大眾運輸模式
   if (ctx.selectedMode === 'transit') {
@@ -669,10 +825,12 @@ async function saveTransportSetting() {
       const idx = Math.min(ctx.selectedRouteIndex || 0, ctx.transitResult.routes.length - 1);
       const chosenRoute = ctx.transitResult.routes[idx];
       pinA.transportToNext = buildTransitTransportRecord(chosenRoute, {
+        provider: chosenRoute.provider || ctx.transitResult.provider || 'google',
         departureTime: ctx.departureTime || '',
         transitPreference: ctx.transitPreference || 'DEFAULT',
         selectedRouteIndex: idx,
         cost,
+        ...foreignMeta,
       });
 
       saveState((msg) => showToast(msg, 'error'));
@@ -694,6 +852,7 @@ async function saveTransportSetting() {
       duration,
       distanceKm: null,
       cost,
+      ...foreignMeta,
       fare: null,
       encodedPolyline: '',
       segments: [],
@@ -731,6 +890,7 @@ async function saveTransportSetting() {
     duration: res.status === 'ok' ? res.durationMin : null,
     distanceKm: res.status === 'ok' ? res.distanceKm : null,
     cost,
+    ...foreignMeta,
     encodedPolyline: res.status === 'ok' ? res.encodedPolyline || '' : '',
     fallbackNote: res.status === 'ok' ? res.fallbackNote || '' : '',
     transitType: '',
@@ -762,6 +922,11 @@ export function bindTransportModalEvents({ onStateChanged }) {
   document.getElementById('input-transport-cost').addEventListener('input', () => {
     if (!editingTransportContext) return;
     editingTransportContext.userEditedCost = true;
+    renderTransportCostHint();
+  });
+
+  document.getElementById('select-transport-currency')?.addEventListener('change', () => {
+    if (!editingTransportContext) return;
     renderTransportCostHint();
   });
 

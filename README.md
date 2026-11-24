@@ -43,7 +43,8 @@ npm run dev
 
 1. 將此 GitHub 專案匯入 Vercel（框架選 **Vite**）。
 2. 在 Vercel 專案設定 **Environment Variables** 新增 `GOOGLE_MAPS_API_KEY`。
-3. 部署完成後，前端靜態資源與 Serverless 端點 [api/routes.js](api/routes.js)（對應 `/api/routes`）會自動一起上線。
+3. **（選填）啟用日本大眾運輸自動查詢**：由於 Google 開發者 API 因日本鐵路業者授權限制不提供日本大眾運輸路線，可於 RapidAPI 免費訂閱 **NAVITIME Route(totalnavi)** 的 **Basic 方案（$0／月、500 次硬上限不扣款）**，並將 `X-RapidAPI-Key` 新增至 Vercel 環境變數 `RAPIDAPI_NAVITIME_KEY` 後重新部署，即可自動抓取全日本 JR／新幹線／地鐵／私鐵分段路線與日圓票價換算。
+4. 部署完成後，前端靜態資源與 Serverless 端點 [api/routes.js](api/routes.js)（對應 `/api/routes`）會自動一起上線。
 
 ---
 

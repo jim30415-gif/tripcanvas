@@ -1,6 +1,12 @@
 import { EXPENSE_CATEGORIES } from '../config/constants.js';
 import { PRESET_ARTWORKS } from '../config/presets.js';
 import { getState, saveState } from '../state/store.js';
+import {
+  convertToTwdSync,
+  ensureFxRatesLoaded,
+  formatCurrencyAmount,
+} from '../services/currencyClient.js';
+import { isJapanCoord } from '../utils/geo.js';
 import { escapeHTML, formatTWD, refreshIcons, renderImageContent, uid } from '../utils/format.js';
 import { flyToPoint } from '../map/mapInit.js';
 import { openCustomDialog, showToast } from './dialog.js';
@@ -13,6 +19,26 @@ function buildCategoryOptionsHTML(selectedId = 'other') {
   return EXPENSE_CATEGORIES.map(
     (c) => `<option value="${c.id}" ${selectedId === c.id ? 'selected' : ''}>${c.emoji} ${c.label}</option>`
   ).join('');
+}
+
+function renderNewSubSpotFxPreview() {
+  const previewEl = document.getElementById('new-subspot-fx-preview');
+  const currencySel = document.getElementById('select-new-subspot-currency');
+  const costInp = document.getElementById('input-new-subspot-cost');
+  if (!previewEl || !currencySel || !costInp) return;
+
+  const currency = currencySel.value || 'TWD';
+  const rawVal = Number(costInp.value);
+  if (currency === 'TWD' || !Number.isFinite(rawVal) || rawVal <= 0) {
+    previewEl.classList.add('hidden');
+    previewEl.innerHTML = '';
+    return;
+  }
+
+  const conv = convertToTwdSync(rawVal, currency);
+  const rateTag = conv.rateSource === 'live' ? '即時匯率' : '參考匯率';
+  previewEl.innerHTML = `💱 <strong>${escapeHTML(formatCurrencyAmount(rawVal, currency))}</strong>（${escapeHTML(currency)}）≈ <strong>${formatTWD(conv.amountTwd)}</strong>（${rateTag}，新增後自動換算新台幣計入總支出）`;
+  previewEl.classList.remove('hidden');
 }
 
 function renderDetailImagePreview() {
@@ -73,13 +99,18 @@ function renderDetailSubSpots() {
   }
 
   listEl.innerHTML = spots
-    .map(
-      (spot, i) => `
+    .map((spot, i) => {
+      const foreignTag =
+        spot.originalCurrency && spot.originalCurrency !== 'TWD' && Number(spot.originalAmount) > 0
+          ? `<span class="px-1.5 py-0.5 rounded-md bg-[#EBF2EC] border border-[#C7DCCB] text-[10px] font-bold text-[#4F6F57] whitespace-nowrap shrink-0" title="原始外幣金額">${escapeHTML(formatCurrencyAmount(spot.originalAmount, spot.originalCurrency))}</span>`
+          : '';
+      return `
       <div class="flex flex-wrap sm:flex-nowrap items-center gap-1.5 sm:gap-2 bg-owl-card border border-owl-cardBorder rounded-xl p-2">
         <select data-sub-idx="${i}" data-field="category" title="支出分類" class="subspot-input bg-owl-softBg/70 hover:bg-owl-softBg px-2 py-1.5 rounded-lg border border-owl-border text-[11px] font-bold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/30 shrink-0">
           ${buildCategoryOptionsHTML(spot.category || 'other')}
         </select>
-        <input type="text" data-sub-idx="${i}" data-field="name" value="${escapeHTML(spot.name)}" class="subspot-input flex-1 min-w-[110px] bg-white px-2.5 py-1.5 rounded-lg border border-owl-border text-xs font-semibold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/30" />
+        <input type="text" data-sub-idx="${i}" data-field="name" value="${escapeHTML(spot.name)}" class="subspot-input flex-1 min-w-[110px] bg-white px-2.5 py-1.5 rounded-lg border border-owl-border text-xs font-semibold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
+        ${foreignTag}
         <div class="relative w-24 sm:w-28 shrink-0">
           <span class="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-owl-muted">NT$</span>
           <input type="number" min="0" step="10" data-sub-idx="${i}" data-field="cost" value="${Number(spot.cost) || 0}" class="subspot-input w-full bg-white pl-8 pr-2 py-1.5 rounded-lg border border-owl-border text-xs font-bold text-owl-primaryDeep tabular-nums-strict focus:outline-none focus:ring-2 focus:ring-owl-primary/30" />
@@ -88,8 +119,8 @@ function renderDetailSubSpots() {
           <i data-lucide="x" class="w-4 h-4"></i>
         </button>
       </div>
-    `
-    )
+    `;
+    })
     .join('');
 
   refreshIcons();
@@ -100,6 +131,8 @@ function renderDetailSubSpots() {
       const i = Number(inp.dataset.subIdx);
       if (inp.dataset.field === 'cost') {
         editingPinContext.draftSubSpots[i].cost = Math.max(0, Number(inp.value) || 0);
+        delete editingPinContext.draftSubSpots[i].originalAmount;
+        delete editingPinContext.draftSubSpots[i].originalCurrency;
         const sub = editingPinContext.draftSubSpots.reduce((sum, s) => sum + (Number(s.cost) || 0), 0);
         document.getElementById('detail-subspots-subtotal').textContent = formatTWD(sub);
       } else if (inp.dataset.field === 'category') {
@@ -122,9 +155,11 @@ function addSubSpotFromInput() {
   if (!editingPinContext) return;
   const nameInp = document.getElementById('input-new-subspot-name');
   const costInp = document.getElementById('input-new-subspot-cost');
+  const currencySel = document.getElementById('select-new-subspot-currency');
   const catSel = document.getElementById('select-new-subspot-category');
   const name = nameInp.value.trim();
-  const cost = Math.max(0, Number(costInp.value) || 0);
+  const rawCost = Math.max(0, Number(costInp.value) || 0);
+  const currency = currencySel?.value || 'TWD';
   const category = catSel?.value || 'other';
 
   if (!name) {
@@ -133,9 +168,22 @@ function addSubSpotFromInput() {
     return;
   }
 
-  editingPinContext.draftSubSpots.push({ id: uid('sub'), name, cost, category });
+  const conv = convertToTwdSync(rawCost, currency);
+  const entry = {
+    id: uid('sub'),
+    name,
+    cost: conv.amountTwd,
+    category,
+  };
+  if (currency !== 'TWD' && rawCost > 0) {
+    entry.originalAmount = rawCost;
+    entry.originalCurrency = currency;
+  }
+
+  editingPinContext.draftSubSpots.push(entry);
   nameInp.value = '';
   costInp.value = '';
+  renderNewSubSpotFxPreview();
   renderDetailSubSpots();
   nameInp.focus();
 }
@@ -202,6 +250,17 @@ export function openPinDetailModal(dayId, pinId) {
   document.getElementById('input-pin-image-url').value = pin.image?.type === 'url' ? pin.image.value : '';
   document.getElementById('input-new-subspot-name').value = '';
   document.getElementById('input-new-subspot-cost').value = '';
+  const currencySel = document.getElementById('select-new-subspot-currency');
+  if (currencySel) {
+    currencySel.value = isJapanCoord(pin) ? 'JPY' : 'TWD';
+  }
+  renderNewSubSpotFxPreview();
+
+  ensureFxRatesLoaded().then(() => {
+    if (editingPinContext?.pinId === pinId) {
+      renderNewSubSpotFxPreview();
+    }
+  });
 
   renderDetailImagePreview();
   renderPresetGallery();
@@ -268,6 +327,8 @@ export function bindPinModalEvents({ onStateChanged }) {
   });
 
   document.getElementById('btn-add-subspot').addEventListener('click', addSubSpotFromInput);
+  document.getElementById('input-new-subspot-cost').addEventListener('input', renderNewSubSpotFxPreview);
+  document.getElementById('select-new-subspot-currency')?.addEventListener('change', renderNewSubSpotFxPreview);
   document.getElementById('input-new-subspot-cost').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();

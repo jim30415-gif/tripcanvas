@@ -45,3 +45,22 @@ export function makeRouteCacheKey(mode, pinA, pinB, extra = {}) {
   }
   return base;
 }
+
+export function isJapanCoord(pt) {
+  if (!pt) return false;
+  const lat = Number(pt.lat);
+  const lng = Number(pt.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+
+  if (lat >= 30.0 && lat <= 45.65 && lng >= 129.4 && lng <= 145.9) return true;
+  if (lat >= 31.0 && lat <= 34.0 && lng >= 128.55 && lng < 129.4) return true;
+  if (lat >= 24.0 && lat < 30.0 && lng >= 122.8 && lng <= 131.5) return true;
+  return false;
+}
+
+export function isJapanTrip(pinA, pinB) {
+  return isJapanCoord(pinA) && isJapanCoord(pinB);
+}
+
+export const NAVITIME_JP_WEB_URL = 'https://japantravel.navitime.com/zh-tw/area/jp/route/';
+

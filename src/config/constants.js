@@ -126,12 +126,29 @@ export const TRANSIT_PREFERENCES = [
 /* 大眾運輸手動紀錄可選工具類型 */
 export const TRANSIT_TYPES = [
   { id: '捷運', emoji: '🚇', label: '捷運' },
+  { id: '地鐵', emoji: '🚇', label: '地鐵' },
   { id: '公車', emoji: '🚌', label: '公車' },
   { id: '台鐵', emoji: '🚆', label: '台鐵' },
   { id: '高鐵', emoji: '🚄', label: '高鐵' },
-  { id: 'JR', emoji: '🚅', label: 'JR' },
-  { id: '新幹線', emoji: '🚅', label: '新幹線' },
+  { id: 'JR', emoji: '🚆', label: 'JR' },
+  { id: '新幹線', emoji: '🚄', label: '新幹線' },
+  { id: '私鐵', emoji: '🚃', label: '私鐵' },
   { id: '飛機', emoji: '✈️', label: '飛機' },
   { id: '渡輪', emoji: '⛴️', label: '渡輪' },
   { id: '其他', emoji: '🎫', label: '其他' },
 ];
+
+/* 手動支出支援的外幣選單（會即時自動換算為新台幣 NT$ 計入總支出） */
+export const SUPPORTED_CURRENCIES = [
+  { code: 'TWD', symbol: 'NT$', label: 'NT$ 台幣', shortLabel: 'NT$' },
+  { code: 'JPY', symbol: '¥', label: '¥ 日圓', shortLabel: '¥ JPY' },
+  { code: 'KRW', symbol: '₩', label: '₩ 韓元', shortLabel: '₩ KRW' },
+  { code: 'USD', symbol: '$', label: '$ 美元', shortLabel: '$ USD' },
+  { code: 'EUR', symbol: '€', label: '€ 歐元', shortLabel: '€ EUR' },
+  { code: 'HKD', symbol: 'HK$', label: 'HK$ 港幣', shortLabel: 'HK$' },
+  { code: 'THB', symbol: '฿', label: '฿ 泰銖', shortLabel: '฿ THB' },
+  { code: 'SGD', symbol: 'S$', label: 'S$ 新幣', shortLabel: 'S$ SGD' },
+  { code: 'GBP', symbol: '£', label: '£ 英鎊', shortLabel: '£ GBP' },
+  { code: 'CNY', symbol: '¥', label: '¥ 人民幣', shortLabel: '¥ CNY' },
+];
+

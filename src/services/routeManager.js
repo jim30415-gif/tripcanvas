@@ -1,5 +1,5 @@
 import { ROUTE_CACHE_STORAGE_KEY } from '../config/constants.js';
-import { makeRouteCacheKey } from '../utils/geo.js';
+import { isJapanTrip, makeRouteCacheKey } from '../utils/geo.js';
 import { getGoogleRoutesStatus, queryGoogleRoutesProxy } from './googleRoutes.js';
 import { queryFossgisOSRM } from './osrmFallback.js';
 import { getState, saveState } from '../state/store.js';
@@ -53,7 +53,7 @@ export function getCachedRoute(mode, pinA, pinB, extra = {}) {
 /**
  * 統一的路線查詢入口：
  * - 陸路交通：Google Routes API (HIGH_QUALITY) 優先；未設定 Key 或連線異常時無縫降級至 FOSSGIS OSRM
- * - 大眾運輸：Google Routes API (TRANSIT 分段)
+ * - 大眾運輸：全球走 Google Routes API (TRANSIT 分段)，日本自動走 NAVITIME RapidAPI（含日圓票價自動換算）
  */
 export async function computeSegmentRoute({
   mode,
@@ -71,7 +71,7 @@ export async function computeSegmentRoute({
 
   const task = (async () => {
     try {
-      // A. 大眾運輸：透過 /api/routes 呼叫 Google Maps Routes API v2
+      // A. 大眾運輸：透過 /api/routes 呼叫 Google Routes API v2 或日本 NAVITIME
       if (mode === 'transit') {
         if (!forceRefresh && routeCache.has(cacheKey)) {
           return routeCache.get(cacheKey);
@@ -123,15 +123,18 @@ export async function computeSegmentRoute({
 }
 
 /**
- * 將選定的 Google 大眾運輸路線物件轉換為存於 pin.transportToNext 的標準欄位
+ * 將選定的分段大眾運輸路線物件（Google 或日本 NAVITIME）轉換為存於 pin.transportToNext 的標準欄位
  */
 export function buildTransitTransportRecord(
   routeObj,
   {
+    provider = '',
     departureTime = '',
     transitPreference = 'DEFAULT',
     selectedRouteIndex = 0,
     cost = null,
+    originalCost = null,
+    originalCurrency = '',
   } = {}
 ) {
   const transitSegs = (routeObj.segments || []).filter((s) => s.type === 'TRANSIT');
@@ -144,10 +147,10 @@ export function buildTransitTransportRecord(
         ? Math.max(0, Math.round(Number(fare.amountTwd)))
         : 0;
 
-  return {
+  const record = {
     mode: 'transit',
     status: 'ok',
-    provider: 'google',
+    provider: provider || routeObj.provider || 'google',
     duration: routeObj.durationMin,
     distanceKm: routeObj.distanceKm,
     cost: resolvedCost,
@@ -167,10 +170,17 @@ export function buildTransitTransportRecord(
     line: transitSegs.map((s) => s.displayLine).filter(Boolean).join(' → '),
     schedule: firstTransit?.headsign ? `往 ${firstTransit.headsign}` : '',
   };
+
+  if (originalCurrency && originalCurrency !== 'TWD' && Number(originalCost) > 0) {
+    record.originalCost = Number(originalCost);
+    record.originalCurrency = originalCurrency;
+  }
+
+  return record;
 }
 
 /**
- * 背景補齊所有待查詢、缺少貼路折線（舊版 JSON 匯入）或可升級為 Google 分段大眾運輸的路段
+ * 背景補齊所有待查詢、缺少貼路折線（舊版 JSON 匯入）或可升級為分段大眾運輸的路段
  */
 export async function resolvePendingSegments({ onUpdated, retryNetworkErrors = false } = {}) {
   const state = getState();
@@ -184,8 +194,10 @@ export async function resolvePendingSegments({ onUpdated, retryNetworkErrors = f
       if (!nextPin || !t) return;
 
       if (t.mode === 'transit') {
+        const inJapan = isJapanTrip(pin, nextPin);
+        const canQueryRegionTransit = inJapan ? googleStatus.navitimeConfigured : googleStatus.configured;
         const shouldAutoQueryTransit =
-          googleStatus.configured &&
+          canQueryRegionTransit &&
           (t.status === 'pending' || (t.autoUpgradeOnGoogle && t.status === 'manual'));
 
         if (shouldAutoQueryTransit) {
@@ -240,9 +252,10 @@ export async function resolvePendingSegments({ onUpdated, retryNetworkErrors = f
           if (res.status === 'ok' && Array.isArray(res.routes) && res.routes.length > 0) {
             const chosenIdx = Math.min(afterPin.transportToNext.selectedRouteIndex || 0, res.routes.length - 1);
             const chosenRoute = res.routes[chosenIdx];
-            // 若 Google 有回傳票價優先自動帶入新台幣票價，否則保留既有費用
+            // 若有回傳票價優先自動帶入新台幣票價，否則保留既有費用
             const autoCost = chosenRoute.fare?.amountTwd ?? afterPin.transportToNext.cost ?? 0;
             afterPin.transportToNext = buildTransitTransportRecord(chosenRoute, {
+              provider: chosenRoute.provider || res.provider || 'google',
               departureTime: afterPin.transportToNext.departureTime || '',
               transitPreference: afterPin.transportToNext.transitPreference || 'DEFAULT',
               selectedRouteIndex: chosenIdx,

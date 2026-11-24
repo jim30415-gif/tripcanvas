@@ -379,16 +379,32 @@
               </select>
               <input id="input-new-subspot-name" type="text" placeholder="新增小景點（例：門票、牛肉麵、伴手禮）" class="flex-1 min-w-0 px-3 py-2 rounded-xl border border-owl-border bg-white text-xs text-owl-text placeholder-owl-muted focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
             </div>
-            <div class="flex gap-2 justify-end">
-              <div class="relative flex-1 sm:flex-none sm:w-36">
-                <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-owl-muted">NT$</span>
-                <input id="input-new-subspot-cost" type="number" min="0" step="10" placeholder="支出 (NT$)" class="w-full pl-9 pr-2.5 py-2 rounded-xl border border-owl-border bg-white text-xs font-bold text-owl-text placeholder-owl-muted focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
+            <div class="flex flex-wrap sm:flex-nowrap gap-2 justify-end items-center">
+              <div class="flex flex-1 sm:flex-none rounded-xl border border-owl-border bg-white overflow-hidden focus-within:ring-2 focus-within:ring-owl-primary/35">
+                <select
+                  id="select-new-subspot-currency"
+                  title="選擇輸入幣別（外幣將自動換算新台幣）"
+                  class="bg-owl-softBg/85 hover:bg-owl-softBg px-2 py-2 border-r border-owl-border text-[11px] font-extrabold text-owl-primaryDeep focus:outline-none shrink-0"
+                >
+                  <option value="TWD">NT$</option>
+                  <option value="JPY">¥ JPY</option>
+                  <option value="KRW">₩ KRW</option>
+                  <option value="USD">$ USD</option>
+                  <option value="EUR">€ EUR</option>
+                  <option value="HKD">HK$</option>
+                  <option value="THB">฿ THB</option>
+                  <option value="SGD">S$ SGD</option>
+                  <option value="GBP">£ GBP</option>
+                  <option value="CNY">¥ CNY</option>
+                </select>
+                <input id="input-new-subspot-cost" type="number" min="0" step="any" placeholder="支出金額" class="w-full sm:w-28 px-2.5 py-2 bg-white text-xs font-bold text-owl-text placeholder-owl-muted focus:outline-none tabular-nums-strict" />
               </div>
               <button id="btn-add-subspot" type="button" class="px-3.5 py-2 rounded-xl bg-owl-primary hover:bg-owl-primaryHover text-white text-xs font-bold flex items-center gap-1 shrink-0 transition">
                 <i data-lucide="plus" class="w-3.5 h-3.5"></i>
                 新增小景點
               </button>
             </div>
+            <div id="new-subspot-fx-preview" class="hidden text-[11px] text-[#4F6F57] bg-[#EBF2EC] border border-[#C7DCCB] rounded-xl px-2.5 py-1.5 font-medium"></div>
           </div>
         </div>
       </div>
@@ -446,15 +462,30 @@
             </span>
           </div>
 
-          <div class="relative">
-            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-owl-muted">NT$</span>
+          <div class="flex rounded-xl border border-owl-border bg-white overflow-hidden focus-within:ring-2 focus-within:ring-owl-primary/35">
+            <select
+              id="select-transport-currency"
+              title="選擇輸入幣別（外幣將自動換算新台幣）"
+              class="bg-owl-softBg/85 hover:bg-owl-softBg px-2.5 py-1.5 border-r border-owl-border text-xs font-extrabold text-owl-primaryDeep focus:outline-none shrink-0"
+            >
+              <option value="TWD">NT$</option>
+              <option value="JPY">¥ JPY</option>
+              <option value="KRW">₩ KRW</option>
+              <option value="USD">$ USD</option>
+              <option value="EUR">€ EUR</option>
+              <option value="HKD">HK$</option>
+              <option value="THB">฿ THB</option>
+              <option value="SGD">S$ SGD</option>
+              <option value="GBP">£ GBP</option>
+              <option value="CNY">¥ CNY</option>
+            </select>
             <input
               id="input-transport-cost"
               type="number"
               min="0"
-              step="1"
-              placeholder="0（選填；大眾運輸有 Google 票價會自動帶入）"
-              class="w-full pl-11 pr-3 py-1.5 rounded-xl border border-owl-border bg-white text-sm font-extrabold text-owl-primaryDeep placeholder:font-normal placeholder:text-xs placeholder-owl-muted tabular-nums-strict focus:outline-none focus:ring-2 focus:ring-owl-primary/35"
+              step="any"
+              placeholder="0（選填；自動查路線有票價會直接帶入，也可切換外幣自動換台幣）"
+              class="flex-1 min-w-0 px-3 py-1.5 bg-white text-sm font-extrabold text-owl-primaryDeep placeholder:font-normal placeholder:text-xs placeholder-owl-muted tabular-nums-strict focus:outline-none"
             />
           </div>
 
@@ -489,18 +520,18 @@
           </div>
         </div>
 
-        <!-- 大眾運輸面板：支援 Google Routes API 分段查詢與手動紀錄切換 -->
+        <!-- 大眾運輸面板：支援自動分段查詢（全球 Google / 日本 NAVITIME）與手動紀錄切換 -->
         <div id="transit-details-box" class="hidden rounded-2xl border border-owl-accentBorder/60 bg-owl-selectedBg p-4 space-y-3.5">
           <div class="flex items-center gap-1 p-1 rounded-2xl bg-owl-softBg border border-owl-border/80">
             <button id="btn-transit-tab-auto" type="button" class="flex-1 py-1.5 px-2.5 rounded-xl text-xs font-extrabold bg-owl-primary text-white shadow-2xs transition">
-              Google 分段路線
+              自動分段路線
             </button>
             <button id="btn-transit-tab-manual" type="button" class="flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold text-owl-subtext hover:text-owl-text transition">
               手動填寫紀錄
             </button>
           </div>
 
-          <!-- 分頁 A：Google Routes API 自動分段路線與班次 -->
+          <!-- 分頁 A：自動分段路線與班次 -->
           <div id="transit-auto-pane" class="space-y-3">
             <div class="rounded-xl bg-owl-card border border-owl-cardBorder p-3 space-y-2.5">
               <div class="flex flex-wrap items-center gap-2">
@@ -527,7 +558,11 @@
               <div id="transit-timeline" class="pt-1"></div>
             </div>
 
-            <div class="pt-1 flex justify-end">
+            <div class="pt-1 flex flex-wrap items-center justify-end gap-x-4 gap-y-1.5">
+              <a id="btn-navitime-transit-auto" href="https://japantravel.navitime.com/zh-tw/area/jp/route/" target="_blank" rel="noopener noreferrer" class="hidden inline-flex items-center gap-1 text-xs font-bold text-[#4F6F57] hover:underline">
+                <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
+                Japan Travel by NAVITIME ↗
+              </a>
               <a id="btn-gmaps-transit-auto" href="#" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-xs font-bold text-owl-primaryDeep hover:text-owl-primary hover:underline">
                 <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
                 在 Google Maps 檢視完整時刻表 ↗
@@ -535,23 +570,35 @@
             </div>
           </div>
 
-          <!-- 分頁 B：手動填寫紀錄（保底與離線用） -->
+          <!-- 分頁 B：手動填寫紀錄（保底、日本公車或自訂轉乘用） -->
           <div id="transit-manual-pane" class="hidden space-y-3.5">
-            <a
-              id="btn-gmaps-transit"
-              href="#"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-owl-darkTop hover:bg-owl-darkBottom text-owl-cream text-xs font-bold shadow-xs transition"
-            >
-              <i data-lucide="map" class="w-4 h-4 text-owl-gold"></i>
-              <span>在 Google Maps 查詢實際路線 ↗</span>
-            </a>
+            <div class="flex flex-col sm:flex-row gap-2">
+              <a
+                id="btn-gmaps-transit"
+                href="#"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="flex-1 inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-owl-darkTop hover:bg-owl-darkBottom text-owl-cream text-xs font-bold shadow-xs transition"
+              >
+                <i data-lucide="map" class="w-4 h-4 text-owl-gold shrink-0"></i>
+                <span>在 Google Maps 查路線 ↗</span>
+              </a>
+              <a
+                id="btn-navitime-transit-manual"
+                href="https://japantravel.navitime.com/zh-tw/area/jp/route/"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="hidden sm:flex-none inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-[#4F6F57] hover:bg-[#3F5C46] text-white text-xs font-bold shadow-xs transition"
+              >
+                <i data-lucide="external-link" class="w-3.5 h-3.5 shrink-0"></i>
+                <span>NAVITIME 日本查車 ↗</span>
+              </a>
+            </div>
 
             <div class="pt-1 border-t border-owl-border/80 space-y-3">
               <div class="flex items-center justify-between">
                 <span class="text-xs font-extrabold text-owl-text">手動填寫紀錄（選填）</span>
-                <span class="text-[10px] font-medium text-owl-subtext">未連線或自訂班次時使用</span>
+                <span class="text-[10px] font-medium text-owl-subtext">支援多段轉乘、公車或自訂班次</span>
               </div>
 
               <div>
@@ -561,8 +608,8 @@
 
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
-                  <label for="input-transit-line" class="block text-[11px] font-bold text-owl-text mb-1">路線名稱或編號</label>
-                  <input id="input-transit-line" type="text" placeholder="選填，例：板南線、307 號公車" class="w-full px-3 py-2 rounded-xl border border-owl-border bg-white text-xs font-semibold text-owl-text placeholder-owl-muted focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
+                  <label for="input-transit-line" class="block text-[11px] font-bold text-owl-text mb-1">路線名稱或轉乘順序</label>
+                  <input id="input-transit-line" type="text" placeholder="例：JR山手線 → 銀座線、板南線" class="w-full px-3 py-2 rounded-xl border border-owl-border bg-white text-xs font-semibold text-owl-text placeholder-owl-muted focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
                 </div>
                 <div>
                   <label for="input-transit-duration" class="block text-[11px] font-bold text-owl-text mb-1">手動預估時間（分鐘）</label>
@@ -571,8 +618,8 @@
               </div>
 
               <div>
-                <label for="input-transit-schedule" class="block text-[11px] font-bold text-owl-text mb-1">班次或備註</label>
-                <input id="input-transit-schedule" type="text" placeholder="選填，例：09:45 班次、需於台北車站轉乘" class="w-full px-3 py-2 rounded-xl border border-owl-border bg-white text-xs font-semibold text-owl-text placeholder-owl-muted focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
+                <label for="input-transit-schedule" class="block text-[11px] font-bold text-owl-text mb-1">班次、月台或轉乘備註</label>
+                <input id="input-transit-schedule" type="text" placeholder="選填，例：09:45 班次、於東京車站轉乘丸之內線" class="w-full px-3 py-2 rounded-xl border border-owl-border bg-white text-xs font-semibold text-owl-text placeholder-owl-muted focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
               </div>
             </div>
           </div>

@@ -1,4 +1,8 @@
-import { handleComputeRoutes, handleStatusRequest } from '../server/routesHandler.js';
+import {
+  handleComputeRoutes,
+  handleRatesRequest,
+  handleStatusRequest,
+} from '../server/routesHandler.js';
 
 /**
  * Vercel Serverless Function 入口（對應 /api/routes）
@@ -9,6 +13,15 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
   if (req.method === 'GET') {
+    const wantsRates =
+      req.query?.rates === '1' ||
+      req.query?.action === 'rates' ||
+      (typeof req.url === 'string' && /[?&](rates=1|action=rates)\b/.test(req.url));
+    if (wantsRates) {
+      res.setHeader('Cache-Control', 'public, max-age=1800');
+      const result = await handleRatesRequest();
+      return res.status(result.statusCode).json(result.body);
+    }
     const result = handleStatusRequest(process.env);
     return res.status(result.statusCode).json(result.body);
   }
