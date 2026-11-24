@@ -155,7 +155,7 @@ export function renderImageContent(imgObj, sizeClass = 'w-full h-full') {
   }
   if (imgObj.value) {
     const safeSrc = escapeHTML(imgObj.value);
-    return `<img src="${safeSrc}" alt="標點圖片" class="${sizeClass} object-cover" onerror="this.onerror=null;this.src='https://placehold.co/160x160/EFE6DA/6B513A?text=No+Image';" />`;
+    return `<img src="${safeSrc}" alt="標點圖片" draggable="false" class="${sizeClass} object-cover select-none" onerror="this.onerror=null;this.src='https://placehold.co/160x160/EFE6DA/6B513A?text=No+Image';" />`;
   }
   return '';
 }

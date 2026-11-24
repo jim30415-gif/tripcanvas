@@ -2,11 +2,12 @@ import L from 'leaflet';
 import { escapeHTML, renderImageContent } from '../utils/format.js';
 import { getMap } from './mapInit.js';
 
-const LONG_PRESS_MS = 420;
+const LONG_PRESS_MOUSE_MS = 280;
+const LONG_PRESS_TOUCH_MS = 420;
 let lastPinDragEndedAt = 0;
 
 export function wasPinRecentlyDragged() {
-  return Date.now() - lastPinDragEndedAt < 420;
+  return Date.now() - lastPinDragEndedAt < 450;
 }
 
 export function renderDayPinsOnMap(overlayGroup, day, isActive, onPinClick, onPinMove) {
@@ -17,7 +18,7 @@ export function renderDayPinsOnMap(overlayGroup, day, isActive, onPinClick, onPi
     const hasImg = Boolean(pin.image);
     const markerHtml = hasImg
       ? `
-        <div class="pin-marker-wrap flex flex-col items-center cursor-pointer" style="transform: translate(-50%, -88%);">
+        <div class="pin-marker-wrap select-none flex flex-col items-center cursor-pointer" style="transform: translate(-50%, -88%);">
           <span class="pin-drag-hint hidden mb-1 px-2.5 py-0.5 rounded-full bg-[#4A382B]/95 text-[#FAF4EC] text-[11px] font-bold shadow-md whitespace-nowrap">拖曳調整位置</span>
           <div class="pin-bubble-frame relative p-1 rounded-2xl bg-[#FFFDF9] shadow-float" style="border: 3px solid ${color};">
             <div class="w-12 h-12 rounded-xl overflow-hidden bg-[#F5EFE6]">
@@ -34,7 +35,7 @@ export function renderDayPinsOnMap(overlayGroup, day, isActive, onPinClick, onPi
         </div>
       `
       : `
-        <div class="pin-marker-wrap flex flex-col items-center cursor-pointer" style="transform: translate(-50%, -88%);">
+        <div class="pin-marker-wrap select-none flex flex-col items-center cursor-pointer" style="transform: translate(-50%, -88%);">
           <span class="pin-drag-hint hidden mb-1 px-2.5 py-0.5 rounded-full bg-[#4A382B]/95 text-[#FAF4EC] text-[11px] font-bold shadow-md whitespace-nowrap">拖曳調整位置</span>
           <div class="pin-bubble-frame relative w-9 h-9 rounded-full text-white text-xs font-extrabold flex items-center justify-center shadow-float" style="background:${color}; border: 2.5px solid #FFFDF9;">
             ${idx + 1}
@@ -74,22 +75,38 @@ export function renderDayPinsOnMap(overlayGroup, day, isActive, onPinClick, onPi
 
     marker.addTo(overlayGroup);
 
-    // 綁定長按標點調整位置（桌機滑鼠與手機觸控通用，不影響一般點擊或拖曳地圖）
+    // 綁定長按標點調整位置（電腦滑鼠與手機觸控通用，不與地圖拖曳或瀏覽器圖片拖放衝突）
     const el = marker.getElement();
     if (el && map && typeof onPinMove === 'function') {
+      // 阻止瀏覽器原生圖片拖放、文字反白與右鍵選單干擾標點長按移位
       el.addEventListener('contextmenu', (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
+      });
+      el.addEventListener('dragstart', (ev) => {
+        ev.preventDefault();
+      });
+      el.addEventListener('selectstart', (ev) => {
+        ev.preventDefault();
+      });
+      // 電腦端左鍵按下標點時阻止事件冒泡至 Leaflet map.dragging，避免手微抖或長按時底層地圖被拉走並重啟圖片拖放
+      el.addEventListener('mousedown', (ev) => {
+        if (ev.button === 0) {
+          ev.stopPropagation();
+        }
       });
 
       let pressTimer = null;
       let isRepositioning = false;
       let activePointerId = null;
+      let activePointerType = 'mouse';
       let startX = 0;
       let startY = 0;
       let mapRect = null;
       let dragOffset = null;
       let movedDuringDrag = false;
+      let prevBodyUserSelect = '';
+      let prevBodyCursor = '';
 
       const blockTouchScroll = (ev) => {
         if (isRepositioning && ev.cancelable) ev.preventDefault();
@@ -102,14 +119,22 @@ export function renderDayPinsOnMap(overlayGroup, day, isActive, onPinClick, onPi
         }
       };
 
-      const finishReposition = (commit) => {
-        clearPressTimer();
+      const detachWindowListeners = () => {
         window.removeEventListener('pointermove', onPointerMove);
         window.removeEventListener('pointerup', onPointerUp);
         window.removeEventListener('pointercancel', onPointerCancel);
+        window.removeEventListener('blur', onWindowBlur);
         window.removeEventListener('touchmove', blockTouchScroll);
+      };
 
-        if (!isRepositioning) return;
+      const finishReposition = (commit) => {
+        clearPressTimer();
+        detachWindowListeners();
+
+        if (!isRepositioning) {
+          activePointerId = null;
+          return;
+        }
         isRepositioning = false;
         activePointerId = null;
         lastPinDragEndedAt = Date.now();
@@ -119,6 +144,8 @@ export function renderDayPinsOnMap(overlayGroup, day, isActive, onPinClick, onPi
         wrap?.classList.remove('pin-repositioning');
         el.querySelector('.pin-drag-hint')?.classList.add('hidden');
         el.style.touchAction = '';
+        document.body.style.userSelect = prevBodyUserSelect;
+        document.body.style.cursor = prevBodyCursor;
         marker.setZIndexOffset(baseZIndex);
         if (map.dragging && !map.dragging.enabled()) {
           map.dragging.enable();
@@ -132,15 +159,18 @@ export function renderDayPinsOnMap(overlayGroup, day, isActive, onPinClick, onPi
         }
       };
 
+      const onWindowBlur = () => {
+        finishReposition(false);
+      };
+
       const onPointerMove = (e) => {
         if (e.pointerId !== activePointerId) return;
         if (!isRepositioning) {
-          if (Math.hypot(e.clientX - startX, e.clientY - startY) > 9) {
+          const jitterLimit = activePointerType === 'mouse' ? 14 : 9;
+          if (Math.hypot(e.clientX - startX, e.clientY - startY) > jitterLimit) {
             clearPressTimer();
-            window.removeEventListener('pointermove', onPointerMove);
-            window.removeEventListener('pointerup', onPointerUp);
-            window.removeEventListener('pointercancel', onPointerCancel);
-            window.removeEventListener('touchmove', blockTouchScroll);
+            detachWindowListeners();
+            activePointerId = null;
           }
           return;
         }
@@ -164,11 +194,17 @@ export function renderDayPinsOnMap(overlayGroup, day, isActive, onPinClick, onPi
 
       el.addEventListener('pointerdown', (e) => {
         if (e.button !== 0 && e.pointerType === 'mouse') return;
+        if (e.pointerType === 'mouse') {
+          e.stopPropagation();
+        }
         activePointerId = e.pointerId;
+        activePointerType = e.pointerType || 'mouse';
         startX = e.clientX;
         startY = e.clientY;
         movedDuringDrag = false;
         suppressNextClick = false;
+
+        const holdDelay = activePointerType === 'mouse' ? LONG_PRESS_MOUSE_MS : LONG_PRESS_TOUCH_MS;
 
         clearPressTimer();
         pressTimer = setTimeout(() => {
@@ -180,22 +216,25 @@ export function renderDayPinsOnMap(overlayGroup, day, isActive, onPinClick, onPi
           const pointerPt = L.point(startX - mapRect.left, startY - mapRect.top);
           dragOffset = pinPt.subtract(pointerPt);
 
-          if (map.dragging && !map.dragging.enabled()) {
-            // already disabled
-          } else if (map.dragging) {
+          if (map.dragging && map.dragging.enabled()) {
             map.dragging.disable();
           }
+          prevBodyUserSelect = document.body.style.userSelect;
+          prevBodyCursor = document.body.style.cursor;
+          document.body.style.userSelect = 'none';
+          document.body.style.cursor = 'grabbing';
           window.addEventListener('touchmove', blockTouchScroll, { passive: false });
           el.style.touchAction = 'none';
           marker.setZIndexOffset(2400);
           const wrap = el.querySelector('.pin-marker-wrap');
           wrap?.classList.add('pin-repositioning');
           el.querySelector('.pin-drag-hint')?.classList.remove('hidden');
-        }, LONG_PRESS_MS);
+        }, holdDelay);
 
         window.addEventListener('pointermove', onPointerMove, { passive: false });
         window.addEventListener('pointerup', onPointerUp);
         window.addEventListener('pointercancel', onPointerCancel);
+        window.addEventListener('blur', onWindowBlur);
       });
     }
   });

@@ -295,7 +295,7 @@ function fitMapToVisiblePins(silentIfEmpty = false) {
   fitBoundsToPoints(pts, opts);
 }
 
-function addPinAtCoordinate(lat, lng, customName = null) {
+function addPinAtCoordinate(lat, lng, customName = null, meta = {}) {
   const state = getState();
   const activeDay = getActiveDay(state);
   if (!activeDay) return;
@@ -316,6 +316,8 @@ function addPinAtCoordinate(lat, lng, customName = null) {
     subSpots: [],
     transportToNext: null,
   };
+  if (meta?.placeId) newPin.placeId = meta.placeId;
+  if (meta?.countryCode) newPin.countryCode = meta.countryCode;
   activeDay.pins.push(newPin);
   saveState((msg) => showToast(msg, 'error'));
   renderAll();

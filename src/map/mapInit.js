@@ -115,38 +115,84 @@ export function initMap({ onMapClick, onMapRightClick }) {
 
   mountTileSourceSilently(0);
 
-  let lastTouchLongPressAt = 0;
+  let touchTimer = null;
+  let isTouchActive = false;
+  let lastTouchActivityAt = 0;
+  let touchGestureConsumed = false;
+  let lastLongPressAddAt = 0;
+
+  const clearTouchTimer = () => {
+    if (touchTimer) {
+      clearTimeout(touchTimer);
+      touchTimer = null;
+    }
+  };
+
+  const emitTouchLongPressAdd = (lat, lng) => {
+    clearTouchTimer();
+    if (touchGestureConsumed) return;
+    const now = Date.now();
+    if (now - lastLongPressAddAt < 900) return;
+    touchGestureConsumed = true;
+    lastLongPressAddAt = now;
+    if (navigator.vibrate) navigator.vibrate(30);
+    if (typeof onMapRightClick === 'function') {
+      onMapRightClick(lat, lng);
+    }
+  };
 
   mapInstance.on('click', (e) => {
-    if (Date.now() - lastTouchLongPressAt < 650) return;
+    if (Date.now() - lastLongPressAddAt < 800) return;
     if (typeof onMapClick === 'function') onMapClick(e.latlng.lat, e.latlng.lng);
   });
 
   mapInstance.on('contextmenu', (e) => {
     L.DomEvent.preventDefault(e);
-    if (Date.now() - lastTouchLongPressAt < 650) return;
-    if (typeof onMapRightClick === 'function') onMapRightClick(e.latlng.lat, e.latlng.lng);
+    const orig = e.originalEvent;
+    const isTouchContextMenu =
+      isTouchActive ||
+      Date.now() - lastTouchActivityAt < 1400 ||
+      orig?.pointerType === 'touch' ||
+      orig?.sourceCapabilities?.firesTouchEvents === true;
+
+    if (isTouchContextMenu) {
+      // Android Chrome／Leaflet TapHold 可能早於或晚於 520ms 觸發 contextmenu，統一經單次去重通道避免生出兩個標點
+      emitTouchLongPressAdd(e.latlng.lat, e.latlng.lng);
+      return;
+    }
+
+    // 電腦版滑鼠右鍵：立即新增單一標點
+    clearTouchTimer();
+    if (typeof onMapRightClick === 'function') {
+      onMapRightClick(e.latlng.lat, e.latlng.lng);
+    }
   });
 
-  // 手機觸控長按地圖空處（520ms）即可新增標點（支援 iOS Safari 與 Android Chrome，不干擾標點長按移位與雙指縮放）
+  mapInstance.on('dragstart', () => {
+    clearTouchTimer();
+    if (isTouchActive) touchGestureConsumed = true;
+  });
+  mapInstance.on('zoomstart', () => {
+    clearTouchTimer();
+    if (isTouchActive) touchGestureConsumed = true;
+  });
+
+  // 手機觸控長按地圖空處（520ms）即可新增標點（支援 iOS Safari 與 Android Chrome，保證每次長按僅新增 1 點）
   const mapContainer = mapInstance.getContainer();
   if (mapContainer) {
-    let touchTimer = null;
     let startX = 0;
     let startY = 0;
-
-    const clearTouchTimer = () => {
-      if (touchTimer) {
-        clearTimeout(touchTimer);
-        touchTimer = null;
-      }
-    };
 
     mapContainer.addEventListener(
       'touchstart',
       (ev) => {
+        isTouchActive = true;
+        lastTouchActivityAt = Date.now();
+        touchGestureConsumed = false;
+
         if (!ev.touches || ev.touches.length !== 1) {
           clearTouchTimer();
+          touchGestureConsumed = true;
           return;
         }
         const target = ev.target;
@@ -154,8 +200,11 @@ export function initMap({ onMapClick, onMapRightClick }) {
           target?.closest?.('.custom-pin-icon') ||
           target?.closest?.('.route-pill-marker') ||
           target?.closest?.('.leaflet-control') ||
-          target?.closest?.('button')
+          target?.closest?.('button') ||
+          target?.closest?.('a')
         ) {
+          clearTouchTimer();
+          touchGestureConsumed = true;
           return;
         }
         const t = ev.touches[0];
@@ -164,15 +213,11 @@ export function initMap({ onMapClick, onMapRightClick }) {
         clearTouchTimer();
         touchTimer = setTimeout(() => {
           touchTimer = null;
-          lastTouchLongPressAt = Date.now();
-          if (navigator.vibrate) navigator.vibrate(30);
           const rect = mapContainer.getBoundingClientRect();
           const latlng = mapInstance.containerPointToLatLng(
             L.point(startX - rect.left, startY - rect.top)
           );
-          if (typeof onMapRightClick === 'function') {
-            onMapRightClick(latlng.lat, latlng.lng);
-          }
+          emitTouchLongPressAdd(latlng.lat, latlng.lng);
         }, 520);
       },
       { passive: true }
@@ -181,20 +226,30 @@ export function initMap({ onMapClick, onMapRightClick }) {
     mapContainer.addEventListener(
       'touchmove',
       (ev) => {
-        if (!touchTimer || !ev.touches || ev.touches.length !== 1) {
+        lastTouchActivityAt = Date.now();
+        if (!ev.touches || ev.touches.length !== 1) {
           clearTouchTimer();
+          touchGestureConsumed = true;
           return;
         }
         const t = ev.touches[0];
         if (Math.hypot(t.clientX - startX, t.clientY - startY) > 9) {
           clearTouchTimer();
+          touchGestureConsumed = true;
         }
       },
       { passive: true }
     );
 
-    mapContainer.addEventListener('touchend', clearTouchTimer, { passive: true });
-    mapContainer.addEventListener('touchcancel', clearTouchTimer, { passive: true });
+    const onTouchFinish = (ev) => {
+      lastTouchActivityAt = Date.now();
+      clearTouchTimer();
+      if (!ev.touches || ev.touches.length === 0) {
+        isTouchActive = false;
+      }
+    };
+    mapContainer.addEventListener('touchend', onTouchFinish, { passive: true });
+    mapContainer.addEventListener('touchcancel', onTouchFinish, { passive: true });
   }
 
   mapInstance.invalidateSize();

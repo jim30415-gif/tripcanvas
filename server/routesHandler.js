@@ -906,3 +906,95 @@ export async function handleReverseGeocode(lat, lng, env = process.env) {
   return { statusCode: 200, body: { status: 'not_found', name: null } };
 }
 
+/**
+ * 透過 Google Places API (New) 執行即時關鍵字地點搜尋（原生支援繁中↔日文漢字通配與國家／座標加權）
+ */
+export async function handleSearchPlaces(params = {}, env = process.env) {
+  const query = String(params?.q || '').trim();
+  if (!query) {
+    return { statusCode: 200, body: { status: 'ok', results: [] } };
+  }
+
+  const apiKey = (env?.GOOGLE_MAPS_API_KEY || '').trim();
+  if (!apiKey) {
+    return { statusCode: 200, body: { status: 'unconfigured', results: [] } };
+  }
+
+  const lat = Number(params?.lat);
+  const lng = Number(params?.lng);
+  const regionCode = String(params?.country || '')
+    .trim()
+    .toUpperCase()
+    .slice(0, 2);
+
+  const payload = {
+    textQuery: query,
+    languageCode: 'zh-TW',
+    maxResultCount: 8,
+  };
+  if (/^[A-Z]{2}$/.test(regionCode)) {
+    payload.regionCode = regionCode;
+  }
+  if (Number.isFinite(lat) && Number.isFinite(lng) && isValidCoord({ lat, lng })) {
+    payload.locationBias = {
+      circle: {
+        center: { latitude: lat, longitude: lng },
+        radius: 50000.0,
+      },
+    };
+  }
+
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 3800);
+    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask':
+          'places.id,places.displayName,places.formattedAddress,places.shortFormattedAddress,places.location,places.addressComponents,places.primaryTypeDisplayName',
+      },
+      body: JSON.stringify(payload),
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+
+    if (!res.ok) {
+      return { statusCode: 200, body: { status: 'unconfigured', results: [] } };
+    }
+
+    const data = await res.json();
+    const places = Array.isArray(data?.places) ? data.places : [];
+    const results = places
+      .map((p) => {
+        const pLat = p?.location?.latitude;
+        const pLng = p?.location?.longitude;
+        const name = p?.displayName?.text?.trim() || '';
+        if (!name || pLat == null || pLng == null) return null;
+
+        const countryComp = (p.addressComponents || []).find((c) => (c.types || []).includes('country'));
+        const countryCode = (countryComp?.shortText || '').toUpperCase();
+        const address = p?.shortFormattedAddress || p?.formattedAddress || '';
+
+        return {
+          name,
+          address,
+          display_name: address ? `${name}, ${address}` : name,
+          lat: Number(pLat),
+          lon: Number(pLng),
+          countryCode,
+          placeId: p.id || '',
+          categoryLabel: p?.primaryTypeDisplayName?.text || '',
+          source: 'google',
+        };
+      })
+      .filter(Boolean);
+
+    return { statusCode: 200, body: { status: 'ok', results } };
+  } catch {
+    return { statusCode: 200, body: { status: 'error', results: [] } };
+  }
+}
+
+

@@ -3,6 +3,7 @@ import {
   handleComputeRoutes,
   handleRatesRequest,
   handleReverseGeocode,
+  handleSearchPlaces,
   handleStatusRequest,
 } from './server/routesHandler.js';
 import {
@@ -132,6 +133,21 @@ function createRoutesApiPlugin(env) {
       res.setHeader('Cache-Control', 'no-store');
 
       if (req.method === 'GET') {
+        const wantsSearch = /[?&](search=1|action=search)\b/.test(fullUrl);
+        if (wantsSearch) {
+          const result = await handleSearchPlaces(
+            {
+              q: parsedUrl.searchParams.get('q') || '',
+              lat: parsedUrl.searchParams.get('lat'),
+              lng: parsedUrl.searchParams.get('lng'),
+              country: parsedUrl.searchParams.get('country') || '',
+            },
+            env
+          );
+          res.statusCode = result.statusCode;
+          res.end(JSON.stringify(result.body));
+          return;
+        }
         const wantsReverse = /[?&](reverse=1|action=reverse)\b/.test(fullUrl);
         if (wantsReverse) {
           const lat = parsedUrl.searchParams.get('lat');

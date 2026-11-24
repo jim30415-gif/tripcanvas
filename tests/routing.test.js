@@ -995,6 +995,95 @@ test('單景點 Google Maps 跳轉連結與「標點優先、次順位路名」�
   );
 });
 
+test('跨語系地名轉換（繁中↔日文新字體↔簡中，如金澤通金沢）與計畫國家優先排序', async () => {
+  const {
+    toJapaneseShinjitai,
+    toTraditionalChinese,
+    canonicalizePlaceName,
+    buildSearchQueryVariants,
+  } = await import('../src/utils/cjkNormalize.js');
+  const { inferCountryCodeFromCoord, inferTripCountryProfile } = await import('../src/utils/geo.js');
+  const { rankAndDeduplicateSearchResults } = await import('../src/services/geocoder.js');
+
+  // 1. 繁中／簡中 ↔ 日文新字體互通
+  assert.equal(toJapaneseShinjitai('金澤'), '金沢');
+  assert.equal(toJapaneseShinjitai('金澤車站'), '金沢駅');
+  assert.equal(toJapaneseShinjitai('金泽'), '金沢');
+  assert.equal(toJapaneseShinjitai('淺草寺'), '浅草寺');
+  assert.equal(toJapaneseShinjitai('輕井澤'), '軽井沢');
+  assert.equal(toJapaneseShinjitai('廣島'), '広島');
+  assert.equal(toJapaneseShinjitai('澀谷'), '渋谷');
+  assert.equal(toJapaneseShinjitai('沖繩'), '沖縄');
+  assert.equal(toJapaneseShinjitai('橫濱'), '横浜');
+  assert.equal(toTraditionalChinese('金沢駅'), '金澤車站');
+
+  assert.equal(canonicalizePlaceName('金澤車站'), canonicalizePlaceName('金沢駅'));
+  assert.equal(canonicalizePlaceName('金澤車站'), canonicalizePlaceName('金泽车站'));
+  assert.equal(canonicalizePlaceName('台北車站'), canonicalizePlaceName('臺北車站'));
+
+  const jpVariants = buildSearchQueryVariants('金澤', ['JP']);
+  assert.equal(jpVariants.primary, '金沢');
+  assert.ok(jpVariants.variants.includes('金澤'));
+  assert.equal(jpVariants.convertedHint, '金沢');
+
+  // 2. 座標國家推斷與旅遊計畫國家分析
+  assert.equal(inferCountryCodeFromCoord(25.0478, 121.517), 'TW');
+  assert.equal(inferCountryCodeFromCoord(36.5781, 136.648), 'JP'); // 金澤
+  assert.equal(inferCountryCodeFromCoord(26.2124, 127.6809), 'JP'); // 沖繩
+  assert.equal(inferCountryCodeFromCoord(37.5665, 126.978), 'KR'); // 首爾
+  assert.equal(inferCountryCodeFromCoord(22.3193, 114.1694), 'HK'); // 香港
+
+  const jpProfile = inferTripCountryProfile({
+    activeDayId: 'd1',
+    days: [
+      {
+        id: 'd1',
+        pins: [
+          { lat: 36.5621, lng: 136.6626 }, // 兼六園
+          { lat: 36.5717, lng: 136.6565 }, // 近江町市場
+        ],
+      },
+    ],
+  });
+  assert.deepEqual(jpProfile.countryCodes, ['JP']);
+  assert.equal(jpProfile.primaryCountry, 'JP');
+
+  // 3. 本計畫國家優先排序 ＋ 近距離去重
+  const sampleRaw = [
+    { name: '金澤食堂', lat: 25.042, lon: 121.531, countryCode: 'TW', source: 'nominatim', importance: 0.6 },
+    { name: '金泽镇', lat: 31.041, lon: 120.916, countryCode: 'CN', source: 'nominatim', importance: 0.7 },
+    { name: '金沢駅', lat: 36.57805, lon: 136.64798, countryCode: 'JP', source: 'photon', importance: 0.4 },
+    { name: '金澤車站', lat: 36.57808, lon: 136.64802, countryCode: 'JP', placeId: 'ChIJ_KanazawaSt', source: 'google', importance: 0.9 },
+    { name: '金沢21世紀美術館', lat: 36.5608, lon: 136.6582, countryCode: 'JP', source: 'nominatim', importance: 0.7 },
+  ];
+
+  // 日本計畫搜「金澤」：日本景點全部排在前段、重複的金澤車站合併且保留 placeId，台灣／中國排在後段
+  const rankedForJp = rankAndDeduplicateSearchResults(sampleRaw, {
+    query: '金澤',
+    tripCountries: ['JP'],
+    focusCenter: { lat: 36.565, lng: 136.658 },
+  });
+  assert.equal(rankedForJp.length, 4); // 重複的金沢駅／金澤車站應合併為 1 筆
+  assert.equal(rankedForJp[0].countryCode, 'JP');
+  assert.equal(rankedForJp[0].placeId, 'ChIJ_KanazawaSt');
+  assert.equal(rankedForJp[1].countryCode, 'JP');
+  assert.equal(rankedForJp[0].inTripCountry, true);
+  assert.equal(rankedForJp[1].inTripCountry, true);
+  assert.equal(rankedForJp[2].inTripCountry, false);
+  assert.equal(rankedForJp[3].inTripCountry, false);
+
+  // 台灣計畫搜「金澤」：台灣地點優先排第一，其餘日本與中國次之
+  const rankedForTw = rankAndDeduplicateSearchResults(sampleRaw, {
+    query: '金澤',
+    tripCountries: ['TW'],
+    focusCenter: { lat: 25.044, lng: 121.529 },
+  });
+  assert.equal(rankedForTw[0].countryCode, 'TW');
+  assert.equal(rankedForTw[0].inTripCountry, true);
+  assert.equal(rankedForTw[1].inTripCountry, false);
+});
+
+
 
 
 
