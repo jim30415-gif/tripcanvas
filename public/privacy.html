@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>隱私權政策 · 漫步地圖 TripCanvas</title>
+  <style>
+    :root {
+      color-scheme: light;
+    }
+    body {
+      margin: 0;
+      font-family: 'Inter', 'Noto Sans TC', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #F4ECE1;
+      color: #3A2C22;
+      line-height: 1.75;
+    }
+    .wrap {
+      max-width: 760px;
+      margin: 36px auto;
+      padding: 0 18px 48px;
+    }
+    .card {
+      background: #FFFCF7;
+      border: 1px solid #DFD2C0;
+      border-radius: 22px;
+      padding: 28px 30px;
+      box-shadow: 0 8px 24px rgba(58, 44, 34, 0.06);
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 1.5rem;
+      color: #3A2C22;
+    }
+    .subtitle {
+      margin: 0 0 22px;
+      font-size: 0.875rem;
+      color: #7A6554;
+    }
+    h2 {
+      margin: 22px 0 8px;
+      font-size: 1.05rem;
+      color: #6B4F37;
+    }
+    p, li {
+      font-size: 0.94rem;
+      color: #4A392C;
+    }
+    ul {
+      padding-left: 20px;
+      margin: 6px 0 12px;
+    }
+    code {
+      background: #EFE4D4;
+      color: #6B4F37;
+      padding: 2px 6px;
+      border-radius: 6px;
+      font-size: 0.86em;
+    }
+    .back-btn {
+      display: inline-block;
+      margin-top: 22px;
+      padding: 10px 18px;
+      border-radius: 12px;
+      background: #8D6E4F;
+      color: #FFFFFF;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 0.9rem;
+    }
+    .back-btn:hover {
+      background: #775A3E;
+    }
+    hr {
+      border: 0;
+      border-top: 1px solid #E7DCCA;
+      margin: 24px 0;
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <article class="card">
+      <h1>漫步地圖 TripCanvas 隱私權政策</h1>
+      <p class="subtitle">最後更新日期：2026 年 11 月 · 獻給熱愛獨旅和自由行的你</p>
+
+      <h2>1. 我們收集與存取哪些資料？</h2>
+      <p>漫步地圖 TripCanvas（以下簡稱「本服務」）不會設立集中式使用者資料庫。當您選擇使用「Google 雲端硬碟個人同步」功能時，本服務僅向 Google 申請以下最精簡之非機密授權範圍：</p>
+      <ul>
+        <li><code>openid</code>、<code>email</code>、<code>profile</code>：僅用於識別您的 Google 帳號，並在介面中顯示您的名稱、電子郵件與頭像，方便確認目前登入的同步帳號。</li>
+        <li><code>https://www.googleapis.com/auth/drive.file</code>：僅限於您個人 Google 雲端硬碟中建立「漫步地圖 TripCanvas」資料夾與同步檔案 <code>tripcanvas-workspace.json</code>，用以備份與跨裝置還原您的旅遊行程、支出與照片。本服務<strong>無法讀取、修改或刪除您 Google 雲端硬碟裡的其他任何檔案</strong>。</li>
+      </ul>
+
+      <h2>2. 資料儲存位置與安全性</h2>
+      <ul>
+        <li>您的旅遊計畫資料僅儲存在您自己的裝置瀏覽器（<code>localStorage</code> 與 <code>IndexedDB</code>）以及您個人授權的 Google 雲端硬碟空間中。</li>
+        <li>為維持跨重新整理與跨日自動同步，您的 OAuth 憑證會以 AES-256-GCM 加密後儲存於瀏覽器的 <code>HttpOnly</code> 安全 Cookie，不會寫入任何第三方資料庫，亦不會暴露給前端腳本。</li>
+        <li>本服務遵守 Google API 服務使用者資料政策（Google API Services User Data Policy），包含限制使用規範（Limited Use requirements），絕不將您的資料販售、轉交第三方或用於廣告與 AI 模型訓練。</li>
+      </ul>
+
+      <h2>3. 資料刪除與權限撤銷</h2>
+      <p>您完全擁有並掌控自己的旅遊行程資料：</p>
+      <ul>
+        <li>您可隨時於本服務左上角選單點選「登出」，立即清除本機登入 Cookie。</li>
+        <li>您可隨時前往 <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer">Google 帳戶第三方存取權管理</a> 撤銷「漫步地圖 TripCanvas」的授權，並直接從您的 Google 雲端硬碟刪除「漫步地圖 TripCanvas」資料夾。</li>
+      </ul>
+
+      <hr />
+
+      <h2>Privacy Policy Summary (English)</h2>
+      <p>
+        TripCanvas stores travel itineraries strictly in your browser storage and—when you opt in to Google Drive Sync—in a dedicated file created by TripCanvas inside your own Google Drive using the non-sensitive <code>drive.file</code> scope. TripCanvas does not maintain a central user database, cannot access any other files in your Google Drive, and never sells, shares, or uses your Google user data for advertising or AI training. You may disconnect at any time inside the app or revoke access via your Google Account security settings.
+      </p>
+
+      <a class="back-btn" href="/">← 返回漫步地圖 TripCanvas</a>
+    </article>
+  </main>
+</body>
+</html>
