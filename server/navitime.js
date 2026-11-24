@@ -386,6 +386,29 @@ export async function normalizeNavitimeRoute(item, origin, destination) {
     const companyName = transport.company?.name || '';
     const rawLineName = (sec.line_name || transport.name || '').trim() || '日本電車';
     const vMeta = mapNavitimeVehicle(moveType, rawLineName, companyName);
+    let displayLine = rawLineName;
+    if (vMeta.vehicleType === 'BUS') {
+      const normalizedBusRaw = rawLineName.replace(/[０-９Ａ-Ｚａ-ｚ]/g, (ch) =>
+        String.fromCharCode(ch.charCodeAt(0) - 0xfee0)
+      );
+      const explicitNum = String(transport.number || sec.bus_number || '').trim();
+      const busNumMatch =
+        normalizedBusRaw.match(
+          /^[\[\(【]?\s*((?:[都急快系統]|[A-Za-z]{1,2})?\d{1,4}[A-Za-z]?)\s*(?:系統|号|號)?\s*(?:[\]\)】]|\s|$|[\(（\[－—–~～〜])/
+        ) ||
+        normalizedBusRaw.match(
+          /(?:bus|バス|系統|路線|急行)\s*[:#：]?\s*((?:[都]|[A-Za-z]{1,2})?\d{1,4}[A-Za-z]?)(?:\s|系統|号|號|[\(\[（【]|$)/i
+        );
+      if (explicitNum) {
+        displayLine = explicitNum;
+      } else if (busNumMatch?.[1]) {
+        displayLine = busNumMatch[1];
+      } else {
+        // 真的沒有號碼時，優先保留路線名（移除尾端 [起站-迄站] 冗餘括號；若全為起迄站名則保留原樣）
+        const strippedBracket = rawLineName.replace(/\s*[\[\(（【][^\]\)）】]*[-－—–~～〜][^\]\)）】]*[\]\)）】]\s*$/, '').trim();
+        displayLine = strippedBracket || rawLineName;
+      }
+    }
     const lineColor = normalizeHexColor(transport.color);
     const firstLink = Array.isArray(transport.links) ? transport.links[0] : null;
     const headsign =
@@ -412,8 +435,8 @@ export async function normalizeNavitimeRoute(item, origin, destination) {
       vehicleLabel: vMeta.vehicleLabel,
       vehicleEmoji: vMeta.vehicleEmoji,
       lineName: rawLineName,
-      lineShortName: rawLineName,
-      displayLine: rawLineName,
+      lineShortName: displayLine,
+      displayLine,
       lineColor,
       lineTextColor: '#FFFFFF',
       headsign,

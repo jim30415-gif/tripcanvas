@@ -69,7 +69,7 @@ export const PRESET_ARTWORKS = {
     </svg>`,
   },
   museum: {
-    name: '車站館舍',
+    name: '展館',
     svg: `<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" class="w-full h-full">
       <rect width="120" height="120" fill="#ECE2D4"/>
       <polygon points="16,48 60,20 104,48" fill="#7D5C43"/>
@@ -108,6 +108,64 @@ export const PRESET_ARTWORKS = {
       <rect x="64" y="84" width="38" height="6" rx="2" fill="#8C6244"/>
       <rect x="68" y="90" width="4" height="12" fill="#5D4130"/>
       <rect x="94" y="90" width="4" height="12" fill="#5D4130"/>
+    </svg>`,
+  },
+  airport: {
+    name: '機場',
+    svg: `<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" class="w-full h-full">
+      <defs><linearGradient id="apSky" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#6B8599"/><stop offset="65%" stop-color="#C8D6DE"/><stop offset="100%" stop-color="#EFE6D8"/></linearGradient></defs>
+      <rect width="120" height="120" fill="url(#apSky)"/>
+      <ellipse cx="26" cy="28" rx="16" ry="7" fill="#FFFDF9" opacity="0.72"/>
+      <ellipse cx="95" cy="22" rx="14" ry="6" fill="#FFFDF9" opacity="0.62"/>
+      <rect x="0" y="90" width="120" height="30" fill="#6E6359"/>
+      <line x1="12" y1="105" x2="34" y2="105" stroke="#FAF4EC" stroke-width="3.5" stroke-linecap="round"/>
+      <line x1="49" y1="105" x2="71" y2="105" stroke="#FAF4EC" stroke-width="3.5" stroke-linecap="round"/>
+      <line x1="86" y1="105" x2="108" y2="105" stroke="#FAF4EC" stroke-width="3.5" stroke-linecap="round"/>
+      <g transform="rotate(-18 62 56)">
+        <path d="M20 58 L84 52 C96 51 102 55 102 58 C102 61 95 64 84 64 L24 66 Z" fill="#FFFDF9" stroke="#4A382B" stroke-width="2.5" stroke-linejoin="round"/>
+        <polygon points="48,55 68,28 76,28 65,54" fill="#A67C58" stroke="#4A382B" stroke-width="2" stroke-linejoin="round"/>
+        <polygon points="46,65 64,84 72,84 62,64" fill="#8D6E4F" stroke="#4A382B" stroke-width="2" stroke-linejoin="round"/>
+        <polygon points="20,58 14,44 24,44 32,57" fill="#A65D57" stroke="#4A382B" stroke-width="2" stroke-linejoin="round"/>
+        <circle cx="80" cy="57" r="2.2" fill="#5B758A"/>
+        <circle cx="71" cy="58" r="2.2" fill="#5B758A"/>
+        <circle cx="62" cy="59" r="2.2" fill="#5B758A"/>
+      </g>
+    </svg>`,
+  },
+  station: {
+    name: '車站',
+    svg: `<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" class="w-full h-full">
+      <defs><linearGradient id="stBg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#E5DAC8"/><stop offset="100%" stop-color="#F7F0E4"/></linearGradient></defs>
+      <rect width="120" height="120" fill="url(#stBg)"/>
+      <rect x="26" y="18" width="68" height="68" rx="16" fill="#5B758A" stroke="#3D2E23" stroke-width="3.5"/>
+      <rect x="44" y="23" width="32" height="7" rx="3.5" fill="#E5C59E"/>
+      <rect x="35" y="36" width="50" height="24" rx="6" fill="#FAF4EC"/>
+      <line x1="60" y1="36" x2="60" y2="60" stroke="#5B758A" stroke-width="2.5"/>
+      <circle cx="42" cy="72" r="5.5" fill="#F6D99B"/>
+      <circle cx="78" cy="72" r="5.5" fill="#F6D99B"/>
+      <rect x="52" y="70" width="16" height="4" rx="2" fill="#D8C7B4"/>
+      <line x1="38" y1="88" x2="26" y2="108" stroke="#6B513A" stroke-width="4.5" stroke-linecap="round"/>
+      <line x1="82" y1="88" x2="94" y2="108" stroke="#6B513A" stroke-width="4.5" stroke-linecap="round"/>
+      <line x1="31" y1="96" x2="89" y2="96" stroke="#8C6A4E" stroke-width="3.5" stroke-linecap="round"/>
+      <line x1="24" y1="105" x2="96" y2="105" stroke="#8C6A4E" stroke-width="3.5" stroke-linecap="round"/>
+    </svg>`,
+  },
+  homestay: {
+    name: '民宿',
+    svg: `<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" class="w-full h-full">
+      <defs><linearGradient id="hsSky" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#E7D4BC"/><stop offset="100%" stop-color="#FAF3E8"/></linearGradient></defs>
+      <rect width="120" height="120" fill="url(#hsSky)"/>
+      <circle cx="94" cy="24" r="11" fill="#F3C982" opacity="0.9"/>
+      <rect x="78" y="26" width="11" height="24" rx="2" fill="#8C5649"/>
+      <rect x="0" y="96" width="120" height="24" fill="#7D8C5E"/>
+      <rect x="26" y="56" width="68" height="44" rx="4" fill="#FFFDF9" stroke="#6B513A" stroke-width="3"/>
+      <polygon points="16,60 60,24 104,60" fill="#A65D57" stroke="#5A392C" stroke-width="3" stroke-linejoin="round"/>
+      <rect x="50" y="70" width="20" height="30" rx="10" fill="#8C6244"/>
+      <circle cx="65" cy="86" r="2" fill="#F6D99B"/>
+      <rect x="33" y="68" width="12" height="13" rx="2.5" fill="#F6D99B" stroke="#6B513A" stroke-width="2"/>
+      <rect x="75" y="68" width="12" height="13" rx="2.5" fill="#F6D99B" stroke="#6B513A" stroke-width="2"/>
+      <circle cx="16" cy="88" r="10" fill="#5D8065"/>
+      <circle cx="104" cy="90" r="9" fill="#5D8065"/>
     </svg>`,
   },
 };

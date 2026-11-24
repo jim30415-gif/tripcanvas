@@ -145,12 +145,12 @@
               </button>
             </div>
           </div>
-          <div class="mt-1.5 flex items-center justify-between text-[11px] text-owl-subtext">
-            <span class="inline-flex items-center gap-1">
-              <i data-lucide="grip-vertical" class="w-3.5 h-3.5 text-owl-muted"></i>
-              長按卡片或拖曳手把調整順序
+          <div class="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-owl-subtext">
+            <span class="inline-flex items-center gap-1 min-w-0">
+              <i data-lucide="grip-vertical" class="w-3.5 h-3.5 text-owl-muted shrink-0"></i>
+              <span class="truncate">長按卡片或拖曳手把調整順序</span>
             </span>
-            <span class="inline-flex items-center gap-1 font-extrabold text-owl-primaryDeep tabular-nums-strict">
+            <span class="inline-flex items-center gap-1 font-extrabold text-owl-primaryDeep tabular-nums-strict whitespace-nowrap shrink-0">
               <span class="text-[10px] font-semibold text-owl-muted">支出</span>
               <span id="left-day-expense">NT$ 0</span>
             </span>
@@ -248,16 +248,16 @@
     </main>
 
     <!-- ==================== 手機版浮動互動控制列（< lg 顯示；電腦與橫向平板隱藏） ==================== -->
-    <!-- 右邊圓球往上彈出的正方形天數方塊列（僅標示第幾天，點擊後再開啟該天詳細設定） -->
+    <!-- 右邊圓球往上彈出的正方形天數方塊列（點擊某天直接跳轉、旁邊彈出眼睛與齒輪小圓、左側同步顯示變窄行程表） -->
     <div
       id="mobile-days-popup"
-      class="hidden lg:hidden fixed right-3.5 bottom-[calc(76px+env(safe-area-inset-bottom))] z-[1560] flex flex-col items-center gap-2 max-h-[56dvh] overflow-y-auto custom-scroll py-1 px-0.5"
+      class="hidden lg:hidden fixed right-2.5 bottom-[calc(76px+env(safe-area-inset-bottom))] z-[1560] flex flex-col items-end gap-2 max-h-[58dvh] overflow-y-auto custom-scroll py-1 px-0.5"
     ></div>
 
-    <!-- 點擊日期正方形後展開的「單日詳細設定」半透明卡片 -->
+    <!-- 點擊齒輪小圓圖標後展開的「單日詳細設定」半透明卡片（更名、刪除、當日支出預算分類查看） -->
     <div
       id="mobile-day-detail-sheet"
-      class="hidden lg:hidden fixed left-3 right-[78px] bottom-[calc(76px+env(safe-area-inset-bottom))] max-w-[300px] ml-auto z-[1570] rounded-3xl bg-owl-panel/90 backdrop-blur-md border border-owl-border shadow-2xl p-3.5 mobile-sheet-animate"
+      class="hidden lg:hidden fixed left-3 right-3 bottom-[calc(76px+env(safe-area-inset-bottom))] max-w-[332px] mx-auto z-[1585] rounded-3xl bg-owl-panel/95 backdrop-blur-md border border-owl-border shadow-2xl p-3.5 mobile-sheet-animate"
     ></div>
 
     <!-- 點擊中間總支出圓弧長條後展開的「開銷比例明細」半透明深咖卡片 -->
@@ -399,8 +399,8 @@
           </div>
 
           <div>
-            <div class="text-[11px] font-semibold text-owl-subtext mb-2">或快速套用 8 款內建旅遊主題插畫：</div>
-            <div id="preset-gallery" class="grid grid-cols-4 sm:grid-cols-8 gap-2"></div>
+            <div class="text-[11px] font-semibold text-owl-subtext mb-2">或快速套用 11 款內建旅遊主題插畫：</div>
+            <div id="preset-gallery" class="grid grid-cols-4 sm:grid-cols-6 gap-2"></div>
           </div>
         </div>
 
@@ -413,7 +413,7 @@
           <textarea id="detail-pin-notes" rows="3" placeholder="記錄開放時間、預約代號、拍照角度或美食推薦..." class="w-full px-3.5 py-2.5 rounded-xl border border-owl-border bg-white text-xs sm:text-sm text-owl-text leading-relaxed focus:outline-none focus:ring-2 focus:ring-owl-primary/35 focus:border-owl-accentBorder resize-y"></textarea>
         </div>
 
-        <!-- 小景點與支出清單（含支出分類選擇） -->
+        <!-- 小景點與支出清單（含支出分類與多幣別自動換算） -->
         <div class="rounded-2xl border border-owl-cardBorder bg-owl-panel p-4 space-y-3">
           <div class="flex items-center justify-between gap-2">
             <label class="text-xs font-bold text-owl-text flex items-center gap-1.5">
@@ -432,6 +432,7 @@
               <select id="select-new-subspot-category" title="選擇支出分類" class="px-2.5 py-2 rounded-xl border border-owl-border bg-white text-xs font-bold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35 shrink-0">
                 <option value="food">🍜 食物</option>
                 <option value="transport">🚆 交通</option>
+                <option value="lodging">🏨 住宿</option>
                 <option value="shopping">🛍️ 購物</option>
                 <option value="other" selected>✨ 其他</option>
               </select>

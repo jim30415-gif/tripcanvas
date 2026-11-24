@@ -23,7 +23,7 @@ import {
   invalidateMapSize,
   fitBoundsToPoints,
 } from './map/mapInit.js';
-import { renderDayPinsOnMap } from './map/pinRenderer.js';
+import { renderDayPinsOnMap, wasPinRecentlyDragged } from './map/pinRenderer.js';
 import { drawRouteSegmentOnMap } from './map/routeRenderer.js';
 import { renderLeftPanel } from './ui/leftPanel.js';
 import { renderRightPanel } from './ui/rightPanel.js';
@@ -68,6 +68,35 @@ function updateMapHeaderUI() {
   }
 }
 
+function movePinToCoordinate(dayId, pinId, lat, lng) {
+  const state = getState();
+  const day = state.days.find((d) => d.id === dayId);
+  if (!day) return;
+  const idx = day.pins.findIndex((p) => p.id === pinId);
+  if (idx === -1) return;
+
+  const pin = day.pins[idx];
+  pin.lat = Number(lat.toFixed(6));
+  pin.lng = Number(lng.toFixed(6));
+
+  // 將相連的自動路線標記為待重算，讓路徑自動貼合新座標（保留手動紀錄與交通支出）
+  const invalidateAutoSegment = (seg) => {
+    if (!seg || seg.status === 'manual') return;
+    seg.encodedPolyline = '';
+    seg.status = 'pending';
+    if (seg.mode === 'transit') {
+      seg.segments = [];
+    }
+  };
+  if (idx > 0) invalidateAutoSegment(day.pins[idx - 1].transportToNext);
+  if (idx < day.pins.length - 1) invalidateAutoSegment(pin.transportToNext);
+
+  saveState((msg) => showToast(msg, 'error'));
+  renderAll();
+  triggerBackgroundResolve(true);
+  showToast(`已調整「${pin.name}」地圖位置`, 'success');
+}
+
 function renderMapLayers() {
   const overlayGroup = getOverlayGroup();
   if (!overlayGroup) return;
@@ -89,18 +118,24 @@ function renderMapLayers() {
       });
     });
 
-    // 2. 繪製標點氣泡
-    renderDayPinsOnMap(overlayGroup, day, isActive, (dId, pId) => {
-      if (state.activeDayId !== dId) {
-        state.activeDayId = dId;
-        const edited = !getWorkspace().isPristineDemo;
-        saveState(null, { markEdited: edited, skipCloudSync: !edited });
-        renderLeft();
-        renderRight();
-        updateMapHeaderUI();
-      }
-      openPinDetailModal(dId, pId);
-    });
+    // 2. 繪製標點氣泡（短按開詳細設定、長按拖曳調整地圖位置）
+    renderDayPinsOnMap(
+      overlayGroup,
+      day,
+      isActive,
+      (dId, pId) => {
+        if (state.activeDayId !== dId) {
+          state.activeDayId = dId;
+          const edited = !getWorkspace().isPristineDemo;
+          saveState(null, { markEdited: edited, skipCloudSync: !edited });
+          renderLeft();
+          renderRight();
+          updateMapHeaderUI();
+        }
+        openPinDetailModal(dId, pId);
+      },
+      movePinToCoordinate
+    );
   });
 }
 
@@ -378,10 +413,12 @@ function boot() {
 
   initMap({
     onMapClick: (lat, lng) => {
+      if (wasPinRecentlyDragged()) return;
       if (!getState().addMode) return;
       addPinAtCoordinate(lat, lng);
     },
     onMapRightClick: (lat, lng) => {
+      if (wasPinRecentlyDragged()) return;
       addPinAtCoordinate(lat, lng);
     },
   });

@@ -8,6 +8,8 @@ import {
   getPolylineMidpoint,
 } from '../src/services/polyline.js';
 import {
+  extractBusRouteNumber,
+  formatLineDisplayName,
   handleComputeRoutes,
   handleStatusRequest,
   normalizeLandRoute,
@@ -772,6 +774,129 @@ test('NAVITIME 日本大眾運輸正規化與分流（含轉乘分段、官方�
     globalThis.fetch = originalFetch;
   }
 });
+
+test('公車路線顯示優先以號碼為主，無號碼時才退回名稱（Google Routes 與日本 NAVITIME）', async () => {
+  // 1. Google Routes formatLineDisplayName 與 extractBusRouteNumber
+  assert.equal(formatLineDisplayName('撫遠街－板橋', '307', 'BUS'), '307');
+  assert.equal(formatLineDisplayName('捷運淡水站－漁人碼頭', '紅26', 'BUS'), '紅26');
+  assert.equal(formatLineDisplayName('台北－桃園機場', '1819', 'INTERCITY_BUS'), '1819');
+  assert.equal(formatLineDisplayName('307 撫遠街－板橋', '', 'BUS'), '307');
+  assert.equal(formatLineDisplayName('撫遠街－板橋', '307 撫遠街－板橋', 'BUS'), '307');
+  assert.equal(formatLineDisplayName('仁愛幹線', '', 'BUS'), '仁愛幹線');
+  assert.equal(formatLineDisplayName('東湖－台北車站', '內湖幹線', 'BUS'), '內湖幹線');
+  assert.equal(formatLineDisplayName('撫遠街－板橋', '', 'BUS'), '撫遠街－板橋');
+  // 非公車（捷運）仍維持完整中文線名
+  assert.equal(formatLineDisplayName('板南線', 'BL', 'SUBWAY'), '板南線');
+  assert.equal(extractBusRouteNumber('京都市バス ２０５系統'), '205');
+  assert.equal(extractBusRouteNumber('都01(T01)'), '都01');
+
+  // 2. normalizeTransitRoute 實際整合驗證（公車 307 不會被撫遠街－板橋覆蓋）
+  const busLine = encodePolyline([
+    [25.0478, 121.517],
+    [25.0441, 121.5294],
+  ]);
+  const busParsed = normalizeTransitRoute({
+    distanceMeters: 1600,
+    duration: '420s',
+    legs: [
+      {
+        steps: [
+          {
+            travelMode: 'TRANSIT',
+            distanceMeters: 1600,
+            staticDuration: '420s',
+            polyline: { encodedPolyline: busLine },
+            transitDetails: {
+              headsign: '撫遠街',
+              stopCount: 3,
+              stopDetails: {
+                departureStop: { name: '台北車站(忠孝)' },
+                arrivalStop: { name: '華山公園' },
+              },
+              transitLine: {
+                name: '撫遠街－板橋',
+                nameShort: '307',
+                vehicle: { type: 'BUS', name: { text: '公車' } },
+              },
+            },
+          },
+        ],
+      },
+    ],
+  });
+  assert.ok(busParsed);
+  assert.equal(busParsed.segments[0].displayLine, '307');
+
+  // 3. NAVITIME 日本公車優先擷取番號，無號碼時退回名稱並移除冗餘起迄括號
+  const { normalizeNavitimeRoute } = await import('../server/navitime.js');
+  const kyotoBusItem = {
+    summary: { move: { time: 15, distance: 3200, transit_count: 1 } },
+    sections: [
+      { type: 'point', name: '京都駅前', coord: { lat: 34.9858, lon: 135.7588 } },
+      {
+        type: 'move',
+        move: 'local_bus',
+        line_name: '京都市バス ２０５系統',
+        time: 8,
+        distance: 1800,
+        transport: { company: { name: '京都市交通局' } },
+      },
+      { type: 'point', name: '四条河原町', coord: { lat: 35.0037, lon: 135.7688 } },
+      {
+        type: 'move',
+        move: 'local_bus',
+        line_name: '金沢ふらっとバス 此花ルート[金沢駅-近江町市場]',
+        time: 7,
+        distance: 1400,
+        transport: { company: { name: '西日本JRバス' } },
+      },
+      { type: 'point', name: '近江町市場', coord: { lat: 35.01, lon: 135.775 } },
+    ],
+  };
+  const navBus = await normalizeNavitimeRoute(kyotoBusItem);
+  assert.ok(navBus);
+  assert.equal(navBus.segments[0].displayLine, '205');
+  assert.equal(navBus.segments[1].displayLine, '金沢ふらっとバス 此花ルート');
+});
+
+test('新增支出分類（住宿）與 11 款內建預設圖示（含機場／車站／民宿）驗證', async () => {
+  const { EXPENSE_CATEGORIES } = await import('../src/config/constants.js');
+  const { PRESET_ARTWORKS } = await import('../src/config/presets.js');
+  const { calcExpenseBreakdown } = await import('../src/state/selectors.js');
+
+  assert.ok(EXPENSE_CATEGORIES.some((c) => c.id === 'lodging' && c.label === '住宿'));
+  assert.equal(Object.keys(PRESET_ARTWORKS).length, 11);
+  assert.equal(PRESET_ARTWORKS.airport?.name, '機場');
+  assert.equal(PRESET_ARTWORKS.station?.name, '車站');
+  assert.equal(PRESET_ARTWORKS.homestay?.name, '民宿');
+
+  const bd = calcExpenseBreakdown({
+    activeDayId: 'd1',
+    days: [
+      {
+        id: 'd1',
+        name: 'Day 1',
+        color: '#A46C49',
+        visible: true,
+        pins: [
+          {
+            id: 'p1',
+            subSpots: [
+              { id: 's1', name: '溫泉民宿一晚', cost: 3600, category: 'lodging' },
+              { id: 's2', name: '晚餐', cost: 400, category: 'food' },
+            ],
+            transportToNext: null,
+          },
+        ],
+      },
+    ],
+  });
+  assert.equal(bd.grandTotal, 4000);
+  const lodgingCat = bd.categories.find((c) => c.id === 'lodging');
+  assert.equal(lodgingCat.amount, 3600);
+  assert.equal(lodgingCat.pct, 90);
+});
+
 
 
 

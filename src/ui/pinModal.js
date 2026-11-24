@@ -1,4 +1,4 @@
-import { EXPENSE_CATEGORIES } from '../config/constants.js';
+import { EXPENSE_CATEGORIES, SUPPORTED_CURRENCIES } from '../config/constants.js';
 import { PRESET_ARTWORKS } from '../config/presets.js';
 import { getState, saveState } from '../state/store.js';
 import {
@@ -18,6 +18,16 @@ let onChangeCallback = null;
 function buildCategoryOptionsHTML(selectedId = 'other') {
   return EXPENSE_CATEGORIES.map(
     (c) => `<option value="${c.id}" ${selectedId === c.id ? 'selected' : ''}>${c.emoji} ${c.label}</option>`
+  ).join('');
+}
+
+function buildCurrencyOptionsHTML(selectedCode = 'TWD') {
+  const code = (selectedCode || 'TWD').toUpperCase();
+  return SUPPORTED_CURRENCIES.map(
+    (c) =>
+      `<option value="${c.code}" ${code === c.code ? 'selected' : ''}>${
+        c.code === 'TWD' ? 'NT$' : `${c.symbol} ${c.code}`
+      }</option>`
   ).join('');
 }
 
@@ -86,12 +96,18 @@ function renderPresetGallery() {
   });
 }
 
+function updateSubSpotsSubtotalDisplay() {
+  const spots = editingPinContext?.draftSubSpots || [];
+  const subtotal = spots.reduce((sum, s) => sum + (Number(s.cost) || 0), 0);
+  const el = document.getElementById('detail-subspots-subtotal');
+  if (el) el.textContent = formatTWD(subtotal);
+}
+
 function renderDetailSubSpots() {
   const listEl = document.getElementById('detail-subspots-list');
   const spots = editingPinContext?.draftSubSpots || [];
 
-  const subtotal = spots.reduce((sum, s) => sum + (Number(s.cost) || 0), 0);
-  document.getElementById('detail-subspots-subtotal').textContent = formatTWD(subtotal);
+  updateSubSpotsSubtotalDisplay();
 
   if (spots.length === 0) {
     listEl.innerHTML = `<div class="text-xs text-owl-muted text-center py-3 bg-owl-card rounded-xl border border-dashed border-owl-border">尚未新增小景點或支出項目</div>`;
@@ -100,24 +116,37 @@ function renderDetailSubSpots() {
 
   listEl.innerHTML = spots
     .map((spot, i) => {
-      const foreignTag =
-        spot.originalCurrency && spot.originalCurrency !== 'TWD' && Number(spot.originalAmount) > 0
-          ? `<span class="px-1.5 py-0.5 rounded-md bg-[#EBF2EC] border border-[#C7DCCB] text-[10px] font-bold text-[#4F6F57] whitespace-nowrap shrink-0" title="原始外幣金額">${escapeHTML(formatCurrencyAmount(spot.originalAmount, spot.originalCurrency))}</span>`
-          : '';
+      const activeCurrency =
+        spot.originalCurrency && spot.originalCurrency !== 'TWD'
+          ? spot.originalCurrency.toUpperCase()
+          : 'TWD';
+      const displayAmount =
+        activeCurrency !== 'TWD' && Number(spot.originalAmount) > 0
+          ? Number(spot.originalAmount)
+          : Number(spot.cost) || 0;
+      const showFxBadge = activeCurrency !== 'TWD' && displayAmount > 0;
+      const fxText = showFxBadge ? `≈ ${formatTWD(Number(spot.cost) || 0)}` : '';
+
       return `
-      <div class="flex flex-wrap sm:flex-nowrap items-center gap-1.5 sm:gap-2 bg-owl-card border border-owl-cardBorder rounded-xl p-2">
-        <select data-sub-idx="${i}" data-field="category" title="支出分類" class="subspot-input bg-owl-softBg/70 hover:bg-owl-softBg px-2 py-1.5 rounded-lg border border-owl-border text-[11px] font-bold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/30 shrink-0">
-          ${buildCategoryOptionsHTML(spot.category || 'other')}
-        </select>
-        <input type="text" data-sub-idx="${i}" data-field="name" value="${escapeHTML(spot.name)}" class="subspot-input flex-1 min-w-[110px] bg-white px-2.5 py-1.5 rounded-lg border border-owl-border text-xs font-semibold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
-        ${foreignTag}
-        <div class="relative w-24 sm:w-28 shrink-0">
-          <span class="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-owl-muted">NT$</span>
-          <input type="number" min="0" step="10" data-sub-idx="${i}" data-field="cost" value="${Number(spot.cost) || 0}" class="subspot-input w-full bg-white pl-8 pr-2 py-1.5 rounded-lg border border-owl-border text-xs font-bold text-owl-primaryDeep tabular-nums-strict focus:outline-none focus:ring-2 focus:ring-owl-primary/30" />
+      <div class="subspot-row bg-owl-card border border-owl-cardBorder rounded-xl p-2 space-y-1.5" data-row-idx="${i}">
+        <div class="flex flex-wrap sm:flex-nowrap items-center gap-1.5 sm:gap-2">
+          <select data-sub-idx="${i}" data-field="category" title="支出分類" class="subspot-input bg-owl-softBg/70 hover:bg-owl-softBg px-2 py-1.5 rounded-lg border border-owl-border text-[11px] font-bold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/30 shrink-0">
+            ${buildCategoryOptionsHTML(spot.category || 'other')}
+          </select>
+          <input type="text" data-sub-idx="${i}" data-field="name" value="${escapeHTML(spot.name)}" class="subspot-input flex-1 min-w-[110px] bg-white px-2.5 py-1.5 rounded-lg border border-owl-border text-xs font-semibold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
+          <div class="flex items-center rounded-lg border border-owl-border bg-white overflow-hidden focus-within:ring-2 focus-within:ring-owl-primary/30 shrink-0">
+            <select data-sub-idx="${i}" data-field="currency" title="選擇幣別（外幣自動換算新台幣）" class="subspot-input bg-owl-softBg/80 hover:bg-owl-softBg px-1.5 py-1.5 border-r border-owl-border text-[10.5px] font-extrabold text-owl-primaryDeep focus:outline-none shrink-0">
+              ${buildCurrencyOptionsHTML(activeCurrency)}
+            </select>
+            <input type="number" min="0" step="any" data-sub-idx="${i}" data-field="amount" value="${displayAmount}" class="subspot-input w-20 sm:w-24 bg-white px-2 py-1.5 text-xs font-bold text-owl-primaryDeep tabular-nums-strict focus:outline-none" />
+          </div>
+          <button type="button" data-del-sub-idx="${i}" class="btn-del-subspot w-7 h-7 rounded-lg text-owl-muted hover:text-[#A65D57] hover:bg-[#F9EDEC] flex items-center justify-center shrink-0 transition">
+            <i data-lucide="x" class="w-4 h-4"></i>
+          </button>
         </div>
-        <button type="button" data-del-sub-idx="${i}" class="btn-del-subspot w-7 h-7 rounded-lg text-owl-muted hover:text-[#A65D57] hover:bg-[#F9EDEC] flex items-center justify-center shrink-0 transition">
-          <i data-lucide="x" class="w-4 h-4"></i>
-        </button>
+        <div data-fx-badge-idx="${i}" class="${showFxBadge ? '' : 'hidden '}text-right text-[10.5px] font-bold text-[#4F6F57] tabular-nums-strict pr-9">
+          💱 自動換算新台幣：<span class="fx-twd-val">${escapeHTML(fxText)}</span>
+        </div>
       </div>
     `;
     })
@@ -125,17 +154,45 @@ function renderDetailSubSpots() {
 
   refreshIcons();
 
+  const recomputeRowFx = (rowIdx) => {
+    const row = listEl.querySelector(`.subspot-row[data-row-idx="${rowIdx}"]`);
+    const spot = editingPinContext?.draftSubSpots?.[rowIdx];
+    if (!row || !spot) return;
+
+    const curSel = row.querySelector('select[data-field="currency"]');
+    const amtInp = row.querySelector('input[data-field="amount"]');
+    const fxRow = row.querySelector(`[data-fx-badge-idx="${rowIdx}"]`);
+    const fxValSpan = fxRow?.querySelector('.fx-twd-val');
+
+    const currency = (curSel?.value || 'TWD').toUpperCase();
+    const rawAmt = Math.max(0, Number(amtInp?.value) || 0);
+    const conv = convertToTwdSync(rawAmt, currency);
+
+    spot.cost = conv.amountTwd;
+    if (currency !== 'TWD' && rawAmt > 0) {
+      spot.originalCurrency = currency;
+      spot.originalAmount = rawAmt;
+      if (fxRow && fxValSpan) {
+        fxValSpan.textContent = `≈ ${formatTWD(conv.amountTwd)}`;
+        fxRow.classList.remove('hidden');
+      }
+    } else {
+      delete spot.originalCurrency;
+      delete spot.originalAmount;
+      if (fxRow) fxRow.classList.add('hidden');
+    }
+
+    updateSubSpotsSubtotalDisplay();
+  };
+
   listEl.querySelectorAll('.subspot-input').forEach((inp) => {
     const evt = inp.tagName === 'SELECT' ? 'change' : 'input';
     inp.addEventListener(evt, () => {
       const i = Number(inp.dataset.subIdx);
-      if (inp.dataset.field === 'cost') {
-        editingPinContext.draftSubSpots[i].cost = Math.max(0, Number(inp.value) || 0);
-        delete editingPinContext.draftSubSpots[i].originalAmount;
-        delete editingPinContext.draftSubSpots[i].originalCurrency;
-        const sub = editingPinContext.draftSubSpots.reduce((sum, s) => sum + (Number(s.cost) || 0), 0);
-        document.getElementById('detail-subspots-subtotal').textContent = formatTWD(sub);
-      } else if (inp.dataset.field === 'category') {
+      const field = inp.dataset.field;
+      if (field === 'amount' || field === 'currency') {
+        recomputeRowFx(i);
+      } else if (field === 'category') {
         editingPinContext.draftSubSpots[i].category = inp.value || 'other';
       } else {
         editingPinContext.draftSubSpots[i].name = inp.value;

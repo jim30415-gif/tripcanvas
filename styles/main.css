@@ -208,7 +208,7 @@ aside.right-panel {
   border-top-color: #D8C7B4 !important;
 }
 
-/* 地圖標點氣泡微動畫 */
+/* 地圖標點氣泡微動畫與長按拖曳調整位置狀態 */
 .pin-marker-wrap {
   transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
   will-change: transform;
@@ -216,6 +216,14 @@ aside.right-panel {
 .pin-marker-wrap:hover {
   transform: translate(-50%, -94%) scale(1.07) !important;
   z-index: 999 !important;
+}
+.pin-marker-wrap.pin-repositioning {
+  transform: translate(-50%, -104%) scale(1.13) !important;
+  cursor: grabbing !important;
+  z-index: 2500 !important;
+}
+.pin-marker-wrap.pin-repositioning .pin-bubble-frame {
+  box-shadow: 0 0 0 6px rgba(154, 123, 92, 0.34), 0 18px 34px -6px rgba(58, 44, 33, 0.38) !important;
 }
 
 /* 路徑中點資訊膠囊微動畫 */
@@ -349,6 +357,24 @@ aside.right-panel {
   -webkit-backdrop-filter: blur(12px);
 }
 
+.mobile-mini-orb {
+  background: rgba(251, 248, 243, 0.9);
+  border: 1px solid rgba(212, 195, 174, 0.95);
+  color: #6B513A;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.mobile-mini-orb-active {
+  background: linear-gradient(135deg, rgba(166, 134, 102, 0.95) 0%, rgba(130, 100, 71, 0.95) 100%);
+  border: 1px solid rgba(107, 81, 58, 0.85);
+  color: #FFFFFF;
+}
+.mobile-mini-orb-off {
+  background: rgba(235, 228, 218, 0.85);
+  border: 1px solid rgba(196, 184, 169, 0.95);
+  color: #8C7D6F;
+}
+
 @media (max-width: 1023px) {
   /* 手機版解除 .app-main 堆疊上下文鎖定，確保浮動視窗正確位於地圖之上、頂部搜尋列之下 */
   .app-main {
@@ -361,6 +387,35 @@ aside.right-panel {
     border-color: rgba(226, 214, 197, 0.85) !important;
     backdrop-filter: blur(10px) saturate(1.1);
     -webkit-backdrop-filter: blur(10px) saturate(1.1);
+    transition: width 0.22s cubic-bezier(0.22, 1, 0.36, 1), left 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  /* 點擊天數正方形時：行程表自動稍微變窄並往左靠，為右側天數正方形＋眼睛／齒輪小圓留出俐落空間 */
+  #panel-left.mobile-sheet-narrow {
+    left: 10px !important;
+    width: calc(100vw - 118px) !important;
+    max-width: 280px !important;
+  }
+  #panel-left.mobile-sheet-narrow #panel-left-header {
+    padding: 9px 12px !important;
+  }
+  #panel-left.mobile-sheet-narrow #itinerary-list {
+    padding: 10px !important;
+  }
+  #panel-left.mobile-sheet-narrow .pin-card {
+    padding: 9px !important;
+  }
+  #panel-left.mobile-sheet-narrow .transport-connector-row {
+    padding-left: 20px !important;
+  }
+  #panel-left.mobile-sheet-narrow .transport-connector-line {
+    left: 10px !important;
+  }
+  #panel-left.mobile-sheet-narrow .btn-open-transport {
+    padding: 6px 8px !important;
+    gap: 6px !important;
+  }
+  #panel-left.mobile-sheet-narrow .transport-status-badge {
+    display: none !important;
   }
   #panel-left-header {
     background-color: rgba(246, 238, 227, 0.64) !important;

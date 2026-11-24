@@ -58,8 +58,8 @@ function renderConnectorHTML(day, pin, idx) {
   // 分段大眾運輸專屬卡片：直覺呈現「步行 → 大眾運輸路線 → 步行」與交通支出
   if (info.kind === 'transit-segmented' && Array.isArray(info.segments)) {
     return `
-      <div class="relative flex items-center pl-9 py-2">
-        <div class="absolute top-0 bottom-0 left-[23px] w-0.5" style="background: ${lineColor};"></div>
+      <div class="transport-connector-row relative flex items-center pl-9 py-2">
+        <div class="transport-connector-line absolute top-0 bottom-0 left-[23px] w-0.5" style="background: ${lineColor};"></div>
         <button type="button" data-transport-idx="${idx}" class="btn-open-transport group relative z-10 w-full flex flex-col gap-1.5 px-3 py-2 rounded-xl border bg-owl-selectedBg/95 hover:bg-owl-softBg border-owl-cardBorder hover:border-owl-accentBorder text-left transition">
           <div class="flex flex-wrap items-center gap-1">
             ${renderSegmentedTransitChips(info.segments, day.color)}
@@ -68,7 +68,7 @@ function renderConnectorHTML(day, pin, idx) {
             <span class="text-[10.5px] font-semibold text-owl-subtext truncate tabular-nums-strict">${escapeHTML(info.leftSub)}</span>
             <div class="flex items-center gap-1 shrink-0">
               ${costPill}
-              <span class="text-[10px] font-bold shrink-0 px-1.5 py-0.5 rounded-md border bg-owl-card border-owl-cardBorder text-owl-primaryDeep">${escapeHTML(info.badge)}</span>
+              <span class="transport-status-badge text-[10px] font-bold shrink-0 px-1.5 py-0.5 rounded-md border bg-owl-card border-owl-cardBorder text-owl-primaryDeep">${escapeHTML(info.badge)}</span>
             </div>
           </div>
         </button>
@@ -83,8 +83,8 @@ function renderConnectorHTML(day, pin, idx) {
       : 'bg-owl-selectedBg/90 hover:bg-owl-softBg border-owl-cardBorder hover:border-owl-accentBorder text-owl-text';
 
   return `
-    <div class="relative flex items-center pl-9 py-2">
-      <div class="absolute top-0 bottom-0 left-[23px] w-0.5" style="background: ${lineColor};"></div>
+    <div class="transport-connector-row relative flex items-center pl-9 py-2">
+      <div class="transport-connector-line absolute top-0 bottom-0 left-[23px] w-0.5" style="background: ${lineColor};"></div>
       <button type="button" data-transport-idx="${idx}" class="btn-open-transport group relative z-10 w-full flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl border transition text-left ${cardClasses}">
         <div class="flex items-center gap-2 min-w-0">
           <span class="text-base leading-none shrink-0">${info.emoji}</span>
@@ -95,7 +95,7 @@ function renderConnectorHTML(day, pin, idx) {
         </div>
         <div class="flex items-center gap-1 shrink-0">
           ${costPill}
-          <span class="text-[10px] font-bold shrink-0 px-1.5 py-0.5 rounded-md border ${isAlert ? 'bg-white/75 border-[#CFC5BA] text-[#78685B]' : 'bg-owl-card border-owl-cardBorder text-owl-primaryDeep'}">${escapeHTML(info.badge)}</span>
+          <span class="transport-status-badge text-[10px] font-bold shrink-0 px-1.5 py-0.5 rounded-md border ${isAlert ? 'bg-white/75 border-[#CFC5BA] text-[#78685B]' : 'bg-owl-card border-owl-cardBorder text-owl-primaryDeep'}">${escapeHTML(info.badge)}</span>
         </div>
       </button>
     </div>

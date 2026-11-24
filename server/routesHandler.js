@@ -103,13 +103,79 @@ function normalizeHexColor(color) {
   return '';
 }
 
-function formatLineDisplayName(lineName, lineShortName) {
+const BUS_VEHICLE_TYPES = new Set(['BUS', 'INTERCITY_BUS', 'TROLLEYBUS']);
+
+function toHalfWidthAlnum(str = '') {
+  return String(str).replace(/[０-９Ａ-Ｚａ-ｚ]/g, (ch) =>
+    String.fromCharCode(ch.charCodeAt(0) - 0xfee0)
+  );
+}
+
+function looksLikeOriginDestName(str = '') {
+  return /[-－—–~～〜→↔]/.test(str);
+}
+
+/**
+ * 從公車路線字串擷取明確的公車號碼／代號（例：307、紅26、藍15、0東、1819、都01、205、M15）
+ * 若字串沒有號碼（如「仁愛幹線」或純起迄站名「撫遠街－板橋」），回傳空字串。
+ */
+export function extractBusRouteNumber(raw = '') {
+  const s = toHalfWidthAlnum(raw).trim();
+  if (!s) return '';
+
+  // 1. 整段本身就是簡短公車號碼（如 307、紅26、0東、1819A、都01、205系統、R26、M15、小15區）
+  if (/^(?:[紅藍綠棕橘黃小棕貓都急快]|[A-Za-z]{1,2})?\d{1,4}[A-Za-z東西南北區直副延繞支號系統]*$/.test(s)) {
+    return s.replace(/系統$/, '');
+  }
+
+  // 2. 開頭為方括號或號碼後接空白／括號／破折號（如 "[205] 京都駅-金閣寺"、"307 撫遠街-板橋"、"紅26(捷運淡水站-漁人碼頭)"）
+  const leadingMatch = s.match(
+    /^[\[\(【]?\s*((?:[紅藍綠棕橘黃小貓都]|[A-Za-z]{1,2})?\d{1,4}[A-Za-z東西南北區直副延繞支]?)\s*(?:號|系統|線)?\s*(?:[\]\)】]|\s|$|[\(（\[－—–~～〜])/
+  );
+  if (leadingMatch?.[1]) {
+    return leadingMatch[1];
+  }
+
+  // 3. 業者／關鍵字後接號碼（如 "Bus 42"、"京都市バス 205系統"、"北鉄バス 11[東部車庫-金沢駅]"、"系統205"、"公車 307"）
+  const afterKeyword = s.match(
+    /(?:bus|バス|公車|客運|系統|路線|line)\s*[:#：]?\s*((?:[紅藍綠棕橘黃小貓都]|[A-Za-z]{1,2})?\d{1,4}[A-Za-z東西南北區直副延繞支]?)(?:\s|系統|號|[\(\[（【]|$)/i
+  );
+  if (afterKeyword?.[1]) {
+    return afterKeyword[1];
+  }
+
+  return '';
+}
+
+export function formatLineDisplayName(lineName, lineShortName, vehicleType = '') {
   const name = (lineName || '').trim();
   const short = (lineShortName || '').trim();
+
+  // 公車／客運一律以「號碼」為主，避免被起迄站名（如「撫遠街－板橋」）覆蓋
+  if (BUS_VEHICLE_TYPES.has(vehicleType)) {
+    const halfShort = toHalfWidthAlnum(short);
+    if (short) {
+      if (/\d/.test(halfShort)) {
+        if (looksLikeOriginDestName(short) || short.length > 10) {
+          const cleanShortNum = extractBusRouteNumber(short);
+          if (cleanShortNum) return cleanShortNum;
+        }
+        return short;
+      }
+      if (!looksLikeOriginDestName(short) && looksLikeOriginDestName(name)) return short;
+    }
+
+    const extractedFromName = extractBusRouteNumber(name);
+    if (extractedFromName) return extractedFromName;
+
+    if (short && !looksLikeOriginDestName(short)) return short;
+    return short || name || '公車';
+  }
+
   if (short && name) {
     if (name === short || name.includes(short)) return name;
     if (short.includes(name)) return short;
-    // 若簡稱僅為路線代號（如 BL、R、G），保留完整中文路線名為主
+    // 若非公車（例如捷運）且簡稱僅為路線代號（如 BL、R、G），保留完整中文路線名為主
     if (/^[A-Za-z0-9]{1,4}$/.test(short) && /[\u4e00-\u9fff]/.test(name)) {
       return name;
     }
@@ -227,7 +293,7 @@ export function normalizeTransitRoute(route) {
 
       const lineName = td.transitLine?.name || '';
       const lineShortName = td.transitLine?.nameShort || '';
-      const displayLine = formatLineDisplayName(lineName, lineShortName);
+      const displayLine = formatLineDisplayName(lineName, lineShortName, vehicleType);
       const lineColor = normalizeHexColor(td.transitLine?.color);
       const lineTextColor = normalizeHexColor(td.transitLine?.textColor) || '#FFFFFF';
 
