@@ -130,16 +130,16 @@
     <main class="app-main flex-1 flex min-h-0 overflow-hidden bg-owl-canvas">
 
       <!-- ==================== 左側欄：目前天數標點順序與交通設定（手機版改為半透明浮動非滿版視窗） ==================== -->
-      <aside id="panel-left" class="hidden lg:flex fixed left-3 bottom-[80px] z-[1550] w-[calc(100vw-24px)] max-w-[356px] max-h-[60dvh] rounded-3xl border border-owl-border/90 bg-owl-panel/80 backdrop-blur-md shadow-2xl overflow-hidden flex-col shrink-0 min-h-0 lg:static lg:inset-auto lg:z-20 lg:w-[305px] xl:w-[360px] lg:max-w-none lg:max-h-none lg:h-full lg:rounded-none lg:border-0 lg:border-r lg:border-owl-border lg:bg-owl-panel lg:backdrop-blur-none lg:shadow-none">
+      <aside id="panel-left" class="hidden lg:flex fixed left-3 bottom-[80px] z-[1550] w-[calc(100vw-24px)] max-w-[356px] max-h-[54dvh] rounded-3xl border border-owl-border/90 bg-owl-panel/60 backdrop-blur-md shadow-2xl overflow-hidden flex-col shrink-0 min-h-0 lg:static lg:inset-auto lg:z-20 lg:w-[305px] xl:w-[360px] lg:max-w-none lg:max-h-none lg:h-full lg:rounded-none lg:border-0 lg:border-r lg:border-owl-border lg:bg-owl-panel lg:backdrop-blur-none lg:shadow-none">
         <!-- 當前天數標題與支出小計 -->
-        <div class="px-4 py-3 border-b border-owl-border/80 bg-owl-selectedBg/75 shrink-0">
+        <div id="panel-left-header" class="px-4 py-3 border-b border-owl-border/75 bg-owl-selectedBg/75 shrink-0">
           <div class="flex items-center justify-between gap-2">
             <div class="flex items-center gap-2.5 min-w-0">
               <span id="left-day-dot" class="w-3.5 h-3.5 rounded-full shrink-0 ring-4 ring-owl-softBg"></span>
               <h2 id="left-day-title" class="text-sm font-extrabold text-owl-text truncate">Day 1</h2>
             </div>
             <div class="flex items-center gap-1.5 shrink-0">
-              <span id="left-pin-count" class="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-owl-card/90 border border-owl-cardBorder text-owl-subtext shrink-0">0 個標點</span>
+              <span id="left-pin-count" class="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-owl-card/85 border border-owl-cardBorder text-owl-subtext shrink-0">0 個標點</span>
               <button id="btn-close-mobile-itinerary" type="button" title="收合行程清單" aria-label="收合行程清單" class="lg:hidden w-7 h-7 rounded-full bg-owl-card/85 hover:bg-owl-softBg border border-owl-border text-owl-subtext flex items-center justify-center transition active:scale-95">
                 <i data-lucide="x" class="w-3.5 h-3.5"></i>
               </button>
@@ -158,7 +158,7 @@
         </div>
 
         <!-- 標點與交通連接器可捲動清單 -->
-        <div id="itinerary-list" class="flex-1 overflow-y-auto custom-scroll p-3.5 pb-4 lg:pb-6"></div>
+        <div id="itinerary-list" class="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y custom-scroll p-3.5 pb-5 lg:pb-6"></div>
       </aside>
 
       <!-- ==================== 中間主畫面：Google 地圖互動區（isolation: isolate） ==================== -->
@@ -248,9 +248,6 @@
     </main>
 
     <!-- ==================== 手機版浮動互動控制列（< lg 顯示；電腦與橫向平板隱藏） ==================== -->
-    <!-- 點擊地圖空白處收合手機版浮動視窗的透明攔截層（避免收合時誤觸地圖新增標點） -->
-    <div id="mobile-hud-backdrop" class="hidden lg:hidden fixed inset-0 z-[1490] bg-transparent"></div>
-
     <!-- 右邊圓球往上彈出的正方形天數方塊列（僅標示第幾天，點擊後再開啟該天詳細設定） -->
     <div
       id="mobile-days-popup"

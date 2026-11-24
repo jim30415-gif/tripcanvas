@@ -350,13 +350,33 @@ aside.right-panel {
 }
 
 @media (max-width: 1023px) {
-  /* 手機版行程清單採半透明暖咖毛玻璃卡片，讓底層互動地圖若隱若現 */
+  /* 手機版解除 .app-main 堆疊上下文鎖定，確保浮動視窗正確位於地圖之上、頂部搜尋列之下 */
+  .app-main {
+    z-index: auto;
+  }
+
+  /* 手機版行程清單採明顯半透明毛玻璃底，清楚透出底層地圖同時保持文字高對比 */
   #panel-left {
-    background-color: rgba(251, 248, 243, 0.84);
-    -webkit-backdrop-filter: blur(12px);
+    background-color: rgba(251, 248, 243, 0.56) !important;
+    border-color: rgba(226, 214, 197, 0.85) !important;
+    backdrop-filter: blur(10px) saturate(1.1);
+    -webkit-backdrop-filter: blur(10px) saturate(1.1);
+  }
+  #panel-left-header {
+    background-color: rgba(246, 238, 227, 0.64) !important;
   }
   #panel-left .pin-card {
-    background-color: rgba(255, 253, 249, 0.88);
+    background-color: rgba(255, 253, 249, 0.72) !important;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+  #panel-left .btn-open-transport {
+    background-color: rgba(246, 238, 227, 0.74) !important;
+  }
+  #itinerary-list {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
   }
 
   /* 手機版將 Leaflet 縮放 +/- 移至右上角縮放鈕下方，避免與右下圓球及往上彈出的日期方塊重疊 */

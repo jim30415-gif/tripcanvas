@@ -218,7 +218,7 @@ function bindItineraryInteractions(day, { onOpenPinDetail, onOpenTransport, onRe
           startDrag(e.clientY);
           return;
         }
-        if (dx > 10 || dy > 10) {
+        if (dx > 6 || dy > 6) {
           clearTimer();
           window.removeEventListener('pointermove', onPointerMove);
         }
@@ -228,8 +228,16 @@ function bindItineraryInteractions(day, { onOpenPinDetail, onOpenTransport, onRe
       }
     };
 
+    const onListScroll = () => {
+      if (!isDragging) {
+        clearTimer();
+        window.removeEventListener('pointermove', onPointerMove);
+      }
+    };
+
     const onPointerUp = (e) => {
       if (e.pointerId !== pointerId) return;
+      listEl.removeEventListener('scroll', onListScroll);
       const moved = Math.hypot(e.clientX - startX, e.clientY - startY);
       const wasDragging = isDragging;
       endDrag(true);
@@ -239,7 +247,10 @@ function bindItineraryInteractions(day, { onOpenPinDetail, onOpenTransport, onRe
       }
     };
 
-    const onPointerCancel = () => endDrag(false);
+    const onPointerCancel = () => {
+      listEl.removeEventListener('scroll', onListScroll);
+      endDrag(false);
+    };
 
     card.addEventListener('pointerdown', (e) => {
       if (e.button !== 0 && e.pointerType === 'mouse') return;
@@ -248,12 +259,14 @@ function bindItineraryInteractions(day, { onOpenPinDetail, onOpenTransport, onRe
       pointerId = e.pointerId;
 
       const isHandle = Boolean(e.target.closest('.drag-handle'));
+      const pressDelay = isHandle ? 75 : e.pointerType === 'touch' ? 420 : 250;
       longPressTimer = setTimeout(() => {
         card.classList.add('longpress-active');
         setTimeout(() => card.classList.remove('longpress-active'), 450);
         startDrag(startY);
-      }, isHandle ? 75 : 250);
+      }, pressDelay);
 
+      listEl.addEventListener('scroll', onListScroll, { passive: true });
       window.addEventListener('pointermove', onPointerMove, { passive: false });
       window.addEventListener('pointerup', onPointerUp);
       window.addEventListener('pointercancel', onPointerCancel);

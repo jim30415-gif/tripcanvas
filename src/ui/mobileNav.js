@@ -22,7 +22,6 @@ function formatPct(pct) {
 }
 
 function syncBackdropAndOrbs() {
-  const backdrop = document.getElementById('mobile-hud-backdrop');
   const leftPanel = document.getElementById('panel-left');
   const daysPopup = document.getElementById('mobile-days-popup');
   const dayDetailSheet = document.getElementById('mobile-day-detail-sheet');
@@ -35,11 +34,6 @@ function syncBackdropAndOrbs() {
   const isItineraryOpen = activeOverlay === 'itinerary';
   const isDaysOpen = activeOverlay === 'days';
   const isExpenseOpen = activeOverlay === 'expense';
-  const anyOpen = activeOverlay !== 'none';
-
-  if (backdrop) {
-    backdrop.classList.toggle('hidden', !anyOpen);
-  }
 
   if (leftPanel) {
     if (isItineraryOpen && isMobileViewport()) {
@@ -511,10 +505,6 @@ export function bindMobileNav({ onStateChanged, onVisibilityChanged, onAddDay } 
     renderMobileExpenseSheet(calcExpenseBreakdown(getState()));
     syncBackdropAndOrbs();
     refreshIcons();
-  });
-
-  document.getElementById('mobile-hud-backdrop')?.addEventListener('click', () => {
-    closeAllMobileOverlays();
   });
 
   document.addEventListener('keydown', (e) => {
