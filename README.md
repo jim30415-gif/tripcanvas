@@ -1,61 +1,107 @@
 # 漫步地圖 TripCanvas
 
-自由行旅遊地圖規劃網站（貓頭鷹淺咖啡主題 · Vite + 原生 Vanilla JS + Leaflet + Google Routes API v2 後端代理）。
+> **獻給熱愛獨旅和自由行的你**
 
-## 核心特色
+一款專為自助旅行者打造的互動式旅遊地圖規劃網站，結合直覺的地圖標點、貼路與大眾運輸班次查詢、多國匯率即時換算、分類支出統計，以及個人 Google 雲端硬碟跨裝置同步。
 
-- **既有風格與核心機能完整保留**：貓頭鷹淺咖啡色系、單手拉大型傾斜白色行李箱圖示、全站「支出」用語、右側最大化天數圖層搭配底部 3 行精簡總支出卡片、Google 地圖（繁中）底圖、標點拍立得插圖／壓縮上傳／8 款內建插畫、備註與小景點支出、長按／拖曳手把排序、圖層眼睛開關與 JSON 匯出／匯入（向下相容舊版 JSON）。
-- **高精度貼路路徑繪製**：汽車、機車、自行車、步行優先透過 Google Routes API v2（`polylineQuality: HIGH_QUALITY`＋逐段 `steps` 折線拼接），未設定金鑰時自動降級至依車種分流的 FOSSGIS OSRM（`routed-car` / `routed-bike` / `routed-foot`），並持久化快取折線，不再出現橫越街區的曲線。
-- **大眾運輸分段路線與班次**：串接 Google Maps Routes API `TRANSIT` 模式，在地圖與側欄／彈窗呈現完整「🚶 步行（實景人行道虛線） → 🚇/🚌 大眾運輸（官方路線色實線、上下車站點、路線／方向／發車與抵達時間／經過站數） → 🚶 步行」，並支援指定出發時間、少步行／少轉乘偏好、替代方案切換，亦保留手動填寫紀錄模式。
+🔗 **線上體驗網址**：[https://tripcanvas-ten.vercel.app](https://tripcanvas-ten.vercel.app)
 
 ---
 
-## 本機開發啟動
+## ✨ 產品特色
 
+### 1. 專為獨旅與自由行熱愛者設計
+採用溫潤耐看的貓頭鷹淺咖啡大地色系與繁體中文地圖介面，將「找景點、排順序、查交通、記開銷」整合在同一個清爽畫布裡。電腦與平板提供三欄式全景規劃視野；手機版則搭配不遮擋地圖的半透明浮動雙圓球與手勢互動，旅途中也能單手優雅操作。
+
+![漫步地圖主畫面總覽](docs/images/01-hero-overview.png)
+
+---
+
+### 2. 點到點交通規劃：大眾運輸即時方案、班次與多國匯率自動結算
+任意兩個景點之間都能快速設定汽車、機車、大眾運輸、自行車或步行的真實貼路路線。選擇**大眾運輸**時，支援全球 Google Routes 與日本 NAVITIME 分段路線查詢，直接呈現完整轉乘方案、路線代表色、發車與抵達時刻並自動帶入交通票價；內建 **TWD、JPY、KRW、USD、EUR、HKD、THB、SGD、GBP、CNY** 等 10 種常用幣別，外幣車資即時換算為新台幣並納入總支出。
+
+![點到點大眾運輸分段班次與多國匯率換算](docs/images/02-transit-fare-fx.png)
+
+---
+
+### 3. 自訂景點名稱與拍立得插圖，支援小景點細項與分類記帳
+每一個標點皆可自由命名、撰寫營業資訊與行前筆記，並可上傳本機照片（自動壓縮）、貼上圖片網址，或一鍵套用 8 款手繪風旅遊插畫，以拍立得氣泡呈現在地圖上。點開景點還能細分多筆「小景點」項目，依 **🍜 食物、🚆 交通、🛍️ 購物、✨ 其他** 四大類別記錄花費，讓旅程細節與花費清清楚楚。
+
+![景點自訂名稱、拍立得圖片與小景點分類支出](docs/images/03-pin-detail-categories.png)
+
+---
+
+### 4. 多天數獨立圖層，自由開關呈現讓規劃更專注
+一趟旅行可依行程天數自由增設多組色彩圖層（Day 1、Day 2、Day 3…），並透過右側「眼睛」按鈕獨立切換各天數在地圖上的顯示或隱藏狀態。規劃跨區長途旅程時，可隨時聚焦檢視單日動線，畫面依然俐落不凌亂。
+
+![多天數獨立圖層自由開關呈現](docs/images/04-day-layers.png)
+
+---
+
+### 5. 多旅遊計畫獨立珍藏 × 個人 Google 雲端硬碟多裝置同步
+點擊左上角選單即可建立、切換、複製或管理多份彼此獨立的旅遊計畫——開啟下一趟旅程不必覆蓋先前的安排，完整保留每一段自由行回憶。除了瀏覽器內建 `localStorage + IndexedDB` 雙重本地備份，更支援登入個人 Google 帳號，將行程自動存入**使用者自己的 Google 雲端硬碟**，零資料庫成本即可在電腦、平板與手機間無縫備份與接續編輯。
+
+![多旅遊計畫獨立保存與 Google 雲端硬碟同步](docs/images/05-trips-cloud-sync.png)
+
+---
+
+### 6. 總支出即時掌握：電腦版右下角 × 手機版底部中央，一鍵查看開銷比例
+無論在哪種裝置上都能隨時掌握旅費分配——電腦與平板版於右下角呈現深咖總支出卡片，手機版則以長條圓弧膠囊懸浮於畫面底部正中央。點擊即可展開視覺化統計條，一目了然檢視「交通／食物／購物／其他」四大分類比例以及各天數的開銷佔比。
+
+<table>
+  <tr>
+    <td width="68%" align="center" valign="top">
+      <img src="docs/images/06a-expense-desktop.png" alt="電腦版右下角總支出與開銷比例展開" />
+      <br />
+      <sub><strong>電腦／平板版</strong>：右下角總支出卡片點開顯示分類與各天比例</sub>
+    </td>
+    <td width="32%" align="center" valign="top">
+      <img src="docs/images/06b-expense-mobile.png" alt="手機版底部中央長條圓弧總支出與開銷比例展開" />
+      <br />
+      <sub><strong>手機版</strong>：底部中央長條圓弧直接顯示總支出，點擊展開明細</sub>
+    </td>
+  </tr>
+</table>
+
+---
+
+## 🛠️ 技術架構
+
+- **前端**：Vite 6 + 原生 ES Modules（Vanilla JS）+ Tailwind CSS v3 + Leaflet + Lucide Icons
+- **後端代理（Vercel Serverless Functions）**：
+  - `/api/routes`：封裝 Google Routes API v2（高精度貼路與全球大眾運輸）、日本 NAVITIME RapidAPI（日本鐵路／地鐵分段路線）與即時匯率查詢，未設金鑰時陸路自動降級至免費 FOSSGIS OSRM。
+  - `/api/drive` & `/api/drive-callback`：採用 Google OAuth 2.0（PKCE）與 AES-256-GCM 加密 `HttpOnly` Cookie，透過非機密權限 `drive.file` 直接讀寫使用者個人 Google 雲端硬碟中的「`漫步地圖 TripCanvas`」同步檔，無需額外資料庫。
+
+---
+
+## 🚀 本機開發與部署
+
+### 本機啟動
 ```bash
 npm install
 cp .env.example .env.local
-# 編輯 .env.local 填入 GOOGLE_MAPS_API_KEY=...
+# 依需求於 .env.local 填入環境變數
 npm run dev
 ```
+開啟終端機顯示的網址（預設 `http://localhost:5173`）即可使用。
 
-開啟終端機顯示的本機網址（預設 `http://localhost:5173`）即可使用。
+> 即使尚未填入任何 API 金鑰，網站仍可完整運作：陸路會自動使用免費 FOSSGIS OSRM 貼路引擎，行程會自動透過 `localStorage + IndexedDB` 雙重保存於本機瀏覽器。
 
-> 若暫時未填入 `GOOGLE_MAPS_API_KEY`，網站仍可正常運作：汽車／機車／自行車／步行會自動改用免費 FOSSGIS OSRM 貼路引擎，大眾運輸則維持「手動填寫紀錄」模式。
+### 部署至 Vercel（環境變數一覽）
+將專案匯入 Vercel（框架選 **Vite**）後，可依需求至 **Settings → Environment Variables** 設定：
 
----
-
-## Google Maps Routes API 金鑰設定注意事項（重要）
-
-本專案採用 **方案 A（伺服器端代理 `/api/routes`）**，API 金鑰僅存在伺服器環境變數（本機 `.env.local` 或 Vercel Environment Variables），絕不暴露在前端瀏覽器。
-
-請在 Google Cloud Console 依以下方式設定金鑰限制：
-
-1. 於 **API 和服務 → 程式庫** 啟用 **Routes API**（並確認已綁定計費帳戶，Google 提供每月免費額度）。
-2. 於 **憑證** 建立 API 金鑰，在 **API 限制** 中**僅勾選 `Routes API`**。
-3. **應用程式限制請保持「無」（勿設定「網站／HTTP 參照網址」網域限制）**：
-   - 因為是透過 `/api/routes` 由伺服器端發出請求，請求不會帶有瀏覽器 `Referer` 標頭；若綁定網域限制，Google 會回傳 `API_KEY_HTTP_REFERRER_BLOCKED` 拒絕連線。
-   - 若部署於固定 IP 的自架主機可改設「IP 位址」限制；若部署於 Vercel 等 Serverless 平台，請改於 Google Cloud Console 的 **配額（Quotas）** 設定每日／每分鐘上限與預算通知即可。
+| 環境變數 | 必填 | 用途說明 |
+| :--- | :---: | :--- |
+| `GOOGLE_MAPS_API_KEY` | 選填 | 啟用 Google Routes API v2 高精度陸路與全球大眾運輸分段查詢（API 限制僅勾選 `Routes API`，應用程式限制請選「無」） |
+| `RAPIDAPI_NAVITIME_KEY` | 選填 | 啟用日本大眾運輸自動分段查詢與日圓票價換算（RapidAPI NAVITIME Route(totalnavi) 免費 Basic 方案即可） |
+| `GOOGLE_OAUTH_CLIENT_ID` | 選填 | 啟用使用者個人 Google 雲端硬碟跨裝置同步（搭配 Google Drive API 與非機密權限 `drive.file`） |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | 選填 | 同上，OAuth 2.0 網頁應用程式用戶端密鑰；已授權重新導向 URI 需填入 `https://<你的網域>/api/drive-callback` |
 
 ---
 
-## 部署至 Vercel
-
-1. 將此 GitHub 專案匯入 Vercel（框架選 **Vite**）。
-2. 在 Vercel 專案設定 **Environment Variables** 新增 `GOOGLE_MAPS_API_KEY`。
-3. **（選填）啟用日本大眾運輸自動查詢**：由於 Google 開發者 API 因日本鐵路業者授權限制不提供日本大眾運輸路線，可於 RapidAPI 免費訂閱 **NAVITIME Route(totalnavi)** 的 **Basic 方案（$0／月、500 次硬上限不扣款）**，並將 `X-RapidAPI-Key` 新增至 Vercel 環境變數 `RAPIDAPI_NAVITIME_KEY` 後重新部署，即可自動抓取全日本 JR／新幹線／地鐵／私鐵分段路線與日圓票價換算。
-4. **（選填）啟用「使用者個人 Google 雲端硬碟」跨裝置同步（零資料庫成本）**：
-   - 於 Google Cloud Console 啟用免費的 **Google Drive API**。
-   - 前往 **Google Auth Platform（OAuth 同意畫面）** 設定為 **外部（External）**，在 **資料存取（Scopes）** 加入非敏感權限 `openid`、`email`、`profile` 與 `https://www.googleapis.com/auth/drive.file`，並於 **目標對象（Audience）** 點選「發布應用程式（Publish App）」成為正式版。
-   - 建立 **OAuth 2.0 用戶端 ID（網頁應用程式）**，在「已授權的重新導向 URI」填入 `https://<你的 Vercel 網域>/api/drive-callback`（本機測試可另加 `http://localhost:5173/api/drive-callback`）。
-   - 將產生的用戶端編號與密鑰新增至 Vercel 環境變數 `GOOGLE_OAUTH_CLIENT_ID` 與 `GOOGLE_OAUTH_CLIENT_SECRET` 後重新部署，每位使用者即可登入自己的 Google 帳號，把行程自動存於各自雲端硬碟的「`漫步地圖 TripCanvas`」資料夾中。
-5. 部署完成後，前端靜態資源與 Serverless 端點 [api/routes.js](api/routes.js)（`/api/routes`）、[api/drive.js](api/drive.js)（`/api/drive`）、[api/drive-callback.js](api/drive-callback.js)（`/api/drive-callback`）會自動一起上線。
-
----
-
-## 測試指令
+## 🧪 測試與建置指令
 
 ```bash
-npm test       # 執行單元與代理處理器測試
-npm run build  # 驗證正式環境建置
+npm test       # 執行路線代理、匯率換算、多計畫管理與 Google Drive 同步單元測試
+npm run build  # 產出正式環境建置檔
 ```
