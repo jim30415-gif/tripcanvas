@@ -23,23 +23,23 @@
   <div id="app">
 
     <!-- ==================== 頂部導覽列（z-index: 2000） ==================== -->
-    <header class="app-header bg-owl-panel border-b border-owl-border px-3 py-2 md:py-0 md:h-[60px] md:px-4 flex flex-wrap md:flex-nowrap items-center justify-between gap-x-2.5 gap-y-2 md:gap-3 shrink-0 shadow-xs">
+    <header class="app-header bg-owl-panel border-b border-owl-border h-[56px] md:h-[60px] px-2.5 md:px-4 flex flex-nowrap items-center justify-between gap-2 md:gap-3 shrink-0 shadow-xs">
       <!-- 左側：三條短橫線多計畫選單 ＋ 行李箱 Logo ＋ 品牌文字 -->
-      <div class="order-1 flex items-center gap-2 shrink-0 min-w-0">
+      <div class="order-1 flex items-center gap-1.5 md:gap-2 shrink-0 min-w-0">
         <!-- 三條短橫線：開啟／管理多個旅遊計畫與 Google 雲端同步 -->
         <button
           id="btn-open-trips-drawer"
           type="button"
           title="切換或新增旅遊計畫、Google 雲端同步與匯出入工具"
           aria-label="開啟旅遊計畫與工具選單"
-          class="relative w-10 h-10 rounded-xl bg-owl-softBg/85 hover:bg-owl-border/75 border border-owl-border text-owl-primaryDeep flex items-center justify-center shrink-0 transition active:scale-95"
+          class="relative w-9 h-9 md:w-10 md:h-10 rounded-xl bg-owl-softBg/85 hover:bg-owl-border/75 border border-owl-border text-owl-primaryDeep flex items-center justify-center shrink-0 transition active:scale-95"
         >
           <i data-lucide="menu" class="w-5 h-5"></i>
           <span id="mobile-drive-sync-dot" class="hidden"></span>
         </button>
 
         <div
-          class="w-[36px] h-[36px] md:w-[40px] md:h-[40px] rounded-[11px] flex items-center justify-center shadow-brand shrink-0 overflow-hidden"
+          class="w-[30px] h-[30px] sm:w-[36px] sm:h-[36px] md:w-[40px] md:h-[40px] rounded-[9px] md:rounded-[11px] flex items-center justify-center shadow-brand shrink-0 overflow-hidden"
           style="background: linear-gradient(135deg, #A68666 0%, #826447 100%);"
           title="漫步地圖 TripCanvas"
         >
@@ -64,37 +64,37 @@
         </div>
         <div class="leading-tight min-w-0">
           <div class="flex items-center gap-1.5">
-            <h1 class="text-base sm:text-lg font-extrabold tracking-tight text-owl-text whitespace-nowrap">
-              漫步地圖 <span class="hidden sm:inline text-owl-primary">TripCanvas</span>
+            <h1 class="text-sm sm:text-base md:text-lg font-extrabold tracking-tight text-owl-text whitespace-nowrap">
+              漫步地圖 <span class="hidden sm:inline md:hidden lg:inline text-owl-primary">TripCanvas</span>
             </h1>
             <span id="header-active-trip-badge" class="hidden 2xl:inline-block max-w-[140px] truncate px-2.5 py-0.5 rounded-full bg-owl-softBg border border-owl-cardBorder text-xs font-bold text-owl-primaryDeep"></span>
           </div>
-          <p class="text-xs text-owl-subtext truncate">獻給熱愛獨旅和自由行的你</p>
+          <p class="hidden lg:block text-xs text-owl-subtext truncate">獻給熱愛獨旅和自由行的你</p>
         </div>
       </div>
 
-      <!-- 中央（手機版獨立第二列滿寬）：Nominatim 地點搜尋欄 -->
-      <div class="order-3 basis-full w-full md:order-2 md:basis-auto md:w-auto relative md:flex-1 min-w-0 md:max-w-xl">
-        <form id="map-search-form" class="flex items-center min-w-0 bg-owl-softBg/75 hover:bg-owl-softBg border border-owl-border rounded-xl px-3 py-1.5 focus-within:bg-owl-card focus-within:ring-2 focus-within:ring-owl-primary/30 focus-within:border-owl-accentBorder transition">
-          <i data-lucide="search" class="w-4 h-4 text-owl-muted shrink-0 mr-2"></i>
+      <!-- 中央（全版本單列置頂）：地點即時搜尋欄 -->
+      <div class="order-2 md:relative flex-1 min-w-0 md:max-w-xl">
+        <form id="map-search-form" class="flex items-center min-w-0 bg-owl-softBg/75 hover:bg-owl-softBg border border-owl-border rounded-xl pl-2 pr-1 py-1 md:px-3 md:py-1.5 focus-within:bg-owl-card focus-within:ring-2 focus-within:ring-owl-primary/30 focus-within:border-owl-accentBorder transition">
+          <i data-lucide="search" class="w-3.5 h-3.5 md:w-4 md:h-4 text-owl-muted shrink-0 mr-1.5 md:mr-2"></i>
           <input
             id="map-search-input"
             type="search"
             enterkeyhint="search"
             autocomplete="off"
-            placeholder="輸入地點即時搜尋（例：金澤、淺草寺、淡水老街）"
+            placeholder="輸入地點即時搜尋"
             class="w-full bg-transparent text-sm text-owl-text placeholder-owl-muted focus:outline-none py-0.5 select-text min-w-0"
           />
-          <button id="btn-clear-search" type="button" title="清除關鍵字" class="hidden ml-1 w-7 h-7 sm:w-6 sm:h-6 rounded-full hover:bg-owl-border/70 text-owl-muted hover:text-owl-text flex items-center justify-center shrink-0 transition">
+          <button id="btn-clear-search" type="button" title="清除關鍵字" class="hidden ml-1 w-6 h-6 rounded-full hover:bg-owl-border/70 text-owl-muted hover:text-owl-text flex items-center justify-center shrink-0 transition">
             <i data-lucide="x" class="w-3.5 h-3.5"></i>
           </button>
-          <button type="submit" class="ml-2 px-3.5 py-1.5 rounded-lg bg-owl-primary hover:bg-owl-primaryHover text-white text-xs sm:text-sm font-bold transition shrink-0">
+          <button type="submit" class="ml-1 md:ml-2 px-2.5 py-1 md:px-3.5 md:py-1.5 rounded-lg bg-owl-primary hover:bg-owl-primaryHover text-white text-xs sm:text-sm font-bold transition shrink-0 whitespace-nowrap">
             搜尋
           </button>
         </form>
 
-        <!-- 搜尋結果下拉清單（z-index: 2100，完整浮於地圖之上） -->
-        <div id="map-search-results" class="search-dropdown hidden top-full left-0 right-0 mt-2 bg-owl-card border border-owl-border rounded-2xl shadow-dropdown overflow-hidden max-h-[60dvh] overflow-y-auto custom-scroll"></div>
+        <!-- 搜尋結果下拉清單（手機版貼齊頂部列滿寬，平板／電腦對齊搜尋欄，z-index: 2100） -->
+        <div id="map-search-results" class="search-dropdown hidden top-full left-2.5 right-2.5 md:left-0 md:right-0 mt-1.5 md:mt-2 bg-owl-card border border-owl-border rounded-2xl shadow-dropdown overflow-hidden max-h-[60dvh] overflow-y-auto custom-scroll"></div>
       </div>
 
       <!-- 右側（平板／電腦顯示）：Google 雲端同步狀態 ＋ JSON 匯出 / 匯入（手機端收納於漢堡抽屜內） -->
@@ -132,7 +132,13 @@
             >
               <span id="left-day-dot" class="w-3.5 h-3.5 rounded-full shrink-0 ring-4 ring-owl-softBg"></span>
               <h2 id="left-day-title" class="text-base font-extrabold text-owl-text truncate">Day 1</h2>
-              <i id="left-day-chevron" data-lucide="chevron-down" class="w-4 h-4 text-owl-subtext group-hover:text-owl-primaryDeep shrink-0 transition-transform duration-200"></i>
+              <span
+                id="left-day-chevron"
+                class="inline-flex items-center justify-center w-4 h-4 text-owl-subtext group-hover:text-owl-primaryDeep shrink-0 transition-transform duration-200 ease-out"
+                style="transform: rotate(0deg);"
+              >
+                <i data-lucide="chevron-down" class="w-4 h-4"></i>
+              </span>
             </button>
             <div class="flex items-center gap-1.5 shrink-0">
               <span id="left-pin-count" class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-owl-card/90 border border-owl-cardBorder text-owl-subtext shrink-0">0 個標點</span>
@@ -148,10 +154,11 @@
             </span>
           </div>
 
-          <!-- 快速切換天數下拉選單 -->
+          <!-- 快速切換天數下拉選單（開合雙向動畫） -->
           <div
             id="left-day-dropdown"
-            class="hidden absolute left-3 right-3 top-full mt-1.5 z-[1600] rounded-2xl bg-owl-card border border-owl-border shadow-dropdown overflow-hidden max-h-[45dvh] overflow-y-auto custom-scroll py-1.5"
+            aria-hidden="true"
+            class="absolute left-3 right-3 top-full mt-1.5 z-[1600] rounded-2xl bg-owl-card border border-owl-border shadow-dropdown overflow-hidden max-h-[45dvh] overflow-y-auto custom-scroll py-1.5"
           ></div>
         </div>
 
@@ -262,7 +269,7 @@
     </main>
 
     <!-- ==================== 手機版浮動互動控制列（< lg 顯示；電腦與橫向平板隱藏） ==================== -->
-    <!-- 右邊圓球往上彈出的正方形天數方塊列（點擊某天直接跳轉、旁邊彈出眼睛與齒輪小圓、左側同步顯示變窄行程表） -->
+    <!-- 右邊圓球往上彈出的正方形天數方塊列（點擊某天切換圖層並在旁彈出眼睛與齒輪小圓，不自動跳出行程介面） -->
     <div
       id="mobile-days-popup"
       class="hidden lg:hidden fixed right-2.5 bottom-[calc(76px+env(safe-area-inset-bottom))] z-[1560] flex flex-col items-end gap-2 max-h-[58dvh] overflow-y-auto custom-scroll py-1 px-0.5"

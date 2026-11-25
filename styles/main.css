@@ -535,50 +535,6 @@ aside.right-panel {
     display: none !important;
   }
 
-  /* 點擊天數正方形時：行程表自動稍微變窄並往左靠，為右側天數正方形＋眼睛／齒輪小圓留出俐落空間 */
-  #panel-left.mobile-sheet-narrow {
-    left: 10px !important;
-    width: calc(100vw - 126px) !important;
-    max-width: 274px !important;
-  }
-  #panel-left.mobile-sheet-narrow #panel-left-header {
-    padding: 9px 10px !important;
-  }
-  #panel-left.mobile-sheet-narrow #left-pin-count {
-    display: none !important;
-  }
-  #panel-left.mobile-sheet-narrow #itinerary-list {
-    padding: 9px !important;
-  }
-  #panel-left.mobile-sheet-narrow .pin-card {
-    padding: 8px 9px !important;
-  }
-  #panel-left.mobile-sheet-narrow .drag-handle {
-    min-width: 28px !important;
-    margin-left: -2px !important;
-    padding-left: 2px !important;
-    padding-right: 2px !important;
-  }
-  #panel-left.mobile-sheet-narrow .pin-thumb-box {
-    width: 40px !important;
-    height: 40px !important;
-  }
-  #panel-left.mobile-sheet-narrow .pin-card-chevron {
-    display: none !important;
-  }
-  #panel-left.mobile-sheet-narrow .transport-connector-row {
-    padding-left: 20px !important;
-  }
-  #panel-left.mobile-sheet-narrow .transport-connector-line {
-    left: 10px !important;
-  }
-  #panel-left.mobile-sheet-narrow .btn-open-transport {
-    padding: 6px 8px !important;
-    gap: 6px !important;
-  }
-  #panel-left.mobile-sheet-narrow .transport-status-badge {
-    display: none !important;
-  }
   #panel-left-header {
     background-color: rgba(246, 238, 227, 0.72) !important;
   }
@@ -620,6 +576,23 @@ aside.right-panel {
   .leaflet-bottom.leaflet-right .leaflet-control-attribution {
     display: none !important;
   }
+}
+
+/* 快速切換天數下拉選單：開合雙向平滑滑動淡入淡出動畫 */
+#left-day-dropdown {
+  opacity: 0;
+  transform: translateY(-6px) scale(0.98);
+  transform-origin: top center;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), visibility 0.2s ease;
+}
+
+#left-day-dropdown.is-open {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  visibility: visible;
+  pointer-events: auto;
 }
 
 .basemap-poi-card {
@@ -668,6 +641,10 @@ aside.right-panel {
   #modal-transport select,
   #modal-dialog input[type='text'] {
     font-size: 16px;
+  }
+
+  #map-search-input::placeholder {
+    font-size: 13px;
   }
 }
 

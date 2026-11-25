@@ -5,7 +5,7 @@ import { fitBoundsToPoints, invalidateMapSize } from '../map/mapInit.js';
 import { openCustomDialog, showToast } from './dialog.js';
 
 let activeOverlay = 'none'; // 'none' | 'itinerary' | 'days' | 'expense'
-let splitDayId = null; // 點擊天數正方形後，左側同步展開變窄行程表，並在該天旁顯示眼睛＋齒輪小圓
+let selectedDayId = null; // 點擊天數正方形後，在該天旁顯示眼睛＋齒輪小圓（不再跳出行程清單）
 let gearSettingsDayId = null; // 點擊齒輪小圓後展開的詳細設定卡（更名、刪除、顯隱）
 let callbacks = {
   onStateChanged: () => {},
@@ -35,18 +35,16 @@ function syncOrbsAndPanels() {
   const isPureItineraryOpen = activeOverlay === 'itinerary';
   const isDaysOpen = activeOverlay === 'days';
   const showGearSheet = isDaysOpen && Boolean(gearSettingsDayId);
-  const isSplitItineraryOpen = isDaysOpen && Boolean(splitDayId) && !showGearSheet;
   const isExpenseOpen = activeOverlay === 'expense';
-  const showItineraryOnMobile = (isPureItineraryOpen || isSplitItineraryOpen) && isMobileViewport();
+  const showItineraryOnMobile = isPureItineraryOpen && isMobileViewport();
 
   if (leftPanel) {
     if (showItineraryOnMobile) {
       leftPanel.classList.remove('hidden');
       leftPanel.classList.add('flex', 'mobile-sheet-animate');
-      leftPanel.classList.toggle('mobile-sheet-narrow', isSplitItineraryOpen);
     } else {
       leftPanel.classList.add('hidden');
-      leftPanel.classList.remove('flex', 'mobile-sheet-animate', 'mobile-sheet-narrow');
+      leftPanel.classList.remove('flex', 'mobile-sheet-animate');
     }
   }
 
@@ -310,7 +308,7 @@ function renderMobileDayDetailSheet() {
       if (latestState.activeDayId === target.id) {
         latestState.activeDayId = latestState.days[0].id;
       }
-      if (splitDayId === target.id) splitDayId = latestState.activeDayId;
+      if (selectedDayId === target.id) selectedDayId = latestState.activeDayId;
       gearSettingsDayId = null;
       saveState((msg) => showToast(msg, 'error'));
       callbacks.onStateChanged();
@@ -326,9 +324,9 @@ function renderMobileDaysPopup() {
   const state = getState();
   const totalCount = state.days.length;
 
-  // 若 splitDayId 已不存在於天數列表，重設之
-  if (splitDayId && !state.days.some((d) => d.id === splitDayId)) {
-    splitDayId = null;
+  // 若 selectedDayId 已不存在於天數列表，重設之
+  if (selectedDayId && !state.days.some((d) => d.id === selectedDayId)) {
+    selectedDayId = null;
   }
 
   // 上方附同尺寸「+ 新增」正方形，往下依序為第 1 天、第 2 天…
@@ -351,18 +349,18 @@ function renderMobileDaysPopup() {
   const rowsHtml = state.days
     .map((day, idx) => {
       const isActive = day.id === state.activeDayId;
-      const isSplitSelected = day.id === splitDayId;
+      const isSelected = day.id === selectedDayId;
       const isGearOpen = day.id === gearSettingsDayId;
       const delayMs = Math.min(totalCount - 1 - idx, 6) * 24;
-      const tileClass = isSplitSelected
+      const tileClass = isSelected
         ? 'mobile-day-tile-selected'
         : isActive
           ? 'mobile-day-tile-active'
           : 'mobile-day-tile-idle';
       const dimClass = day.visible ? '' : 'opacity-55';
 
-      // 點擊該天正方形時，緊貼其左側同步跳出「眼睛小圓」與「齒輪小圓」（視覺 32px，觸控熱區擴大至 40px）
-      const inlineMiniOrbsHtml = isSplitSelected
+      // 點擊該天正方形時，僅在緊貼左側跳出「眼睛小圓」與「齒輪小圓」（視覺 32px，觸控熱區擴大至 40px）
+      const inlineMiniOrbsHtml = isSelected
         ? `
           <div class="flex flex-col items-center gap-1.5 mr-1.5 mobile-day-square-animate">
             <button
@@ -397,7 +395,7 @@ function renderMobileDaysPopup() {
           <button
             type="button"
             data-mobile-day-id="${day.id}"
-            title="${escapeHTML(day.name)}（點擊切換至這一天並顯示行程）"
+            title="${escapeHTML(day.name)}（點擊切換至這一天並顯示眼睛與設定按鈕）"
             style="animation-delay: ${delayMs}ms;"
             class="mobile-day-square mobile-day-square-animate w-[58px] h-[58px] rounded-2xl shadow-float flex flex-col items-center justify-center gap-1 shrink-0 transition active:scale-95 ${tileClass} ${dimClass}"
           >
@@ -414,14 +412,14 @@ function renderMobileDaysPopup() {
   popup.querySelector('#btn-mobile-add-day')?.addEventListener('click', () => {
     callbacks.onAddDay();
     const latest = getState();
-    splitDayId = latest.activeDayId;
+    selectedDayId = latest.activeDayId;
     gearSettingsDayId = null;
     renderMobileDaysPopup();
     syncOrbsAndPanels();
     refreshIcons();
   });
 
-  // 點擊任一天數正方形：直接跳轉到該天行程、同步展開變窄靠左行程表、並在正方形旁彈出眼睛＋齒輪小圓
+  // 點擊任一天數正方形：切換作用中天數並於正方形旁彈出眼睛＋齒輪小圓（不自動彈出行程清單）
   popup.querySelectorAll('.mobile-day-square').forEach((btn) => {
     btn.addEventListener('click', () => {
       const dayId = btn.dataset.mobileDayId;
@@ -435,7 +433,7 @@ function renderMobileDaysPopup() {
         saveState((msg) => showToast(msg, 'error'));
       }
 
-      splitDayId = chosen.id;
+      selectedDayId = chosen.id;
       gearSettingsDayId = null;
 
       if (changedDay) {
@@ -450,7 +448,7 @@ function renderMobileDaysPopup() {
       if (chosen.visible && chosen.pins.length > 0) {
         fitBoundsToPoints(
           chosen.pins.map((p) => [p.lat, p.lng]),
-          getMobileFitBoundsOptions({ splitOpen: true })
+          getMobileFitBoundsOptions({ daysPopupOpen: true })
         );
       }
     });
@@ -470,7 +468,7 @@ function renderMobileDaysPopup() {
     });
   });
 
-  // 齒輪小圓：展開／收合該天的詳細設定（更名、刪除、單日預算查看）
+  // 齒輪小圓：展開／收合該天的詳細設定（更名、刪除、顯示切換）
   popup.querySelectorAll('.btn-mobile-inline-gear').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -488,12 +486,15 @@ export function hasOpenMobileOverlay() {
   return isMobileViewport() && activeOverlay !== 'none';
 }
 
-export function getMobileFitBoundsOptions({ splitOpen = false } = {}) {
+export function getMobileFitBoundsOptions({ daysPopupOpen = false } = {}) {
   const vh = typeof window !== 'undefined' ? window.innerHeight : 844;
-  const bottomReserve = splitOpen || activeOverlay !== 'none' ? Math.min(Math.round(vh * 0.56), 470) : 110;
+  const hasTallBottomSheet =
+    activeOverlay === 'itinerary' || activeOverlay === 'expense' || Boolean(gearSettingsDayId);
+  const bottomReserve = hasTallBottomSheet ? Math.min(Math.round(vh * 0.56), 470) : 110;
+  const rightReserve = daysPopupOpen || (activeOverlay === 'days' && !gearSettingsDayId) ? 116 : 24;
   return {
     paddingTopLeft: [24, 68],
-    paddingBottomRight: [splitOpen ? 92 : 24, bottomReserve],
+    paddingBottomRight: [rightReserve, bottomReserve],
     maxZoom: 14,
   };
 }
@@ -522,7 +523,7 @@ export function renderMobileHud() {
 
 export function closeAllMobileOverlays() {
   activeOverlay = 'none';
-  splitDayId = null;
+  selectedDayId = null;
   gearSettingsDayId = null;
   syncOrbsAndPanels();
 }
@@ -530,13 +531,13 @@ export function closeAllMobileOverlays() {
 export function setMobileTab(tabName) {
   if (tabName === 'left') {
     activeOverlay = 'itinerary';
-    splitDayId = null;
+    selectedDayId = null;
     gearSettingsDayId = null;
   } else if (tabName === 'right') {
     activeOverlay = 'days';
   } else {
     activeOverlay = 'none';
-    splitDayId = null;
+    selectedDayId = null;
     gearSettingsDayId = null;
   }
   syncOrbsAndPanels();
@@ -552,26 +553,17 @@ export function bindMobileNav({ onStateChanged, onVisibilityChanged, onAddDay } 
     onAddDay: onAddDay || (() => {}),
   };
 
-  // 單純點左下行程圓球：以原尺寸顯示半透明行程清單（收合右側天數）
+  // 點擊左下行程圓球：以原尺寸顯示半透明行程清單（收合右側天數）
   document.getElementById('btn-mobile-orb-itinerary')?.addEventListener('click', () => {
-    splitDayId = null;
+    selectedDayId = null;
     gearSettingsDayId = null;
     activeOverlay = activeOverlay === 'itinerary' ? 'none' : 'itinerary';
     syncOrbsAndPanels();
   });
 
-  // 點擊行程清單右上角 ×：若在雙開模式僅收合行程清單（保留天數列），單純模式則整個收合
+  // 點擊行程清單右上角 ×：收合行程清單
   document.getElementById('btn-close-mobile-itinerary')?.addEventListener('click', () => {
-    if (activeOverlay === 'days' && splitDayId) {
-      splitDayId = null;
-      gearSettingsDayId = null;
-      renderMobileDaysPopup();
-      renderMobileDayDetailSheet();
-      syncOrbsAndPanels();
-      refreshIcons();
-    } else {
-      closeAllMobileOverlays();
-    }
+    closeAllMobileOverlays();
   });
 
   document.getElementById('btn-mobile-orb-days')?.addEventListener('click', () => {
@@ -579,7 +571,7 @@ export function bindMobileNav({ onStateChanged, onVisibilityChanged, onAddDay } 
       closeAllMobileOverlays();
     } else {
       activeOverlay = 'days';
-      splitDayId = null;
+      selectedDayId = null;
       gearSettingsDayId = null;
       renderMobileDaysPopup();
       renderMobileDayDetailSheet();
@@ -589,7 +581,7 @@ export function bindMobileNav({ onStateChanged, onVisibilityChanged, onAddDay } 
   });
 
   document.getElementById('btn-mobile-expense-pill')?.addEventListener('click', () => {
-    splitDayId = null;
+    selectedDayId = null;
     gearSettingsDayId = null;
     activeOverlay = activeOverlay === 'expense' ? 'none' : 'expense';
     renderMobileExpenseSheet(calcExpenseBreakdown(getState()));

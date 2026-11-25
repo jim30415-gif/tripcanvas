@@ -21,7 +21,8 @@ function closeDayDropdown() {
   const dropdown = document.getElementById('left-day-dropdown');
   const switcher = document.getElementById('btn-left-day-switcher');
   const chevron = document.getElementById('left-day-chevron');
-  dropdown?.classList.add('hidden');
+  dropdown?.classList.remove('is-open');
+  dropdown?.setAttribute('aria-hidden', 'true');
   switcher?.setAttribute('aria-expanded', 'false');
   if (chevron) chevron.style.transform = 'rotate(0deg)';
 }
@@ -38,7 +39,8 @@ function renderLeftDayDropdown() {
   }
 
   if (!isDayDropdownOpen) {
-    dropdown.classList.add('hidden');
+    dropdown.classList.remove('is-open');
+    dropdown.setAttribute('aria-hidden', 'true');
     return;
   }
 
@@ -84,8 +86,9 @@ function renderLeftDayDropdown() {
       </button>
     </div>
   `;
-  dropdown.classList.remove('hidden');
   refreshIcons();
+  dropdown.setAttribute('aria-hidden', 'false');
+  dropdown.classList.add('is-open');
 
   dropdown.querySelectorAll('.btn-quick-switch-day').forEach((btn) => {
     btn.addEventListener('click', (e) => {
