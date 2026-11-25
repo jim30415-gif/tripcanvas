@@ -63,7 +63,7 @@ function mountTileSourceSilently(sourceIndex) {
   const source = SILENT_TILE_SOURCES[sourceIndex] || SILENT_TILE_SOURCES[SILENT_TILE_SOURCES.length - 1];
 
   if (activeBaseLayer) {
-    activeBaseLayer.off();
+    activeBaseLayer.off('tileload tileerror');
     mapInstance.removeLayer(activeBaseLayer);
     activeBaseLayer = null;
   }
@@ -100,7 +100,12 @@ function mountTileSourceSilently(sourceIndex) {
       sourceIndex + 1 < SILENT_TILE_SOURCES.length
     ) {
       tileRuntime.switched = true;
-      mountTileSourceSilently(sourceIndex + 1);
+      // 延後至下一個事件循環再切換底圖，避免在 Leaflet _updateLevels() 同步清除瓦片期間觸發 removeLayer 導致 _map 為 null
+      setTimeout(() => {
+        if (tileRuntime.token === token) {
+          mountTileSourceSilently(sourceIndex + 1);
+        }
+      }, 60);
     }
   });
 

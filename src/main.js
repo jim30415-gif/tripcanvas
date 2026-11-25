@@ -124,6 +124,81 @@ function updateMapHeaderUI() {
   }
 }
 
+const pinResolveSeq = new Map();
+
+function invalidateAdjacentAutoRoutes(day, pinIdx) {
+  const invalidateAutoSegment = (seg) => {
+    if (!seg || seg.status === 'manual') return;
+    seg.encodedPolyline = '';
+    seg.status = 'pending';
+    if (seg.mode === 'transit') {
+      seg.segments = [];
+    }
+  };
+  if (pinIdx > 0) invalidateAutoSegment(day.pins[pinIdx - 1]?.transportToNext);
+  if (pinIdx < day.pins.length - 1) invalidateAutoSegment(day.pins[pinIdx]?.transportToNext);
+}
+
+function resolvePinPlaceAndSnap(dayId, pinId, lat, lng, { isMove = false } = {}) {
+  const seq = (pinResolveSeq.get(pinId) || 0) + 1;
+  pinResolveSeq.set(pinId, seq);
+
+  reverseGeocode(lat, lng, { zoom: getMapZoom() }).then((resolved) => {
+    if (pinResolveSeq.get(pinId) !== seq) return;
+    const niceName = typeof resolved === 'string' ? resolved : resolved?.name;
+    if (!niceName) return;
+
+    const placeId = typeof resolved === 'object' ? resolved?.placeId || '' : '';
+    const candidates =
+      typeof resolved === 'object' && Array.isArray(resolved?.candidates) ? resolved.candidates : [];
+    const snapped = typeof resolved === 'object' && resolved?.snapped === true;
+    const snapLat = typeof resolved === 'object' ? Number(resolved?.lat) : NaN;
+    const snapLng = typeof resolved === 'object' ? Number(resolved?.lng) : NaN;
+
+    const latestDay = getState().days.find((d) => d.id === dayId);
+    const pinIdx = latestDay?.pins.findIndex((p) => p.id === pinId) ?? -1;
+    if (!latestDay || pinIdx === -1) return;
+    const pin = latestDay.pins[pinIdx];
+
+    // 若使用者已手動自訂名稱，移動或異步解析皆不得覆蓋
+    if (pin.nameCustomized === true) return;
+
+    pin.name = niceName;
+    if (placeId) pin.placeId = placeId;
+    else delete pin.placeId;
+
+    if (candidates.length > 1) pin.nearbyCandidates = candidates;
+    else delete pin.nearbyCandidates;
+
+    let didSnap = false;
+    if (snapped && Number.isFinite(snapLat) && Number.isFinite(snapLng)) {
+      const nextLat = Number(snapLat.toFixed(6));
+      const nextLng = Number(snapLng.toFixed(6));
+      if (Math.abs(pin.lat - nextLat) > 1e-6 || Math.abs(pin.lng - nextLng) > 1e-6) {
+        pin.lat = nextLat;
+        pin.lng = nextLng;
+        invalidateAdjacentAutoRoutes(latestDay, pinIdx);
+        didSnap = true;
+      } else {
+        didSnap = true;
+      }
+    }
+
+    saveState((msg) => showToast(msg, 'error'));
+    renderLeft();
+    renderMapLayers();
+    if (didSnap) {
+      triggerBackgroundResolve(true);
+    }
+
+    if (isMove) {
+      showToast(didSnap ? `已吸附至「${pin.name}」` : `已更新地標名稱為「${pin.name}」`, 'success');
+    } else if (didSnap) {
+      showToast(`已自動吸附至「${pin.name}」`, 'success');
+    }
+  });
+}
+
 function movePinToCoordinate(dayId, pinId, lat, lng) {
   const state = getState();
   const day = state.days.find((d) => d.id === dayId);
@@ -135,23 +210,25 @@ function movePinToCoordinate(dayId, pinId, lat, lng) {
   pin.lat = Number(lat.toFixed(6));
   pin.lng = Number(lng.toFixed(6));
   delete pin.placeId;
+  delete pin.nearbyCandidates;
 
   // 將相連的自動路線標記為待重算，讓路徑自動貼合新座標（保留手動紀錄與交通支出）
-  const invalidateAutoSegment = (seg) => {
-    if (!seg || seg.status === 'manual') return;
-    seg.encodedPolyline = '';
-    seg.status = 'pending';
-    if (seg.mode === 'transit') {
-      seg.segments = [];
-    }
-  };
-  if (idx > 0) invalidateAutoSegment(day.pins[idx - 1].transportToNext);
-  if (idx < day.pins.length - 1) invalidateAutoSegment(pin.transportToNext);
+  invalidateAdjacentAutoRoutes(day, idx);
 
   saveState((msg) => showToast(msg, 'error'));
   renderAll();
   triggerBackgroundResolve(true);
-  showToast(`已調整「${pin.name}」地圖位置`, 'success');
+
+  if (pin.nameCustomized === true) {
+    // 已手動更改過名稱：取消任何尚未回傳的舊地標查詢，並保留使用者自訂名稱與精準落點
+    pinResolveSeq.set(pin.id, (pinResolveSeq.get(pin.id) || 0) + 1);
+    showToast(`已調整「${pin.name}」地圖位置`, 'success');
+    return;
+  }
+
+  // 尚未手動改名：依新落點重新辨識並吸附至鄰近地標，自動更新預設名稱
+  showToast(`已調整位置，更新地標名稱中…`, 'info');
+  resolvePinPlaceAndSnap(dayId, pin.id, pin.lat, pin.lng, { isMove: true });
 }
 
 let mapRenderDeferred = false;
@@ -377,22 +454,7 @@ function addPinAtCoordinate(lat, lng, customName = null, meta = {}) {
   showToast(`已於「${activeDay.name}」新增標點 #${pinNum}`, 'success');
 
   if (!customName) {
-    reverseGeocode(newPin.lat, newPin.lng, { zoom: getMapZoom() }).then((resolved) => {
-      const niceName = typeof resolved === 'string' ? resolved : resolved?.name;
-      const placeId = typeof resolved === 'object' ? resolved?.placeId || '' : '';
-      const candidates = typeof resolved === 'object' && Array.isArray(resolved?.candidates) ? resolved.candidates : [];
-      if (!niceName) return;
-      const latestDay = getState().days.find((d) => d.id === activeDay.id);
-      const pin = latestDay?.pins.find((p) => p.id === newPin.id);
-      if (pin && pin.name.startsWith('自訂景點 ')) {
-        pin.name = niceName;
-        if (placeId) pin.placeId = placeId;
-        if (candidates.length > 1) pin.nearbyCandidates = candidates;
-        saveState((msg) => showToast(msg, 'error'));
-        renderLeft();
-        renderMapLayers();
-      }
-    });
+    resolvePinPlaceAndSnap(activeDay.id, newPin.id, newPin.lat, newPin.lng, { isMove: false });
   }
 }
 
@@ -481,7 +543,12 @@ function bindGlobalEvents() {
   });
 
   bindSearchBarEvents({ onAddPinAtCoordinate: addPinAtCoordinate });
-  bindPinModalEvents({ onStateChanged: renderAll });
+  bindPinModalEvents({
+    onStateChanged: () => {
+      renderAll();
+      triggerBackgroundResolve(false);
+    },
+  });
   bindTransportModalEvents({ onStateChanged: renderAll });
   bindDriveSyncUI();
   bindMobileNav({

@@ -293,9 +293,12 @@ export function openPinDetailModal(dayId, pinId) {
   editingPinContext = {
     dayId,
     pinId,
+    originalName: pin.name,
     draftImage: pin.image ? { ...pin.image } : null,
     draftSubSpots: (pin.subSpots || []).map((s) => ({ ...s })),
     draftPlaceId: pin.placeId || '',
+    draftLat: null,
+    draftLng: null,
   };
 
   const badge = document.getElementById('detail-pin-badge');
@@ -305,7 +308,7 @@ export function openPinDetailModal(dayId, pinId) {
   document.getElementById('detail-pin-coords').textContent = `${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}`;
   document.getElementById('detail-pin-name').value = pin.name;
 
-  // 若放點位置附近偵測到多個鄰近地標／店家，提供一鍵快選切換名稱
+  // 若放點位置附近偵測到多個鄰近地標／店家，提供一鍵快選切換名稱與精準吸附座標
   const candidatesEl = document.getElementById('detail-nearby-candidates');
   if (candidatesEl) {
     const candidates = Array.isArray(pin.nearbyCandidates) ? pin.nearbyCandidates : [];
@@ -333,10 +336,22 @@ export function openPinDetailModal(dayId, pinId) {
           document.getElementById('detail-pin-name').value = picked.name;
           if (editingPinContext) {
             editingPinContext.draftPlaceId = picked.placeId || '';
+            if (Number.isFinite(Number(picked.lat)) && Number.isFinite(Number(picked.lng))) {
+              editingPinContext.draftLat = Number(picked.lat);
+              editingPinContext.draftLng = Number(picked.lng);
+              document.getElementById('detail-pin-coords').textContent =
+                `${editingPinContext.draftLat.toFixed(5)}, ${editingPinContext.draftLng.toFixed(5)}`;
+            }
           }
           const gLink = document.getElementById('btn-open-pin-gmaps');
           if (gLink) {
-            gLink.href = buildGoogleMapsPlaceUrl({ ...pin, name: picked.name, placeId: picked.placeId || '' });
+            gLink.href = buildGoogleMapsPlaceUrl({
+              ...pin,
+              lat: editingPinContext?.draftLat ?? pin.lat,
+              lng: editingPinContext?.draftLng ?? pin.lng,
+              name: picked.name,
+              placeId: picked.placeId || '',
+            });
           }
         });
       });
@@ -382,15 +397,40 @@ function savePinDetail() {
   if (!editingPinContext) return;
   const state = getState();
   const day = state.days.find((d) => d.id === editingPinContext.dayId);
-  const pin = day?.pins.find((p) => p.id === editingPinContext.pinId);
-  if (!pin) return;
+  const pinIdx = day?.pins.findIndex((p) => p.id === editingPinContext.pinId);
+  if (!day || pinIdx === -1) return;
+  const pin = day.pins[pinIdx];
 
-  pin.name = document.getElementById('detail-pin-name').value.trim() || '未命名景點';
+  const nextName = document.getElementById('detail-pin-name').value.trim() || '未命名景點';
+  if (nextName !== editingPinContext.originalName) {
+    // 使用者已手動修改名稱（或主動改選指定地標），之後拖曳標點時保留此自訂名稱不覆蓋
+    pin.nameCustomized = true;
+  }
+  pin.name = nextName;
   pin.notes = document.getElementById('detail-pin-notes').value.trim();
   pin.image = editingPinContext.draftImage;
   pin.subSpots = editingPinContext.draftSubSpots.filter((s) => s.name.trim() !== '');
   if (editingPinContext.draftPlaceId) {
     pin.placeId = editingPinContext.draftPlaceId;
+  }
+
+  // 若切換鄰近地標候選並帶有精確座標，同步吸附並重算相鄰自動路徑
+  if (Number.isFinite(editingPinContext.draftLat) && Number.isFinite(editingPinContext.draftLng)) {
+    const moved =
+      Math.abs(pin.lat - editingPinContext.draftLat) > 1e-6 ||
+      Math.abs(pin.lng - editingPinContext.draftLng) > 1e-6;
+    if (moved) {
+      pin.lat = Number(editingPinContext.draftLat.toFixed(6));
+      pin.lng = Number(editingPinContext.draftLng.toFixed(6));
+      const invalidateAuto = (seg) => {
+        if (!seg || seg.status === 'manual') return;
+        seg.encodedPolyline = '';
+        seg.status = 'pending';
+        if (seg.mode === 'transit') seg.segments = [];
+      };
+      if (pinIdx > 0) invalidateAuto(day.pins[pinIdx - 1].transportToNext);
+      if (pinIdx < day.pins.length - 1) invalidateAuto(pin.transportToNext);
+    }
   }
 
   saveState((msg) => showToast(msg, 'error'));

@@ -549,27 +549,67 @@ export async function searchPlaces(query, { tripCountries = [], focusCenter = nu
   return payload;
 }
 
-function pickLocalizedTagName(tags = {}) {
-  return (
-    tags['name:zh-Hant'] ||
-    tags['name:zh-TW'] ||
-    tags['name:zh'] ||
-    tags.name ||
-    ''
-  ).trim();
+export function isCjkRegionCoord(lat, lng) {
+  const la = Number(lat);
+  const ln = Number(lng);
+  return Number.isFinite(la) && Number.isFinite(ln) && la >= 18 && la <= 46 && ln >= 100 && ln <= 146;
+}
+
+function hasCjkChars(str) {
+  return /[\u3400-\u9FFF\u3040-\u30FF]/.test(String(str || ''));
+}
+
+function isPureLatinName(str) {
+  const s = String(str || '').trim();
+  return /[A-Za-z]/.test(s) && !/[\u3400-\u9FFF\u3040-\u30FF\uAC00-\uD7AF]/.test(s);
+}
+
+export function pickLocalizedTagName(tags = {}) {
+  if (!tags || typeof tags !== 'object') return '';
+  const ordered = [
+    tags['name:zh-Hant-TW'],
+    tags['name:zh-TW'],
+    tags['name:zh-Hant'],
+    tags['name:zh'],
+    tags['official_name:zh-TW'],
+    tags['official_name:zh-Hant'],
+    tags['official_name:zh'],
+    tags['name:ja'],
+    tags['official_name:ja'],
+    tags['brand:zh-TW'],
+    tags['brand:zh-Hant'],
+    tags['brand:zh'],
+    tags['brand:ja'],
+    tags.name,
+    tags.brand,
+  ];
+  for (const cand of ordered) {
+    const clean = typeof cand === 'string' ? cand.trim() : '';
+    if (clean) return clean;
+  }
+  return '';
 }
 
 /**
- * 依「地標名稱優先 → 路名次之 → 街區備援」解析 Nominatim zoom=18 回傳結果
+ * 依「地標名稱優先（繁中／日文優先於純英文） → 路名次之 → 街區備援」解析 Nominatim zoom=18 回傳結果
  */
 export function pickPlaceNameFromNominatim(data) {
   if (!data || typeof data !== 'object') return null;
   const addr = data.address || {};
   const category = String(data.category || data.class || '').toLowerCase();
+  const typeVal = String(data.type || '').toLowerCase();
 
-  // 1. 若 Nominatim 直接命中地標／建物／車站／商家（非道路／行政區）
-  const rawName = (data.name || '').trim();
-  if (rawName && !NOMINATIM_NON_POI_CATEGORIES.has(category)) {
+  const isJunkCategory =
+    NOMINATIM_NON_POI_CATEGORIES.has(category) ||
+    JUNK_PHOTON_KEYS.has(category) ||
+    (category === 'amenity' && JUNK_OSM_AMENITIES.has(typeVal)) ||
+    (category === 'tourism' && JUNK_TOURISM_VALUES.has(typeVal)) ||
+    (category === 'railway' && JUNK_RAILWAY_VALUES.has(typeVal));
+
+  // 1. 若 Nominatim 直接命中地標／建物／車站／商家，優先取 namedetails 內的繁中／日文名稱
+  const localizedFromDetails = pickLocalizedTagName(data.namedetails);
+  const rawName = (localizedFromDetails || data.name || '').trim();
+  if (rawName && !isJunkCategory && !GENERIC_PLACEHOLDER_NAMES.has(rawName)) {
     const roadStr = (addr.road || '').trim();
     if (!roadStr || rawName !== roadStr) {
       return rawName;
@@ -578,7 +618,7 @@ export function pickPlaceNameFromNominatim(data) {
 
   for (const key of NOMINATIM_POI_KEYS) {
     const val = (addr[key] || '').trim();
-    if (val) return val;
+    if (val && !GENERIC_PLACEHOLDER_NAMES.has(val)) return val;
   }
 
   // 2. 次順位：明確路名
@@ -606,8 +646,11 @@ const JUNK_OSM_AMENITIES = new Set([
   'recycling',
   'post_box',
   'fire_hydrant',
+  'parking',
   'parking_entrance',
+  'parking_space',
   'bicycle_parking',
+  'bicycle_rental',
   'motorcycle_parking',
   'clock',
   'telephone',
@@ -617,6 +660,50 @@ const JUNK_OSM_AMENITIES = new Set([
   'shelter',
   'water_point',
   'fountain',
+  'ticket_validator',
+  'loading_dock',
+  'smoking_area',
+  'bbq',
+  'lounger',
+  'watering_place',
+]);
+
+const JUNK_PHOTON_KEYS = new Set([
+  'place',
+  'highway',
+  'boundary',
+  'information',
+  'water',
+  'natural',
+  'landuse',
+  'barrier',
+  'power',
+  'public_transport',
+]);
+
+const JUNK_TOURISM_VALUES = new Set(['photopoint', 'information', 'artwork', 'picnic_site', 'camp_pitch']);
+
+const JUNK_RAILWAY_VALUES = new Set([
+  'stop',
+  'platform',
+  'subway_entrance',
+  'train_station_entrance',
+  'switch',
+  'signal',
+  'crossing',
+  'rail',
+  'tram_stop',
+]);
+
+const JUNK_MAN_MADE_VALUES = new Set([
+  'bridge',
+  'surveillance',
+  'flagpole',
+  'street_cabinet',
+  'utility_pole',
+  'manhole',
+  'lamp',
+  'mast',
 ]);
 
 const GENERIC_PLACEHOLDER_NAMES = new Set([
@@ -633,37 +720,103 @@ const GENERIC_PLACEHOLDER_NAMES = new Set([
 
 function computeOsmReverseRadiusMeters(zoom) {
   const z = Number(zoom);
-  if (!Number.isFinite(z)) return 60;
+  if (!Number.isFinite(z)) return 65;
   if (z >= 19) return 45;
   if (z >= 18) return 60;
-  if (z >= 17) return 75;
-  return 95;
+  if (z >= 17) return 80;
+  if (z >= 16) return 110;
+  return 140;
+}
+
+function computeClientSnapThresholdMeters(zoom) {
+  const z = Number(zoom);
+  if (!Number.isFinite(z)) return 55;
+  if (z >= 19) return 32;
+  if (z >= 18) return 45;
+  if (z >= 17) return 65;
+  if (z >= 16) return 95;
+  return 130;
 }
 
 function isJunkOsmElement(tags = {}, name = '') {
   if (!name || GENERIC_PLACEHOLDER_NAMES.has(name)) return true;
-  if (JUNK_OSM_AMENITIES.has(String(tags.amenity || '').toLowerCase())) return true;
-  if (tags.emergency === 'fire_hydrant' || tags.man_made === 'surveillance') return true;
+  const amenity = String(tags.amenity || '').toLowerCase();
+  const tourism = String(tags.tourism || '').toLowerCase();
+  const railway = String(tags.railway || '').toLowerCase();
+  const manMade = String(tags.man_made || '').toLowerCase();
+
+  if (JUNK_OSM_AMENITIES.has(amenity)) return true;
+  if (tourism && JUNK_TOURISM_VALUES.has(tourism)) return true;
+  if (railway && JUNK_RAILWAY_VALUES.has(railway) && !tags.shop && !tags.tourism && !tags.amenity) return true;
+  if (manMade && JUNK_MAN_MADE_VALUES.has(manMade) && !tags.tourism && !tags.historic) return true;
+  if (tags.information || tags.water || tags.natural === 'tree') return true;
+  if (tags.emergency === 'fire_hydrant') return true;
   if (tags.highway || tags.boundary || tags.route) return true;
   return false;
 }
 
-function scoreOsmPoiTags(tags = {}) {
-  if (tags.shop || tags.tourism || tags.historic || tags.leisure) return 40;
-  if (tags.amenity && ['restaurant', 'cafe', 'fast_food', 'food_court', 'bar', 'pub', 'marketplace', 'cinema', 'theatre', 'arts_centre', 'library', 'museum'].includes(tags.amenity)) {
-    return 40;
+function scorePoiCategoryAndLocale(key, val, name, distKm, inCjkRegion) {
+  let tagBonus = 20;
+  if (
+    (key === 'tourism' && ['attraction', 'museum', 'gallery', 'theme_park', 'zoo', 'aquarium', 'viewpoint'].includes(val)) ||
+    (key === 'man_made' && ['tower', 'lighthouse', 'observatory', 'pier'].includes(val)) ||
+    (key === 'aeroway' && ['aerodrome', 'terminal'].includes(val)) ||
+    (key === 'historic' && ['castle', 'temple', 'shrine', 'monument', 'memorial', 'ruins', 'building'].includes(val)) ||
+    (key === 'shop' && ['mall', 'department_store'].includes(val)) ||
+    (key === 'railway' && ['station', 'halt'].includes(val)) ||
+    (key === 'leisure' && ['park', 'garden', 'stadium'].includes(val))
+  ) {
+    tagBonus = 46;
+  } else if (
+    key === 'shop' ||
+    key === 'tourism' ||
+    key === 'historic' ||
+    (key === 'amenity' &&
+      [
+        'restaurant',
+        'cafe',
+        'fast_food',
+        'food_court',
+        'bar',
+        'pub',
+        'marketplace',
+        'cinema',
+        'theatre',
+        'arts_centre',
+        'library',
+        'museum',
+        'place_of_worship',
+        'hospital',
+        'university',
+      ].includes(val))
+  ) {
+    tagBonus = 38;
+  } else if (key === 'building') {
+    tagBonus = val && val !== 'yes' ? 14 : 8;
   }
-  if (tags.railway || tags.public_transport || tags.aeroway) return 32;
-  if (tags.amenity || tags.craft || tags.healthcare) return 22;
-  if (tags.building && tags.building !== 'yes') return 14;
-  return 10;
+
+  let localeAdj = 0;
+  if (inCjkRegion) {
+    if (hasCjkChars(name)) localeAdj = 14;
+    else if (isPureLatinName(name)) localeAdj = -24;
+  }
+
+  return tagBonus + localeAdj - distKm * 480;
+}
+
+function pickPrimaryOsmKeyVal(tags = {}) {
+  for (const k of ['tourism', 'historic', 'aeroway', 'railway', 'shop', 'amenity', 'leisure', 'man_made', 'craft', 'healthcare', 'building']) {
+    if (tags[k]) return [k, String(tags[k]).toLowerCase()];
+  }
+  return ['other', ''];
 }
 
 /**
- * 解析 Photon Reverse 回傳的鄰近具名地標（排除門牌、道路與無意義微設施）
+ * 解析 Photon Reverse 回傳的鄰近具名地標（排除門牌、道路、導覽牌、水池、微設施，並於東亞區優先繁中／日文）
  */
-export function pickBestPoisFromPhoton(data, lat, lng, maxDistKm = 0.085) {
+export function pickBestPoisFromPhoton(data, lat, lng, maxDistKm = 0.095) {
   const features = Array.isArray(data?.features) ? data.features : [];
+  const inCjkRegion = isCjkRegionCoord(lat, lng);
   const ranked = [];
   const seen = new Set();
 
@@ -674,32 +827,34 @@ export function pickBestPoisFromPhoton(data, lat, lng, maxDistKm = 0.085) {
 
     const key = String(p.osm_key || '').toLowerCase();
     const val = String(p.osm_value || '').toLowerCase();
-    if (NOMINATIM_NON_POI_CATEGORIES.has(key)) continue;
+    if (NOMINATIM_NON_POI_CATEGORIES.has(key) || JUNK_PHOTON_KEYS.has(key)) continue;
     if (key === 'amenity' && JUNK_OSM_AMENITIES.has(val)) continue;
-    if (key === 'place' || key === 'highway' || key === 'boundary') continue;
+    if (key === 'tourism' && JUNK_TOURISM_VALUES.has(val)) continue;
+    if (key === 'railway' && JUNK_RAILWAY_VALUES.has(val)) continue;
+    if (key === 'man_made' && JUNK_MAN_MADE_VALUES.has(val)) continue;
 
     const coords = feat?.geometry?.coordinates;
     if (!Array.isArray(coords) || coords.length < 2) continue;
-    const distKm = calcDistanceKm(lat, lng, Number(coords[1]), Number(coords[0]));
+    const pLat = Number(coords[1]);
+    const pLng = Number(coords[0]);
+    const distKm = calcDistanceKm(lat, lng, pLat, pLng);
     if (!Number.isFinite(distKm) || distKm > maxDistKm) continue;
 
     const canon = canonicalizePlaceName(name);
     if (!canon || seen.has(canon)) continue;
     seen.add(canon);
 
-    const tagBonus =
-      ['shop', 'tourism', 'historic', 'leisure'].includes(key) ||
-      (key === 'amenity' && ['food_court', 'restaurant', 'cafe', 'marketplace'].includes(val))
-        ? 35
-        : ['railway', 'public_transport', 'aeroway'].includes(key)
-          ? 28
-          : key === 'building'
-            ? 12
-            : 20;
-
-    // 距離越近且屬於明確商店／景點分數越高
-    const score = tagBonus - distKm * 450;
-    ranked.push({ name, placeId: '', distKm, score, source: 'photon_poi' });
+    const score = scorePoiCategoryAndLocale(key, val, name, distKm, inCjkRegion);
+    ranked.push({
+      name,
+      placeId: '',
+      lat: Number(pLat.toFixed(6)),
+      lng: Number(pLng.toFixed(6)),
+      distKm,
+      distanceMeters: Math.round(distKm * 1000),
+      score,
+      source: 'photon_poi',
+    });
   }
 
   ranked.sort((a, b) => b.score - a.score);
@@ -723,12 +878,21 @@ async function queryBackendGoogleReverse(lat, lng, zoom) {
     if (!res.ok) return null;
     const data = await res.json();
     if (data?.status === 'ok' && data?.name) {
-      return {
+      const result = {
         name: String(data.name).trim(),
         placeId: data.placeId || '',
         source: data.source || 'google',
+        snapped: data.snapped === true,
         candidates: Array.isArray(data.candidates) ? data.candidates : [],
       };
+      if (Number.isFinite(Number(data.lat)) && Number.isFinite(Number(data.lng))) {
+        result.lat = Number(data.lat);
+        result.lng = Number(data.lng);
+      }
+      if (Number.isFinite(Number(data.distanceMeters))) {
+        result.distanceMeters = Number(data.distanceMeters);
+      }
+      return result;
     }
     return null;
   } catch {
@@ -740,13 +904,13 @@ async function queryPhotonReverse(lat, lng, radiusMeters) {
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 3200);
-    const radiusKm = Math.max(0.045, Math.min(0.12, radiusMeters / 1000));
-    const url = `https://photon.komoot.io/reverse?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}&limit=10&radius=${radiusKm.toFixed(3)}`;
+    const radiusKm = Math.max(0.045, Math.min(0.14, radiusMeters / 1000));
+    const url = `https://photon.komoot.io/reverse?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}&limit=18&radius=${radiusKm.toFixed(3)}`;
     const res = await fetch(url, { signal: ctrl.signal });
     clearTimeout(timer);
     if (!res.ok) return [];
     const data = await res.json();
-    return pickBestPoisFromPhoton(data, lat, lng, radiusKm + 0.02);
+    return pickBestPoisFromPhoton(data, lat, lng, radiusKm + 0.025);
   } catch {
     return [];
   }
@@ -756,7 +920,8 @@ async function fetchOverpassPoisFromEndpoint(endpoint, lat, lng, radiusMeters) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 3000);
   try {
-    const query = `[out:json][timeout:3];nwr(around:${radiusMeters},${lat},${lng})["name"][!"highway"][!"boundary"][!"place"];out center 14;`;
+    const inCjkRegion = isCjkRegionCoord(lat, lng);
+    const query = `[out:json][timeout:3];nwr(around:${radiusMeters},${lat},${lng})["name"][!"highway"][!"boundary"][!"place"];out center 18;`;
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
@@ -773,16 +938,26 @@ async function fetchOverpassPoisFromEndpoint(endpoint, lat, lng, radiusMeters) {
     for (const el of elements) {
       const name = pickLocalizedTagName(el.tags);
       if (isJunkOsmElement(el.tags, name)) continue;
-      const eLat = el.lat ?? el.center?.lat;
-      const eLng = el.lon ?? el.center?.lon;
-      if (eLat == null || eLng == null) continue;
+      const eLat = Number(el.lat ?? el.center?.lat);
+      const eLng = Number(el.lon ?? el.center?.lon);
+      if (!Number.isFinite(eLat) || !Number.isFinite(eLng)) continue;
       const canon = canonicalizePlaceName(name);
       if (!canon || seen.has(canon)) continue;
       seen.add(canon);
 
       const distKm = calcDistanceKm(lat, lng, eLat, eLng);
-      const score = scoreOsmPoiTags(el.tags) - distKm * 450;
-      ranked.push({ name, placeId: '', distKm, score, source: 'osm_poi' });
+      const [key, val] = pickPrimaryOsmKeyVal(el.tags);
+      const score = scorePoiCategoryAndLocale(key, val, name, distKm, inCjkRegion);
+      ranked.push({
+        name,
+        placeId: '',
+        lat: Number(eLat.toFixed(6)),
+        lng: Number(eLng.toFixed(6)),
+        distKm,
+        distanceMeters: Math.round(distKm * 1000),
+        score,
+        source: 'osm_poi',
+      });
     }
     ranked.sort((a, b) => b.score - a.score);
     return ranked.slice(0, 5);
@@ -815,7 +990,7 @@ async function queryNominatimReverse(lat, lng) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 4500);
     const res = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&accept-language=zh-TW&zoom=18&addressdetails=1`,
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&accept-language=zh-TW,zh-Hant,zh,ja&zoom=18&addressdetails=1&namedetails=1`,
       { signal: ctrl.signal }
     );
     clearTimeout(timer);
@@ -828,21 +1003,22 @@ async function queryNominatimReverse(lat, lng) {
 }
 
 export async function reverseGeocode(lat, lng, { zoom = 17 } = {}) {
-  // 1. 優先查詢後端 Google Maps 標點（依縮放動態半徑 45–130m 抓 POI，其次路名）
+  // 1. 優先查詢後端 Google Maps 標點（依縮放動態半徑 40–150m 抓 POI 與精確吸附座標，其次路名）
   const googleHit = await queryBackendGoogleReverse(lat, lng, zoom);
   if (googleHit?.name && googleHit.source === 'google_poi') {
     return googleHit;
   }
 
-  // 2. 若未命中 Google POI，三軌並行比對：Photon Reverse（商場／地標）＋ Overpass（過濾飲水機等雜訊）＋ Nominatim zoom=18
+  // 2. 若未命中 Google POI，三軌並行比對：Photon Reverse（商場／地標）＋ Overpass（繁中／日文優先、排除微設施）＋ Nominatim zoom=18
   const osmRadius = computeOsmReverseRadiusMeters(zoom);
+  const snapThreshold = computeClientSnapThresholdMeters(zoom);
   const [photonPois, osmPois, nominatimName] = await Promise.all([
     queryPhotonReverse(lat, lng, osmRadius),
     queryNearbyOsmPois(lat, lng, osmRadius),
     queryNominatimReverse(lat, lng),
   ]);
 
-  // 合併並依 POI 品質＋距離排序，同時保留最多 5 個鄰近候選供使用者一鍵切換
+  // 合併並依 POI 品質＋語系＋距離排序，同時保留座標供自動吸附與一鍵切換
   const combinedPois = [...osmPois, ...photonPois];
   combinedPois.sort((a, b) => b.score - a.score);
   const dedupedPois = [];
@@ -851,23 +1027,38 @@ export async function reverseGeocode(lat, lng, { zoom = 17 } = {}) {
     const canon = canonicalizePlaceName(p.name);
     if (!canon || seenCanon.has(canon)) continue;
     seenCanon.add(canon);
-    dedupedPois.push({ name: p.name, placeId: p.placeId || '' });
+    const item = { name: p.name, placeId: p.placeId || '' };
+    if (Number.isFinite(p.lat) && Number.isFinite(p.lng)) {
+      item.lat = p.lat;
+      item.lng = p.lng;
+      item.distanceMeters = p.distanceMeters;
+    }
+    dedupedPois.push(item);
     if (dedupedPois.length >= 5) break;
   }
 
   if (dedupedPois.length > 0) {
-    return {
-      name: dedupedPois[0].name,
-      placeId: dedupedPois[0].placeId,
+    const top = dedupedPois[0];
+    const hasCoords = Number.isFinite(top.lat) && Number.isFinite(top.lng);
+    const out = {
+      name: top.name,
+      placeId: top.placeId,
       source: 'osm_poi',
+      snapped: hasCoords && Number.isFinite(top.distanceMeters) && top.distanceMeters <= snapThreshold,
       candidates: dedupedPois.length > 1 ? dedupedPois : [],
     };
+    if (hasCoords) {
+      out.lat = top.lat;
+      out.lng = top.lng;
+      out.distanceMeters = top.distanceMeters;
+    }
+    return out;
   }
   if (googleHit?.name) {
     return googleHit;
   }
   if (nominatimName) {
-    return { name: nominatimName, placeId: '', source: 'nominatim', candidates: [] };
+    return { name: nominatimName, placeId: '', source: 'nominatim', snapped: false, candidates: [] };
   }
   return null;
 }

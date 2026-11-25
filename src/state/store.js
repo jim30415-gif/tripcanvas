@@ -36,35 +36,66 @@ function normalizeDay(day, index) {
     color: day?.color || DAY_COLORS[index % DAY_COLORS.length],
     visible: day?.visible !== false,
     pins: Array.isArray(day?.pins)
-      ? day.pins.map((pin, pIdx) => ({
-          id: pin?.id || `pin_${index + 1}_${pIdx + 1}`,
-          name: typeof pin?.name === 'string' && pin.name.trim() ? pin.name : `自訂景點 ${pIdx + 1}`,
-          lat: Number(pin?.lat) || 0,
-          lng: Number(pin?.lng) || 0,
-          image: pin?.image || null,
-          notes: typeof pin?.notes === 'string' ? pin.notes : '',
-          subSpots: Array.isArray(pin?.subSpots)
-            ? pin.subSpots.map((s, sIdx) => {
-                const sub = {
-                  id: s?.id || `sub_${pIdx}_${sIdx}`,
-                  name: typeof s?.name === 'string' ? s.name : '',
-                  cost: Math.max(0, Number(s?.cost) || 0),
-                  category: normalizeCategory(s?.category),
-                };
-                if (
-                  typeof s?.originalCurrency === 'string' &&
-                  s.originalCurrency &&
-                  s.originalCurrency !== 'TWD' &&
-                  Number(s?.originalAmount) > 0
-                ) {
-                  sub.originalCurrency = s.originalCurrency.toUpperCase();
-                  sub.originalAmount = Number(s.originalAmount);
+      ? day.pins.map((pin, pIdx) => {
+          const normalized = {
+            id: pin?.id || `pin_${index + 1}_${pIdx + 1}`,
+            name: typeof pin?.name === 'string' && pin.name.trim() ? pin.name : `自訂景點 ${pIdx + 1}`,
+            lat: Number(pin?.lat) || 0,
+            lng: Number(pin?.lng) || 0,
+            image: pin?.image || null,
+            notes: typeof pin?.notes === 'string' ? pin.notes : '',
+            subSpots: Array.isArray(pin?.subSpots)
+              ? pin.subSpots.map((s, sIdx) => {
+                  const sub = {
+                    id: s?.id || `sub_${pIdx}_${sIdx}`,
+                    name: typeof s?.name === 'string' ? s.name : '',
+                    cost: Math.max(0, Number(s?.cost) || 0),
+                    category: normalizeCategory(s?.category),
+                  };
+                  if (
+                    typeof s?.originalCurrency === 'string' &&
+                    s.originalCurrency &&
+                    s.originalCurrency !== 'TWD' &&
+                    Number(s?.originalAmount) > 0
+                  ) {
+                    sub.originalCurrency = s.originalCurrency.toUpperCase();
+                    sub.originalAmount = Number(s.originalAmount);
+                  }
+                  return sub;
+                })
+              : [],
+            transportToNext: normalizeTransport(pin?.transportToNext),
+          };
+          if (pin?.nameCustomized === true) {
+            normalized.nameCustomized = true;
+          }
+          if (typeof pin?.placeId === 'string' && pin.placeId.trim()) {
+            normalized.placeId = pin.placeId.trim();
+          }
+          if (typeof pin?.countryCode === 'string' && pin.countryCode.trim()) {
+            normalized.countryCode = pin.countryCode.trim().toUpperCase();
+          }
+          if (Array.isArray(pin?.nearbyCandidates) && pin.nearbyCandidates.length > 1) {
+            const cleanCands = pin.nearbyCandidates
+              .filter((c) => c && typeof c.name === 'string' && c.name.trim())
+              .slice(0, 5)
+              .map((c) => {
+                const item = { name: c.name.trim(), placeId: typeof c.placeId === 'string' ? c.placeId : '' };
+                if (Number.isFinite(Number(c.lat)) && Number.isFinite(Number(c.lng))) {
+                  item.lat = Number(c.lat);
+                  item.lng = Number(c.lng);
                 }
-                return sub;
-              })
-            : [],
-          transportToNext: normalizeTransport(pin?.transportToNext),
-        }))
+                if (Number.isFinite(Number(c.distanceMeters))) {
+                  item.distanceMeters = Number(c.distanceMeters);
+                }
+                return item;
+              });
+            if (cleanCands.length > 1) {
+              normalized.nearbyCandidates = cleanCands;
+            }
+          }
+          return normalized;
+        })
       : [],
   };
 }

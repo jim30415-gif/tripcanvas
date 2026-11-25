@@ -11,6 +11,7 @@ import {
   extractBusRouteNumber,
   formatLineDisplayName,
   handleComputeRoutes,
+  handleReverseGeocode,
   handleStatusRequest,
   normalizeLandRoute,
   normalizeTransitRoute,
@@ -953,7 +954,7 @@ test('單景點 Google Maps 跳轉連結與「標點優先、次順位路名」�
       ],
     }
   );
-  assert.deepEqual(gRoad, { name: '忠孝東路二段', placeId: '', source: 'google_road' });
+  assert.deepEqual(gRoad, { name: '忠孝東路二段', placeId: '', source: 'google_road', snapped: false });
 
   const gUnnamed = pickBestPlaceFromGoogle(null, {
     results: [{ types: ['route'], address_components: [{ long_name: 'Unnamed Road', types: ['route'] }] }],
@@ -1112,7 +1113,7 @@ test('鄰近地標解析：排除飲水機／商辦大樓雜訊，精準抓出�
   assert.equal(picked[0].name, '墨凡商場');
   assert.equal(picked[1].name, '高雄鐵路地下化展示館(舊高雄車站)');
 
-  // Google Places 多鄰近店家距離排序與候選清單
+  // Google Places 多鄰近店家距離排序與候選清單（含自動吸附座標）
   const googleCluster = pickBestPlaceFromGoogle(
     {
       places: [
@@ -1133,13 +1134,180 @@ test('鄰近地標解析：排除飲水機／商辦大樓雜訊，精準抓出�
       ],
     },
     null,
-    { lat: 22.6388, lng: 120.3024 }
+    { lat: 22.6388, lng: 120.3024 },
+    19
   );
   assert.equal(googleCluster.name, '安利美特 高雄店');
   assert.equal(googleCluster.placeId, 'p_near');
+  assert.equal(googleCluster.snapped, true);
+  assert.equal(googleCluster.lat, 22.63882);
+  assert.equal(googleCluster.lng, 120.30242);
   assert.equal(googleCluster.candidates.length, 2);
   assert.equal(googleCluster.candidates[1].name, '台鐵便當 高雄東側店');
+  assert.equal(googleCluster.candidates[1].lat, 22.6391);
 });
+
+test('地標吸附、繁中／日文防英文搶位、Table A 參數合規與 nameCustomized 狀態保留', async () => {
+  const { pickBestPoisFromPhoton, pickPlaceNameFromNominatim, pickLocalizedTagName } = await import(
+    '../src/services/geocoder.js'
+  );
+  const { normalizeState } = await import('../src/state/store.js');
+
+  // 1. 東京鐵塔實測案例：排除 photopoint "Love"，優先選出「東京タワー」且帶座標
+  const tokyoTowerPhoton = pickBestPoisFromPhoton(
+    {
+      features: [
+        { properties: { name: 'Love', osm_key: 'tourism', osm_value: 'photopoint' }, geometry: { coordinates: [139.74541, 35.65861] } },
+        { properties: { name: '大展望台', osm_key: 'building', osm_value: 'yes' }, geometry: { coordinates: [139.74542, 35.6586] } },
+        { properties: { name: '東京タワー', osm_key: 'man_made', osm_value: 'tower' }, geometry: { coordinates: [139.74543, 35.65858] } },
+      ],
+    },
+    35.6586,
+    139.7454,
+    0.09
+  );
+  assert.equal(tokyoTowerPhoton[0].name, '東京タワー');
+  assert.equal(tokyoTowerPhoton[0].lat, 35.65858);
+
+  // 2. 台北 101 實測案例：中文地標「台北101」優先於純英文餐廳 "Sawadee"
+  const t101Photon = pickBestPoisFromPhoton(
+    {
+      features: [
+        { properties: { name: 'Sawadee', osm_key: 'amenity', osm_value: 'restaurant' }, geometry: { coordinates: [121.5645, 25.03391] } },
+        { properties: { name: '台北101', osm_key: 'tourism', osm_value: 'attraction' }, geometry: { coordinates: [121.56452, 25.03392] } },
+      ],
+    },
+    25.0339,
+    121.5645,
+    0.09
+  );
+  assert.equal(t101Photon[0].name, '台北101');
+
+  // 3. 淺草寺實測案例：過濾 Koi Fish Pond（水池）與西境内案内図（導覽牌）
+  const sensojiPhoton = pickBestPoisFromPhoton(
+    {
+      features: [
+        { properties: { name: 'Koi Fish Pond', osm_key: 'water', osm_value: 'fishpond' }, geometry: { coordinates: [139.7967, 35.7148] } },
+        { properties: { name: '西境内案内図', osm_key: 'information', osm_value: 'map' }, geometry: { coordinates: [139.79671, 35.71481] } },
+        { properties: { name: '浅草寺', osm_key: 'historic', osm_value: 'temple' }, geometry: { coordinates: [139.79675, 35.71476] } },
+      ],
+    },
+    35.7148,
+    139.7967,
+    0.09
+  );
+  assert.equal(sensojiPhoton.length, 1);
+  assert.equal(sensojiPhoton[0].name, '浅草寺');
+
+  // 4. Nominatim namedetails 與 OSM tags：有繁中／日文時絕不落回純英文
+  assert.equal(
+    pickPlaceNameFromNominatim({
+      category: 'tourism',
+      type: 'attraction',
+      name: 'Senso-ji',
+      namedetails: { name: 'Senso-ji', 'name:zh-TW': '淺草寺', 'name:ja': '浅草寺' },
+      address: { road: '仲見世通り' },
+    }),
+    '淺草寺'
+  );
+  assert.equal(
+    pickLocalizedTagName({ name: 'Starbucks', 'brand:zh-TW': '星巴克' }),
+    '星巴克'
+  );
+
+  // 5. Google Places：略過永久歇業店家、ATM 與純英文重疊條目讓位給中文底圖標點，且請求僅送 Table A excludedTypes
+  const originalFetch = globalThis.fetch;
+  let sentBody = null;
+  let sentFieldMask = '';
+  try {
+    globalThis.fetch = async (url, init) => {
+      if (String(url).includes('places:searchNearby')) {
+        sentBody = JSON.parse(init.body);
+        sentFieldMask = init.headers['X-Goog-FieldMask'];
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            places: [
+              {
+                id: 'closed1',
+                displayName: { text: '已倒閉舊店' },
+                primaryType: 'restaurant',
+                businessStatus: 'CLOSED_PERMANENTLY',
+                location: { latitude: 22.6388, longitude: 120.3024 },
+              },
+              {
+                id: 'atm1',
+                displayName: { text: '中國信託 ATM' },
+                primaryType: 'atm',
+                types: ['atm'],
+                businessStatus: 'OPERATIONAL',
+                location: { latitude: 22.638805, longitude: 120.302405 },
+              },
+              {
+                id: 'shop_zh',
+                displayName: { text: '安利美特 高雄店' },
+                primaryType: 'book_store',
+                types: ['book_store', 'store'],
+                businessStatus: 'OPERATIONAL',
+                location: { latitude: 22.63889, longitude: 120.30246 },
+              },
+            ],
+          }),
+        };
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    };
+
+    const revRes = await handleReverseGeocode(22.6388, 120.3024, { GOOGLE_MAPS_API_KEY: 'test-key' }, 19);
+    assert.equal(revRes.body.status, 'ok');
+    assert.equal(revRes.body.name, '安利美特 高雄店');
+    assert.equal(revRes.body.snapped, true);
+    assert.equal(revRes.body.lat, 22.63889);
+    assert.equal(revRes.body.lng, 120.30246);
+    assert.ok(sentFieldMask.includes('places.businessStatus'));
+    assert.equal(sentBody.languageCode, 'zh-TW');
+    // 確保不包含任何 Table B 違法過濾值
+    for (const forbidden of ['political', 'route', 'street_address', 'intersection', 'sublocality']) {
+      assert.ok(!sentBody.excludedTypes.includes(forbidden), `excludedTypes 不得含 Table B: ${forbidden}`);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  // 6. normalizeState 正確保留 nameCustomized、placeId、countryCode 與 nearbyCandidates 座標
+  const normalized = normalizeState({
+    activeDayId: 'd1',
+    days: [
+      {
+        id: 'd1',
+        name: 'Day 1',
+        pins: [
+          {
+            id: 'p1',
+            name: '我的私房早午餐',
+            lat: 25.04,
+            lng: 121.52,
+            nameCustomized: true,
+            placeId: 'ChIJ_custom',
+            countryCode: 'tw',
+            nearbyCandidates: [
+              { name: '墨凡商場', placeId: 'p1', lat: 22.63859, lng: 120.30253 },
+              { name: '安利美特 高雄店', placeId: 'p2', lat: 22.63882, lng: 120.30242 },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  const p = normalized.days[0].pins[0];
+  assert.equal(p.nameCustomized, true);
+  assert.equal(p.placeId, 'ChIJ_custom');
+  assert.equal(p.countryCode, 'TW');
+  assert.equal(p.nearbyCandidates.length, 2);
+  assert.equal(p.nearbyCandidates[1].lat, 22.63882);
+});
+
 
 
 
