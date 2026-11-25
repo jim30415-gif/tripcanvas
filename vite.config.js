@@ -152,7 +152,8 @@ function createRoutesApiPlugin(env) {
         if (wantsReverse) {
           const lat = parsedUrl.searchParams.get('lat');
           const lng = parsedUrl.searchParams.get('lng');
-          const result = await handleReverseGeocode(lat, lng, env);
+          const zoom = parsedUrl.searchParams.get('zoom');
+          const result = await handleReverseGeocode(lat, lng, env, zoom);
           res.statusCode = result.statusCode;
           res.end(JSON.stringify(result.body));
           return;

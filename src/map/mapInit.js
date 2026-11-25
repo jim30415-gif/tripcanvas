@@ -56,6 +56,10 @@ function createOfflineCanvasGridLayer(options) {
 
 function mountTileSourceSilently(sourceIndex) {
   if (!mapInstance) return;
+  if (mapInstance._animatingZoom) {
+    mapInstance.once('zoomend', () => mountTileSourceSilently(sourceIndex));
+    return;
+  }
   const source = SILENT_TILE_SOURCES[sourceIndex] || SILENT_TILE_SOURCES[SILENT_TILE_SOURCES.length - 1];
 
   if (activeBaseLayer) {
@@ -90,7 +94,7 @@ function mountTileSourceSilently(sourceIndex) {
     if (tileRuntime.token !== token) return;
     tileRuntime.tileErrorCount++;
     if (
-      tileRuntime.tileErrorCount > 4 &&
+      tileRuntime.tileErrorCount > 10 &&
       tileRuntime.tileSuccessCount === 0 &&
       !tileRuntime.switched &&
       sourceIndex + 1 < SILENT_TILE_SOURCES.length
@@ -269,6 +273,10 @@ export function initMap({ onMapClick, onMapRightClick }) {
 
 export function getMap() {
   return mapInstance;
+}
+
+export function getMapZoom() {
+  return mapInstance ? mapInstance.getZoom() : 16;
 }
 
 export function getOverlayGroup() {

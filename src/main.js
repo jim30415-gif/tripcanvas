@@ -17,6 +17,7 @@ import { initDriveSync } from './services/driveSync.js';
 import { reverseGeocode } from './services/geocoder.js';
 import {
   initMap,
+  getMapZoom,
   getOverlayGroup,
   invalidateMapSize,
   fitBoundsToPoints,
@@ -40,13 +41,29 @@ import {
   hasOpenMobileOverlay,
   getMobileFitBoundsOptions,
 } from './ui/mobileNav.js';
-import { showToast } from './ui/dialog.js';
+import { openCustomDialog, showToast } from './ui/dialog.js';
 import { refreshIcons, uid } from './utils/format.js';
 
 let isLeftCollapsed = false;
 let isRightCollapsed = false;
 
+function getDesktopFitBoundsOptions(maxZoom = 15) {
+  if (typeof window === 'undefined' || window.innerWidth < 1024) {
+    return { padding: [70, 70], maxZoom };
+  }
+  const leftEl = document.getElementById('panel-left');
+  const rightEl = document.getElementById('panel-right');
+  const leftW = !isLeftCollapsed && leftEl ? leftEl.getBoundingClientRect().width : 0;
+  const rightW = !isRightCollapsed && rightEl ? rightEl.getBoundingClientRect().width : 0;
+  return {
+    paddingTopLeft: [Math.round(leftW + 46), 72],
+    paddingBottomRight: [Math.round(rightW + 46), 88],
+    maxZoom,
+  };
+}
+
 function syncDesktopSidebarCollapseUI() {
+  const appMain = document.getElementById('app-main');
   const leftPanel = document.getElementById('panel-left');
   const rightPanel = document.getElementById('panel-right');
   const btnLeft = document.getElementById('btn-collapse-left');
@@ -56,6 +73,8 @@ function syncDesktopSidebarCollapseUI() {
   const btnFs = document.getElementById('btn-toggle-map-fullscreen');
   const iconFs = document.getElementById('icon-map-fullscreen');
 
+  appMain?.classList.toggle('desktop-left-collapsed', isLeftCollapsed);
+  appMain?.classList.toggle('desktop-right-collapsed', isRightCollapsed);
   leftPanel?.classList.toggle('desktop-collapsed', isLeftCollapsed);
   rightPanel?.classList.toggle('desktop-collapsed', isRightCollapsed);
 
@@ -86,7 +105,7 @@ function syncDesktopSidebarCollapseUI() {
 
   refreshIcons();
   invalidateMapSize();
-  setTimeout(() => invalidateMapSize(), 180);
+  setTimeout(() => invalidateMapSize(), 260);
 }
 
 function updateMapHeaderUI() {
@@ -196,7 +215,7 @@ function selectDayAndFocus(dayId) {
     const opts =
       window.innerWidth < 1024 && hasOpenMobileOverlay()
         ? getMobileFitBoundsOptions({ splitOpen: true })
-        : { padding: [80, 80], maxZoom: 14 };
+        : getDesktopFitBoundsOptions(14);
     fitBoundsToPoints(
       chosen.pins.map((p) => [p.lat, p.lng]),
       opts
@@ -221,12 +240,45 @@ function createAndAddNewDay() {
   showToast(`已新增「${newDay.name}」圖層`, 'success');
 }
 
+async function quickDeletePin(dayId, pinId) {
+  const state = getState();
+  const day = state.days.find((d) => d.id === dayId);
+  const idx = day?.pins.findIndex((p) => p.id === pinId);
+  if (!day || idx === -1) return;
+  const target = day.pins[idx];
+
+  const ok = await openCustomDialog({
+    title: '刪除此景點標點？',
+    message: `確定要從「${day.name}」移除「${target.name}」及其小景點紀錄嗎？`,
+    confirmText: '確定刪除',
+    danger: true,
+  });
+  if (!ok) return;
+
+  const latestState = getState();
+  const latestDay = latestState.days.find((d) => d.id === dayId);
+  const latestIdx = latestDay?.pins.findIndex((p) => p.id === pinId);
+  if (!latestDay || latestIdx === -1) return;
+
+  const [removed] = latestDay.pins.splice(latestIdx, 1);
+  // 移除節點後清除前一點原本連向已刪除節點的交通快取
+  if (latestIdx > 0 && latestDay.pins[latestIdx - 1]) {
+    latestDay.pins[latestIdx - 1].transportToNext = null;
+  }
+  saveState((msg) => showToast(msg, 'error'));
+  renderAll();
+  showToast(`已刪除景點「${removed.name}」`, 'info');
+}
+
 function renderLeft() {
   renderLeftPanel({
     onOpenPinDetail: (dayId, pinId) => openPinDetailModal(dayId, pinId),
     onOpenTransport: (dayId, pinIdx) => openTransportModal(dayId, pinIdx),
     onSelectDay: (dayId) => selectDayAndFocus(dayId),
     onAddDay: () => createAndAddNewDay(),
+    onDeletePin: (dayId, pinId) => {
+      void quickDeletePin(dayId, pinId);
+    },
     onReorderPins: (dayId, fromIdx, toIdx) => {
       const state = getState();
       const day = state.days.find((d) => d.id === dayId);
@@ -255,6 +307,7 @@ function renderRight() {
       renderMapLayers();
       renderMobileHud();
     },
+    getFitBoundsOptions: (maxZoom) => getDesktopFitBoundsOptions(maxZoom),
   });
   renderMobileHud();
 }
@@ -291,7 +344,7 @@ function fitMapToVisiblePins(silentIfEmpty = false) {
   const opts =
     window.innerWidth < 1024 && hasOpenMobileOverlay()
       ? getMobileFitBoundsOptions({ splitOpen: true })
-      : { padding: [70, 70], maxZoom: 15 };
+      : getDesktopFitBoundsOptions(15);
   fitBoundsToPoints(pts, opts);
 }
 
@@ -324,15 +377,17 @@ function addPinAtCoordinate(lat, lng, customName = null, meta = {}) {
   showToast(`已於「${activeDay.name}」新增標點 #${pinNum}`, 'success');
 
   if (!customName) {
-    reverseGeocode(newPin.lat, newPin.lng).then((resolved) => {
+    reverseGeocode(newPin.lat, newPin.lng, { zoom: getMapZoom() }).then((resolved) => {
       const niceName = typeof resolved === 'string' ? resolved : resolved?.name;
       const placeId = typeof resolved === 'object' ? resolved?.placeId || '' : '';
+      const candidates = typeof resolved === 'object' && Array.isArray(resolved?.candidates) ? resolved.candidates : [];
       if (!niceName) return;
       const latestDay = getState().days.find((d) => d.id === activeDay.id);
       const pin = latestDay?.pins.find((p) => p.id === newPin.id);
       if (pin && pin.name.startsWith('自訂景點 ')) {
         pin.name = niceName;
         if (placeId) pin.placeId = placeId;
+        if (candidates.length > 1) pin.nearbyCandidates = candidates;
         saveState((msg) => showToast(msg, 'error'));
         renderLeft();
         renderMapLayers();

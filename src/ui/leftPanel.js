@@ -211,7 +211,7 @@ function renderConnectorHTML(day, pin, idx) {
   `;
 }
 
-function bindItineraryInteractions(day, { onOpenPinDetail, onOpenTransport, onReorderPins }) {
+function bindItineraryInteractions(day, { onOpenPinDetail, onOpenTransport, onReorderPins, onDeletePin }) {
   const listEl = document.getElementById('itinerary-list');
   if (!listEl) return;
 
@@ -222,10 +222,20 @@ function bindItineraryInteractions(day, { onOpenPinDetail, onOpenTransport, onRe
     });
   });
 
-  // 單景點直接跳轉 Google Maps 按鈕（避免誤觸開詳情或長按拖曳）
+  // 單景點直接跳轉 Google Maps 與快速刪除按鈕（避免誤觸開詳情或長按拖曳）
   listEl.querySelectorAll('.btn-card-gmaps').forEach((link) => {
     link.addEventListener('pointerdown', (e) => e.stopPropagation());
     link.addEventListener('click', (e) => e.stopPropagation());
+  });
+
+  listEl.querySelectorAll('.btn-card-delete').forEach((btn) => {
+    btn.addEventListener('pointerdown', (e) => e.stopPropagation());
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (typeof onDeletePin === 'function') {
+        onDeletePin(day.id, btn.dataset.deletePinId);
+      }
+    });
   });
 
   listEl.querySelectorAll('.pin-card').forEach((card) => {
@@ -476,35 +486,43 @@ export function renderLeftPanel(callbacks) {
             }
 
             <div class="flex-1 min-w-0">
-              <div class="flex items-center justify-between gap-1">
-                <h3 class="text-[15px] font-bold text-owl-text truncate">${escapeHTML(pin.name)}</h3>
-                <div class="flex items-center gap-0.5 shrink-0">
-                  <a
-                    href="${escapeHTML(gmapsUrl)}"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title="在 Google Maps 開啟此景點"
-                    aria-label="在 Google Maps 開啟 ${escapeHTML(pin.name)}"
-                    class="btn-card-gmaps w-7 h-7 rounded-lg text-[#4F6F57] hover:bg-[#EBF2EC] flex items-center justify-center transition"
-                  >
-                    <i data-lucide="navigation" class="w-3.5 h-3.5"></i>
-                  </a>
-                  <i data-lucide="chevron-right" class="pin-card-chevron w-4 h-4 text-owl-muted group-hover:text-owl-primary shrink-0 transition"></i>
-                </div>
-              </div>
+              <h3 class="text-[15px] font-bold text-owl-text truncate">${escapeHTML(pin.name)}</h3>
               ${pin.notes ? `<p class="text-xs text-owl-subtext truncate mt-0.5">${escapeHTML(pin.notes)}</p>` : ''}
               ${
                 subCount > 0
                   ? `
                 <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
-                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-owl-softBg text-xs font-semibold text-owl-subtext">
-                    <i data-lucide="sparkles" class="w-3 h-3 text-[#C48F3B]"></i>
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-owl-softBg text-xs font-semibold text-owl-subtext whitespace-nowrap">
+                    <i data-lucide="sparkles" class="w-3 h-3 text-[#C48F3B] shrink-0"></i>
                     ${subCount} 個小景點
                   </span>
                 </div>
               `
                   : ''
               }
+            </div>
+
+            <!-- 右側上下對稱快速操作列：上方 Google Maps 導出、下方快速刪除 -->
+            <div class="flex flex-col items-center justify-center gap-1 shrink-0 pl-0.5">
+              <a
+                href="${escapeHTML(gmapsUrl)}"
+                target="_blank"
+                rel="noopener noreferrer"
+                title="在 Google Maps 開啟此景點"
+                aria-label="在 Google Maps 開啟 ${escapeHTML(pin.name)}"
+                class="btn-card-gmaps w-7 h-7 rounded-lg text-[#4F6F57] hover:bg-[#EBF2EC] flex items-center justify-center transition active:scale-90"
+              >
+                <i data-lucide="navigation" class="w-3.5 h-3.5"></i>
+              </a>
+              <button
+                type="button"
+                data-delete-pin-id="${pin.id}"
+                title="快速刪除此景點"
+                aria-label="刪除 ${escapeHTML(pin.name)}"
+                class="btn-card-delete w-7 h-7 rounded-lg text-owl-muted hover:text-[#A65D57] hover:bg-[#F9EDEC] flex items-center justify-center transition active:scale-90"
+              >
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              </button>
             </div>
           </div>
         </div>

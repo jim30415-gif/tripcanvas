@@ -63,24 +63,161 @@ html, body {
   background: #EDE5D8;
 }
 
-/* 電腦版（>= 1024px）左右欄獨立收合狀態：隱藏側欄並立即釋放地圖全寬空間 */
+/* 電腦版（>= 1024px）：全幅地圖底層 ＋ 左右圓角半透明浮動工作區塊（四周留縫隙、單景點與天數卡片更寬敞，絕不影響手機版） */
 @media (min-width: 1024px) {
-  #panel-left.desktop-collapsed,
+  .app-main {
+    --panel-left-w: 332px;
+    --panel-right-w: 288px;
+    --float-gap: 10px;
+    --left-dock: calc(var(--panel-left-w) + var(--float-gap));
+    --right-dock: calc(var(--panel-right-w) + var(--float-gap));
+  }
+
+  .app-main.desktop-left-collapsed {
+    --left-dock: 0px;
+  }
+
+  .app-main.desktop-right-collapsed {
+    --right-dock: 0px;
+  }
+
+  /* 全幅地圖鋪滿主工作區，讓左右半透明圓角工作區與邊緣縫隙自然透出底圖 */
+  #panel-map {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    z-index: 1;
+  }
+
+  /* 左側行程規劃：圓角半透明毛玻璃浮動工作區塊，上／下／左留縫隙 */
+  #panel-left {
+    position: absolute !important;
+    top: var(--float-gap) !important;
+    bottom: var(--float-gap) !important;
+    left: var(--float-gap) !important;
+    right: auto !important;
+    width: var(--panel-left-w) !important;
+    max-width: none !important;
+    max-height: none !important;
+    height: auto !important;
+    z-index: 25 !important;
+    border-radius: 24px !important;
+    border: 1px solid rgba(226, 214, 197, 0.92) !important;
+    background-color: rgba(251, 248, 243, 0.78) !important;
+    backdrop-filter: blur(14px) saturate(1.12);
+    -webkit-backdrop-filter: blur(14px) saturate(1.12);
+    box-shadow: 0 18px 42px -12px rgba(58, 44, 33, 0.22) !important;
+    transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease;
+  }
+
+  #panel-left.desktop-collapsed {
+    display: flex !important;
+    transform: translateX(calc(-100% - var(--float-gap) - 18px));
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* 右側天數圖層：圓角半透明毛玻璃浮動工作區塊，上／下／右留縫隙 */
+  #panel-right {
+    position: absolute !important;
+    top: var(--float-gap) !important;
+    bottom: var(--float-gap) !important;
+    right: var(--float-gap) !important;
+    left: auto !important;
+    width: var(--panel-right-w) !important;
+    height: auto !important;
+    z-index: 25 !important;
+    border-radius: 24px !important;
+    border: 1px solid rgba(226, 214, 197, 0.92) !important;
+    background-color: rgba(251, 248, 243, 0.78) !important;
+    backdrop-filter: blur(14px) saturate(1.12);
+    -webkit-backdrop-filter: blur(14px) saturate(1.12);
+    box-shadow: 0 18px 42px -12px rgba(58, 44, 33, 0.22) !important;
+    transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease;
+  }
+
   #panel-right.desktop-collapsed {
-    display: none !important;
+    display: flex !important;
+    transform: translateX(calc(100% + var(--float-gap) + 18px));
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  #panel-left-header,
+  #panel-right-header {
+    background-color: rgba(246, 238, 227, 0.72) !important;
+  }
+
+  /* 電腦版工作區內卡片改為高可讀輕透白底，保有通透感同時確保字體清晰 */
+  #panel-left .pin-card,
+  #panel-right .day-layer-card {
+    background-color: rgba(255, 253, 249, 0.88);
+  }
+  #panel-left .pin-card:hover,
+  #panel-right .day-layer-card:hover {
+    background-color: rgba(255, 253, 249, 0.96);
+  }
+  #panel-left .btn-open-transport {
+    background-color: rgba(246, 238, 227, 0.84);
+  }
+
+  /* 邊界收合箭頭緊貼浮動工作區塊外側，收合時平滑貼齊螢幕邊緣 */
+  .sidebar-edge-tab-left {
+    left: var(--left-dock);
+  }
+  .sidebar-edge-tab-right {
+    right: var(--right-dock);
+  }
+
+  /* 地圖左上／右上控制項與縮放鈕自動避讓兩側浮動工作區 */
+  #map-top-left-hud {
+    left: calc(var(--left-dock) + 14px);
+    top: var(--float-gap);
+  }
+  #map-top-right-hud {
+    right: calc(var(--right-dock) + 14px);
+    top: var(--float-gap);
+  }
+  #panel-map .leaflet-bottom.leaflet-right {
+    right: calc(var(--right-dock) + 8px);
+    bottom: 6px;
+    transition: right 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  /* 底部總支出膠囊與展開明細自動置中於兩側浮動區塊之間的可見地圖走廊 */
+  #desktop-expense-corridor {
+    left: var(--left-dock);
+    right: var(--right-dock);
+  }
+}
+
+@media (min-width: 1280px) {
+  .app-main {
+    --panel-left-w: 392px;
+    --panel-right-w: 332px;
+    --float-gap: 12px;
+  }
+}
+
+@media (min-width: 1536px) {
+  .app-main {
+    --panel-left-w: 424px;
+    --panel-right-w: 360px;
+    --float-gap: 14px;
   }
 }
 
 .sidebar-edge-tab {
-  background: rgba(251, 248, 243, 0.94);
-  border: 1px solid #DFD2C0;
+  background: rgba(251, 248, 243, 0.88);
+  border: 1px solid rgba(223, 210, 192, 0.95);
   color: #6B513A;
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   box-shadow: 0 8px 22px -6px rgba(58, 44, 33, 0.22);
 }
 .sidebar-edge-tab:hover {
-  background: #F4EBDF;
+  background: rgba(244, 235, 223, 0.96);
   color: #4A382B;
   border-color: #C7B299;
 }

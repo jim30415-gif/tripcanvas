@@ -115,11 +115,11 @@
       </div>
     </header>
 
-    <!-- ==================== 三欄主工作區（z-index: 1） ==================== -->
-    <main class="app-main flex-1 flex min-h-0 overflow-hidden bg-owl-canvas">
+    <!-- ==================== 三欄主工作區（電腦版全幅地圖＋左右圓角半透明浮動區塊） ==================== -->
+    <main id="app-main" class="app-main flex-1 flex min-h-0 overflow-hidden bg-owl-canvas">
 
-      <!-- ==================== 左側欄：目前天數標點順序與交通設定（手機版改為半透明浮動非滿版視窗） ==================== -->
-      <aside id="panel-left" class="hidden lg:flex fixed left-3 bottom-[calc(78px+env(safe-area-inset-bottom))] z-[1550] w-[calc(100vw-24px)] max-w-[360px] max-h-[54dvh] rounded-3xl border border-owl-border/90 bg-owl-panel/60 backdrop-blur-md shadow-2xl overflow-hidden flex-col shrink-0 min-h-0 lg:static lg:inset-auto lg:z-20 lg:w-[320px] xl:w-[376px] lg:max-w-none lg:max-h-none lg:h-full lg:rounded-none lg:border-0 lg:border-r lg:border-owl-border lg:bg-owl-panel lg:backdrop-blur-none lg:shadow-none">
+      <!-- ==================== 左側欄：目前天數標點順序與交通設定（電腦／手機均為圓角半透明浮動區塊） ==================== -->
+      <aside id="panel-left" class="hidden lg:flex fixed left-3 bottom-[calc(78px+env(safe-area-inset-bottom))] z-[1550] w-[calc(100vw-24px)] max-w-[360px] max-h-[54dvh] rounded-3xl border border-owl-border/90 bg-owl-panel/60 backdrop-blur-md shadow-2xl overflow-hidden flex-col shrink-0 min-h-0">
         <!-- 當前天數標題（附小倒三角快速切換天數） -->
         <div id="panel-left-header" class="relative px-4 py-3 border-b border-owl-border/75 bg-owl-selectedBg/75 shrink-0">
           <div class="flex items-center justify-between gap-2">
@@ -156,7 +156,7 @@
         </div>
 
         <!-- 標點與交通連接器可捲動清單 -->
-        <div id="itinerary-list" class="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y custom-scroll p-3.5 pb-5 lg:pb-6"></div>
+        <div id="itinerary-list" class="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y custom-scroll p-3.5 lg:px-3 pb-5 lg:pb-6"></div>
       </aside>
 
       <!-- ==================== 中間主畫面：Google 地圖互動區（isolation: isolate） ==================== -->
@@ -170,7 +170,7 @@
           title="收合左側行程清單"
           aria-label="收合或展開左側行程清單"
           aria-expanded="true"
-          class="hidden lg:flex sidebar-edge-tab absolute left-0 top-1/2 -translate-y-1/2 z-[510] w-6 h-14 rounded-r-xl border-l-0 items-center justify-center transition active:scale-95"
+          class="hidden lg:flex sidebar-edge-tab sidebar-edge-tab-left absolute top-1/2 -translate-y-1/2 z-[510] w-6 h-14 rounded-r-xl border-l-0 items-center justify-center transition-all duration-200 active:scale-95"
         >
           <i id="icon-collapse-left" data-lucide="chevron-left" class="w-4 h-4"></i>
         </button>
@@ -182,14 +182,14 @@
           title="收合右側天數圖層"
           aria-label="收合或展開右側天數圖層"
           aria-expanded="true"
-          class="hidden lg:flex sidebar-edge-tab absolute right-0 top-1/2 -translate-y-1/2 z-[510] w-6 h-14 rounded-l-xl border-r-0 items-center justify-center transition active:scale-95"
+          class="hidden lg:flex sidebar-edge-tab sidebar-edge-tab-right absolute top-1/2 -translate-y-1/2 z-[510] w-6 h-14 rounded-l-xl border-r-0 items-center justify-center transition-all duration-200 active:scale-95"
         >
           <i id="icon-collapse-right" data-lucide="chevron-right" class="w-4 h-4"></i>
         </button>
 
         <!-- 左上角精簡浮動膠囊：目前編輯圖層 ＋ 全螢幕地圖切換（電腦版同時收合／還原左右欄） -->
-        <div class="absolute top-3 left-3 z-[450] flex items-center gap-2 pointer-events-none">
-          <div class="pointer-events-auto bg-owl-panel/95 backdrop-blur-md border border-owl-border shadow-float rounded-2xl px-3.5 py-2 flex items-center gap-2 max-w-[230px] sm:max-w-[280px]">
+        <div id="map-top-left-hud" class="absolute top-3 left-3 z-[450] flex items-center gap-2 pointer-events-none transition-all duration-200">
+          <div class="pointer-events-auto bg-owl-panel/90 backdrop-blur-md border border-owl-border shadow-float rounded-2xl px-3.5 py-2 flex items-center gap-2 max-w-[230px] lg:max-w-[195px] xl:max-w-[260px]">
             <span id="map-active-day-dot" class="w-3 h-3 rounded-full shrink-0 ring-2 ring-owl-softBg"></span>
             <span id="map-active-day-name" class="text-sm font-extrabold text-owl-text truncate">Day 1</span>
           </div>
@@ -199,44 +199,46 @@
             title="全螢幕地圖（收合左右側欄）"
             aria-label="切換全螢幕地圖"
             aria-pressed="false"
-            class="pointer-events-auto hidden lg:flex bg-owl-panel/95 hover:bg-owl-softBg backdrop-blur-md border border-owl-border shadow-float rounded-2xl w-10 h-10 text-owl-text hover:text-owl-primaryDeep transition active:scale-95 items-center justify-center shrink-0"
+            class="pointer-events-auto hidden lg:flex bg-owl-panel/90 hover:bg-owl-softBg backdrop-blur-md border border-owl-border shadow-float rounded-2xl w-10 h-10 text-owl-text hover:text-owl-primaryDeep transition active:scale-95 items-center justify-center shrink-0"
           >
             <i id="icon-map-fullscreen" data-lucide="maximize-2" class="w-4 h-4"></i>
           </button>
         </div>
 
         <!-- 右上角極簡按鈕：聚焦至所有可見標點 -->
-        <div class="absolute top-3 right-3 z-[450]">
-          <button id="btn-fit-bounds" type="button" title="聚焦至所有可見標點" aria-label="聚焦至所有可見標點" class="bg-owl-panel/95 hover:bg-owl-softBg backdrop-blur-md border border-owl-border shadow-float rounded-2xl w-10 h-10 text-owl-text hover:text-owl-primaryDeep transition active:scale-95 flex items-center justify-center">
+        <div id="map-top-right-hud" class="absolute top-3 right-3 z-[450] transition-all duration-200">
+          <button id="btn-fit-bounds" type="button" title="聚焦至所有可見標點" aria-label="聚焦至所有可見標點" class="bg-owl-panel/90 hover:bg-owl-softBg backdrop-blur-md border border-owl-border shadow-float rounded-2xl w-10 h-10 text-owl-text hover:text-owl-primaryDeep transition active:scale-95 flex items-center justify-center">
             <i data-lucide="crosshair" class="w-4 h-4"></i>
           </button>
         </div>
 
-        <!-- 電腦／平板版（>= lg）：統一置於地圖下方中央的長條圓弧總支出膠囊與展開明細（釋放右側天數圖層空間） -->
-        <div
-          id="desktop-expense-sheet"
-          class="hidden absolute left-3 right-3 mx-auto bottom-[72px] z-[525] w-[364px] max-w-[calc(100%-24px)] rounded-3xl mobile-expense-card shadow-2xl p-4 max-h-[60vh] overflow-y-auto custom-scroll mobile-sheet-animate"
-        ></div>
-        <div class="hidden lg:flex absolute bottom-4 left-1/2 -translate-x-1/2 z-[520] pointer-events-none">
-          <button
-            id="btn-desktop-expense-pill"
-            type="button"
-            title="檢視總支出與分類／各天開銷比例"
-            aria-label="總支出與開銷比例明細"
-            aria-expanded="false"
-            class="pointer-events-auto h-[48px] px-6 rounded-full mobile-expense-capsule shadow-float flex items-center justify-center gap-2.5 transition-all duration-200 active:scale-[0.97]"
-          >
-            <span class="text-sm font-semibold text-[#DECDB8] whitespace-nowrap shrink-0">總支出</span>
-            <span id="desktop-grand-total-expense" class="text-lg font-extrabold tracking-tight text-owl-cream tabular-nums-strict whitespace-nowrap">NT$ 0</span>
-            <span id="desktop-expense-arrow" class="text-[11px] text-owl-gold transition-transform duration-200 shrink-0">▲</span>
-          </button>
+        <!-- 電腦／平板版（>= lg）：自動置中於兩側浮動工作區中央走廊的圓弧總支出膠囊與展開明細 -->
+        <div id="desktop-expense-corridor" class="hidden lg:block absolute bottom-0 left-0 right-0 z-[520] pointer-events-none transition-all duration-200">
+          <div
+            id="desktop-expense-sheet"
+            class="hidden pointer-events-auto absolute left-3 right-3 mx-auto bottom-[72px] z-[525] w-[364px] max-w-[calc(100%-24px)] rounded-3xl mobile-expense-card shadow-2xl p-4 max-h-[60vh] overflow-y-auto custom-scroll mobile-sheet-animate"
+          ></div>
+          <div class="flex justify-center pb-4">
+            <button
+              id="btn-desktop-expense-pill"
+              type="button"
+              title="檢視總支出與分類／各天開銷比例"
+              aria-label="總支出與開銷比例明細"
+              aria-expanded="false"
+              class="pointer-events-auto h-[48px] px-6 rounded-full mobile-expense-capsule shadow-float flex items-center justify-center gap-2.5 transition-all duration-200 active:scale-[0.97]"
+            >
+              <span class="text-sm font-semibold text-[#DECDB8] whitespace-nowrap shrink-0">總支出</span>
+              <span id="desktop-grand-total-expense" class="text-lg font-extrabold tracking-tight text-owl-cream tabular-nums-strict whitespace-nowrap">NT$ 0</span>
+              <span id="desktop-expense-arrow" class="text-[11px] text-owl-gold transition-transform duration-200 shrink-0">▲</span>
+            </button>
+          </div>
         </div>
       </section>
 
-      <!-- ==================== 右側欄：100% 專注呈現天數圖層清單（總支出移至地圖下方中央） ==================== -->
-      <aside id="panel-right" class="right-panel w-full lg:w-[288px] xl:w-[310px] bg-owl-panel border-l border-owl-border shrink-0 z-20 hidden lg:flex">
+      <!-- ==================== 右側欄：100% 專注呈現天數圖層清單（電腦版為圓角半透明浮動區塊） ==================== -->
+      <aside id="panel-right" class="right-panel shrink-0 z-20 hidden lg:flex">
         <!-- 上方單行精簡標題列 -->
-        <div class="px-4 py-3 border-b border-owl-border/80 bg-owl-selectedBg/75 flex items-center justify-between gap-2 shrink-0">
+        <div id="panel-right-header" class="px-4 py-3 border-b border-owl-border/75 bg-owl-selectedBg/75 flex items-center justify-between gap-2 shrink-0">
           <h2 class="text-base font-extrabold text-owl-text flex items-center gap-2 whitespace-nowrap" title="雙擊圖層名稱可改名・眼睛切換地圖顯示">
             <i data-lucide="calendar-days" class="w-4 h-4 text-owl-primary shrink-0"></i>
             <span>天數圖層</span>
@@ -248,7 +250,7 @@
         </div>
 
         <!-- 完整最大化天數圖層列表（flex: 1 1 auto; min-height: 0; overflow-y: auto） -->
-        <div id="day-layers-list" class="layers-list custom-scroll px-3.5 py-3 space-y-2.5"></div>
+        <div id="day-layers-list" class="layers-list custom-scroll px-3 py-3 space-y-2.5"></div>
       </aside>
 
     </main>
@@ -389,6 +391,7 @@
         <div>
           <label for="detail-pin-name" class="block text-sm font-bold text-owl-text mb-1.5">自訂標點名稱</label>
           <input id="detail-pin-name" type="text" placeholder="輸入景點或地標名稱" class="w-full px-3.5 py-2.5 rounded-xl border border-owl-border bg-white text-base font-semibold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35 focus:border-owl-accentBorder" />
+          <div id="detail-nearby-candidates" class="hidden mt-2 flex flex-wrap items-center gap-1.5"></div>
         </div>
 
         <!-- 標點圖片安插 / 更換 -->

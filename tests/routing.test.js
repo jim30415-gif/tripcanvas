@@ -1083,6 +1083,65 @@ test('跨語系地名轉換（繁中↔日文新字體↔簡中，如金澤通�
   assert.equal(rankedForTw[1].inTripCountry, false);
 });
 
+test('鄰近地標解析：排除飲水機／商辦大樓雜訊，精準抓出商場與多店家候選清單', async () => {
+  const { pickBestPoisFromPhoton } = await import('../src/services/geocoder.js');
+
+  const photonMock = {
+    features: [
+      {
+        properties: { name: '賀眾', osm_key: 'amenity', osm_value: 'drinking_water' },
+        geometry: { coordinates: [120.30241, 22.63881] },
+      },
+      {
+        properties: { name: '商辦大樓', osm_key: 'building', osm_value: 'commercial' },
+        geometry: { coordinates: [120.30242, 22.63882] },
+      },
+      {
+        properties: { name: '墨凡商場', osm_key: 'amenity', osm_value: 'food_court' },
+        geometry: { coordinates: [120.30253, 22.63859] },
+      },
+      {
+        properties: { name: '高雄鐵路地下化展示館(舊高雄車站)', osm_key: 'building', osm_value: 'yes' },
+        geometry: { coordinates: [120.30251, 22.63835] },
+      },
+    ],
+  };
+
+  const picked = pickBestPoisFromPhoton(photonMock, 22.6388, 120.3024, 0.09);
+  assert.equal(picked.length, 2);
+  assert.equal(picked[0].name, '墨凡商場');
+  assert.equal(picked[1].name, '高雄鐵路地下化展示館(舊高雄車站)');
+
+  // Google Places 多鄰近店家距離排序與候選清單
+  const googleCluster = pickBestPlaceFromGoogle(
+    {
+      places: [
+        {
+          id: 'p_far',
+          displayName: { text: '台鐵便當 高雄東側店' },
+          primaryType: 'restaurant',
+          types: ['restaurant', 'point_of_interest'],
+          location: { latitude: 22.6391, longitude: 120.3026 },
+        },
+        {
+          id: 'p_near',
+          displayName: { text: '安利美特 高雄店' },
+          primaryType: 'book_store',
+          types: ['book_store', 'point_of_interest'],
+          location: { latitude: 22.63882, longitude: 120.30242 },
+        },
+      ],
+    },
+    null,
+    { lat: 22.6388, lng: 120.3024 }
+  );
+  assert.equal(googleCluster.name, '安利美特 高雄店');
+  assert.equal(googleCluster.placeId, 'p_near');
+  assert.equal(googleCluster.candidates.length, 2);
+  assert.equal(googleCluster.candidates[1].name, '台鐵便當 高雄東側店');
+});
+
+
 
 
 

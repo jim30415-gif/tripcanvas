@@ -596,13 +596,129 @@ export function pickPlaceNameFromNominatim(data) {
   return (addr.neighbourhood || addr.suburb || addr.village || addr.town || addr.city || '').trim() || null;
 }
 
-async function queryBackendGoogleReverse(lat, lng) {
+const JUNK_OSM_AMENITIES = new Set([
+  'drinking_water',
+  'vending_machine',
+  'bench',
+  'waste_basket',
+  'toilets',
+  'atm',
+  'recycling',
+  'post_box',
+  'fire_hydrant',
+  'parking_entrance',
+  'bicycle_parking',
+  'motorcycle_parking',
+  'clock',
+  'telephone',
+  'charging_station',
+  'letter_box',
+  'parcel_locker',
+  'shelter',
+  'water_point',
+  'fountain',
+]);
+
+const GENERIC_PLACEHOLDER_NAMES = new Set([
+  '商辦大樓',
+  '辦公大樓',
+  '停車場',
+  '地下停車場',
+  '飲水機',
+  '公廁',
+  '廁所',
+  '售票機',
+  '自動販賣機',
+]);
+
+function computeOsmReverseRadiusMeters(zoom) {
+  const z = Number(zoom);
+  if (!Number.isFinite(z)) return 60;
+  if (z >= 19) return 45;
+  if (z >= 18) return 60;
+  if (z >= 17) return 75;
+  return 95;
+}
+
+function isJunkOsmElement(tags = {}, name = '') {
+  if (!name || GENERIC_PLACEHOLDER_NAMES.has(name)) return true;
+  if (JUNK_OSM_AMENITIES.has(String(tags.amenity || '').toLowerCase())) return true;
+  if (tags.emergency === 'fire_hydrant' || tags.man_made === 'surveillance') return true;
+  if (tags.highway || tags.boundary || tags.route) return true;
+  return false;
+}
+
+function scoreOsmPoiTags(tags = {}) {
+  if (tags.shop || tags.tourism || tags.historic || tags.leisure) return 40;
+  if (tags.amenity && ['restaurant', 'cafe', 'fast_food', 'food_court', 'bar', 'pub', 'marketplace', 'cinema', 'theatre', 'arts_centre', 'library', 'museum'].includes(tags.amenity)) {
+    return 40;
+  }
+  if (tags.railway || tags.public_transport || tags.aeroway) return 32;
+  if (tags.amenity || tags.craft || tags.healthcare) return 22;
+  if (tags.building && tags.building !== 'yes') return 14;
+  return 10;
+}
+
+/**
+ * 解析 Photon Reverse 回傳的鄰近具名地標（排除門牌、道路與無意義微設施）
+ */
+export function pickBestPoisFromPhoton(data, lat, lng, maxDistKm = 0.085) {
+  const features = Array.isArray(data?.features) ? data.features : [];
+  const ranked = [];
+  const seen = new Set();
+
+  for (const feat of features) {
+    const p = feat?.properties || {};
+    const name = String(p.name || '').trim();
+    if (!name || GENERIC_PLACEHOLDER_NAMES.has(name)) continue;
+
+    const key = String(p.osm_key || '').toLowerCase();
+    const val = String(p.osm_value || '').toLowerCase();
+    if (NOMINATIM_NON_POI_CATEGORIES.has(key)) continue;
+    if (key === 'amenity' && JUNK_OSM_AMENITIES.has(val)) continue;
+    if (key === 'place' || key === 'highway' || key === 'boundary') continue;
+
+    const coords = feat?.geometry?.coordinates;
+    if (!Array.isArray(coords) || coords.length < 2) continue;
+    const distKm = calcDistanceKm(lat, lng, Number(coords[1]), Number(coords[0]));
+    if (!Number.isFinite(distKm) || distKm > maxDistKm) continue;
+
+    const canon = canonicalizePlaceName(name);
+    if (!canon || seen.has(canon)) continue;
+    seen.add(canon);
+
+    const tagBonus =
+      ['shop', 'tourism', 'historic', 'leisure'].includes(key) ||
+      (key === 'amenity' && ['food_court', 'restaurant', 'cafe', 'marketplace'].includes(val))
+        ? 35
+        : ['railway', 'public_transport', 'aeroway'].includes(key)
+          ? 28
+          : key === 'building'
+            ? 12
+            : 20;
+
+    // 距離越近且屬於明確商店／景點分數越高
+    const score = tagBonus - distKm * 450;
+    ranked.push({ name, placeId: '', distKm, score, source: 'photon_poi' });
+  }
+
+  ranked.sort((a, b) => b.score - a.score);
+  return ranked.slice(0, 5);
+}
+
+async function queryBackendGoogleReverse(lat, lng, zoom) {
   try {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 4000);
-    const res = await fetch(`/api/routes?reverse=1&lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`, {
-      signal: ctrl.signal,
+    const timer = setTimeout(() => ctrl.abort(), 4200);
+    const qs = new URLSearchParams({
+      reverse: '1',
+      lat: String(lat),
+      lng: String(lng),
     });
+    if (Number.isFinite(Number(zoom))) {
+      qs.set('zoom', String(Math.round(Number(zoom))));
+    }
+    const res = await fetch(`/api/routes?${qs.toString()}`, { signal: ctrl.signal });
     clearTimeout(timer);
     if (!res.ok) return null;
     const data = await res.json();
@@ -611,6 +727,7 @@ async function queryBackendGoogleReverse(lat, lng) {
         name: String(data.name).trim(),
         placeId: data.placeId || '',
         source: data.source || 'google',
+        candidates: Array.isArray(data.candidates) ? data.candidates : [],
       };
     }
     return null;
@@ -619,40 +736,78 @@ async function queryBackendGoogleReverse(lat, lng) {
   }
 }
 
-async function queryNearbyOsmPoi(lat, lng) {
+async function queryPhotonReverse(lat, lng, radiusMeters) {
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 3200);
-    const query = `[out:json][timeout:3];nwr(around:30,${lat},${lng})["name"][!"highway"][!"boundary"][!"place"];out center 6;`;
-    const res = await fetch('https://overpass-api.de/api/interpreter', {
+    const radiusKm = Math.max(0.045, Math.min(0.12, radiusMeters / 1000));
+    const url = `https://photon.komoot.io/reverse?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}&limit=10&radius=${radiusKm.toFixed(3)}`;
+    const res = await fetch(url, { signal: ctrl.signal });
+    clearTimeout(timer);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return pickBestPoisFromPhoton(data, lat, lng, radiusKm + 0.02);
+  } catch {
+    return [];
+  }
+}
+
+async function fetchOverpassPoisFromEndpoint(endpoint, lat, lng, radiusMeters) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 3000);
+  try {
+    const query = `[out:json][timeout:3];nwr(around:${radiusMeters},${lat},${lng})["name"][!"highway"][!"boundary"][!"place"];out center 14;`;
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
       body: `data=${encodeURIComponent(query)}`,
       signal: ctrl.signal,
     });
     clearTimeout(timer);
-    if (!res.ok) return null;
+    if (!res.ok) return [];
     const data = await res.json();
     const elements = Array.isArray(data?.elements) ? data.elements : [];
-    let best = null;
-    let bestDistSq = Infinity;
+    const ranked = [];
+    const seen = new Set();
 
     for (const el of elements) {
       const name = pickLocalizedTagName(el.tags);
-      if (!name) continue;
+      if (isJunkOsmElement(el.tags, name)) continue;
       const eLat = el.lat ?? el.center?.lat;
       const eLng = el.lon ?? el.center?.lon;
       if (eLat == null || eLng == null) continue;
-      const dSq = (eLat - lat) ** 2 + (eLng - lng) ** 2;
-      if (dSq < bestDistSq) {
-        bestDistSq = dSq;
-        best = name;
-      }
+      const canon = canonicalizePlaceName(name);
+      if (!canon || seen.has(canon)) continue;
+      seen.add(canon);
+
+      const distKm = calcDistanceKm(lat, lng, eLat, eLng);
+      const score = scoreOsmPoiTags(el.tags) - distKm * 450;
+      ranked.push({ name, placeId: '', distKm, score, source: 'osm_poi' });
     }
-    return best;
+    ranked.sort((a, b) => b.score - a.score);
+    return ranked.slice(0, 5);
   } catch {
-    return null;
+    return [];
+  } finally {
+    clearTimeout(timer);
   }
+}
+
+async function queryNearbyOsmPois(lat, lng, radiusMeters) {
+  const primary = await fetchOverpassPoisFromEndpoint(
+    'https://overpass-api.de/api/interpreter',
+    lat,
+    lng,
+    radiusMeters
+  );
+  if (primary.length > 0) return primary;
+  // 主節點逾時或無結果時自動改查備援鏡像
+  return fetchOverpassPoisFromEndpoint(
+    'https://overpass.kumi.systems/api/interpreter',
+    lat,
+    lng,
+    radiusMeters
+  );
 }
 
 async function queryNominatimReverse(lat, lng) {
@@ -672,27 +827,47 @@ async function queryNominatimReverse(lat, lng) {
   }
 }
 
-export async function reverseGeocode(lat, lng) {
-  // 1. 優先查詢後端 Google Maps 標點（35m 內 POI 優先，其次路名）
-  const googleHit = await queryBackendGoogleReverse(lat, lng);
+export async function reverseGeocode(lat, lng, { zoom = 17 } = {}) {
+  // 1. 優先查詢後端 Google Maps 標點（依縮放動態半徑 45–130m 抓 POI，其次路名）
+  const googleHit = await queryBackendGoogleReverse(lat, lng, zoom);
   if (googleHit?.name && googleHit.source === 'google_poi') {
     return googleHit;
   }
 
-  // 2. 若未命中 Google POI，並行比對 30m 內 OSM 具名地標與 Nominatim zoom=18
-  const [osmPoiName, nominatimName] = await Promise.all([
-    queryNearbyOsmPoi(lat, lng),
+  // 2. 若未命中 Google POI，三軌並行比對：Photon Reverse（商場／地標）＋ Overpass（過濾飲水機等雜訊）＋ Nominatim zoom=18
+  const osmRadius = computeOsmReverseRadiusMeters(zoom);
+  const [photonPois, osmPois, nominatimName] = await Promise.all([
+    queryPhotonReverse(lat, lng, osmRadius),
+    queryNearbyOsmPois(lat, lng, osmRadius),
     queryNominatimReverse(lat, lng),
   ]);
 
-  if (osmPoiName) {
-    return { name: osmPoiName, placeId: '', source: 'osm_poi' };
+  // 合併並依 POI 品質＋距離排序，同時保留最多 5 個鄰近候選供使用者一鍵切換
+  const combinedPois = [...osmPois, ...photonPois];
+  combinedPois.sort((a, b) => b.score - a.score);
+  const dedupedPois = [];
+  const seenCanon = new Set();
+  for (const p of combinedPois) {
+    const canon = canonicalizePlaceName(p.name);
+    if (!canon || seenCanon.has(canon)) continue;
+    seenCanon.add(canon);
+    dedupedPois.push({ name: p.name, placeId: p.placeId || '' });
+    if (dedupedPois.length >= 5) break;
+  }
+
+  if (dedupedPois.length > 0) {
+    return {
+      name: dedupedPois[0].name,
+      placeId: dedupedPois[0].placeId,
+      source: 'osm_poi',
+      candidates: dedupedPois.length > 1 ? dedupedPois : [],
+    };
   }
   if (googleHit?.name) {
     return googleHit;
   }
   if (nominatimName) {
-    return { name: nominatimName, placeId: '', source: 'nominatim' };
+    return { name: nominatimName, placeId: '', source: 'nominatim', candidates: [] };
   }
   return null;
 }

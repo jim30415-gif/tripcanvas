@@ -40,16 +40,6 @@ export const SILENT_TILE_SOURCES = [
     },
   },
   {
-    id: 'carto_voyager',
-    type: 'tile',
-    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-    options: {
-      subdomains: 'abcd',
-      maxZoom: 20,
-      attribution: '&copy; OpenStreetMap &copy; CARTO',
-    },
-  },
-  {
     id: 'osm_standard',
     type: 'tile',
     url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',

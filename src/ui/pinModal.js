@@ -295,6 +295,7 @@ export function openPinDetailModal(dayId, pinId) {
     pinId,
     draftImage: pin.image ? { ...pin.image } : null,
     draftSubSpots: (pin.subSpots || []).map((s) => ({ ...s })),
+    draftPlaceId: pin.placeId || '',
   };
 
   const badge = document.getElementById('detail-pin-badge');
@@ -303,6 +304,47 @@ export function openPinDetailModal(dayId, pinId) {
 
   document.getElementById('detail-pin-coords').textContent = `${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}`;
   document.getElementById('detail-pin-name').value = pin.name;
+
+  // 若放點位置附近偵測到多個鄰近地標／店家，提供一鍵快選切換名稱
+  const candidatesEl = document.getElementById('detail-nearby-candidates');
+  if (candidatesEl) {
+    const candidates = Array.isArray(pin.nearbyCandidates) ? pin.nearbyCandidates : [];
+    if (candidates.length > 1) {
+      candidatesEl.innerHTML =
+        `<span class="text-xs font-semibold text-owl-muted">鄰近地標快選：</span>` +
+        candidates
+          .map(
+            (c, i) => `
+          <button
+            type="button"
+            data-candidate-idx="${i}"
+            class="btn-pick-nearby-name px-2.5 py-1 rounded-full border border-owl-border bg-owl-softBg/80 hover:bg-owl-softBg hover:border-owl-accentBorder text-xs font-bold text-owl-primaryDeep transition"
+          >
+            ${escapeHTML(c.name)}
+          </button>
+        `
+          )
+          .join('');
+      candidatesEl.classList.remove('hidden');
+      candidatesEl.querySelectorAll('.btn-pick-nearby-name').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const picked = candidates[Number(btn.dataset.candidateIdx)];
+          if (!picked) return;
+          document.getElementById('detail-pin-name').value = picked.name;
+          if (editingPinContext) {
+            editingPinContext.draftPlaceId = picked.placeId || '';
+          }
+          const gLink = document.getElementById('btn-open-pin-gmaps');
+          if (gLink) {
+            gLink.href = buildGoogleMapsPlaceUrl({ ...pin, name: picked.name, placeId: picked.placeId || '' });
+          }
+        });
+      });
+    } else {
+      candidatesEl.innerHTML = '';
+      candidatesEl.classList.add('hidden');
+    }
+  }
   document.getElementById('detail-pin-notes').value = pin.notes || '';
   document.getElementById('input-pin-image-url').value = pin.image?.type === 'url' ? pin.image.value : '';
   const gmapsLink = document.getElementById('btn-open-pin-gmaps');
@@ -347,6 +389,9 @@ function savePinDetail() {
   pin.notes = document.getElementById('detail-pin-notes').value.trim();
   pin.image = editingPinContext.draftImage;
   pin.subSpots = editingPinContext.draftSubSpots.filter((s) => s.name.trim() !== '');
+  if (editingPinContext.draftPlaceId) {
+    pin.placeId = editingPinContext.draftPlaceId;
+  }
 
   saveState((msg) => showToast(msg, 'error'));
   closePinDetailModal();

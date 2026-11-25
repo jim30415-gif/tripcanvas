@@ -756,30 +756,110 @@ const NON_POI_GOOGLE_TYPES = new Set([
   'locality',
   'sublocality',
   'sublocality_level_1',
+  'sublocality_level_2',
   'postal_code',
   'plus_code',
+  'neighborhood',
 ]);
 
+const GOOGLE_NEARBY_EXCLUDED_TYPES = [
+  'political',
+  'locality',
+  'sublocality',
+  'administrative_area_level_1',
+  'administrative_area_level_2',
+  'administrative_area_level_3',
+  'country',
+  'postal_code',
+  'route',
+  'street_address',
+  'intersection',
+];
+
+function computeReverseRadiusMeters(zoom) {
+  const z = Number(zoom);
+  if (!Number.isFinite(z)) return 65;
+  if (z >= 19) return 45;
+  if (z >= 18) return 60;
+  if (z >= 17) return 80;
+  if (z >= 16) return 105;
+  return 130;
+}
+
+function sqDistDeg(lat1, lng1, lat2, lng2) {
+  const dLat = lat1 - lat2;
+  const dLng = (lng1 - lng2) * Math.cos((lat1 * Math.PI) / 180);
+  return dLat * dLat + dLng * dLng;
+}
+
 /**
- * 依「Google 地圖標點名稱優先，無標點則取路名」原則選出最適合的標點預設名稱
+ * 依「Google 地圖標點名稱優先，無標點則取路名」原則選出最適合的標點預設名稱與鄰近候選地標
  */
-export function pickBestPlaceFromGoogle(placesData, geocodeData) {
+export function pickBestPlaceFromGoogle(placesData, geocodeData, origin = null) {
   const places = Array.isArray(placesData?.places) ? placesData.places : [];
+  const validPois = [];
+  const seenNames = new Set();
+
   for (const place of places) {
     const name = place?.displayName?.text?.trim();
-    if (!name) continue;
+    if (!name || seenNames.has(name)) continue;
     const types = Array.isArray(place?.types) ? place.types : [];
     const primary = place?.primaryType || '';
     const isGenericArea =
       (primary && NON_POI_GOOGLE_TYPES.has(primary)) ||
       (types.length > 0 && types.every((t) => NON_POI_GOOGLE_TYPES.has(t)));
-    if (!isGenericArea) {
-      return {
-        name,
-        placeId: place.id || '',
-        source: 'google_poi',
-      };
+    if (isGenericArea) continue;
+
+    seenNames.add(name);
+    const pLat = place?.location?.latitude;
+    const pLng = place?.location?.longitude;
+    const distSq =
+      origin && Number.isFinite(pLat) && Number.isFinite(pLng)
+        ? sqDistDeg(origin.lat, origin.lng, pLat, pLng)
+        : validPois.length;
+    validPois.push({
+      name,
+      placeId: place.id || '',
+      source: 'google_poi',
+      distSq,
+    });
+  }
+
+  // Legacy Places API (results[]) 相容解析
+  const legacyPlaces = Array.isArray(placesData?.results) ? placesData.results : [];
+  for (const place of legacyPlaces) {
+    const name = place?.name?.trim();
+    if (!name || seenNames.has(name)) continue;
+    const types = Array.isArray(place?.types) ? place.types : [];
+    if (types.length > 0 && types.every((t) => NON_POI_GOOGLE_TYPES.has(t))) continue;
+
+    seenNames.add(name);
+    const pLat = place?.geometry?.location?.lat;
+    const pLng = place?.geometry?.location?.lng;
+    const distSq =
+      origin && Number.isFinite(pLat) && Number.isFinite(pLng)
+        ? sqDistDeg(origin.lat, origin.lng, pLat, pLng)
+        : validPois.length;
+    validPois.push({
+      name,
+      placeId: place.place_id || '',
+      source: 'google_poi',
+      distSq,
+    });
+  }
+
+  if (validPois.length > 0) {
+    if (origin) validPois.sort((a, b) => a.distSq - b.distSq);
+    const best = validPois[0];
+    const result = {
+      name: best.name,
+      placeId: best.placeId,
+      source: 'google_poi',
+    };
+    if (validPois.length > 1) {
+      result.candidates = validPois.slice(0, 5).map(({ name, placeId }) => ({ name, placeId }));
     }
+    return result;
   }
 
   const results = Array.isArray(geocodeData?.results) ? geocodeData.results : [];
@@ -832,7 +912,7 @@ export function pickBestPlaceFromGoogle(placesData, geocodeData) {
   return null;
 }
 
-export async function handleReverseGeocode(lat, lng, env = process.env) {
+export async function handleReverseGeocode(lat, lng, env = process.env, zoom = null) {
   const numLat = Number(lat);
   const numLng = Number(lng);
   if (!isValidCoord({ lat: numLat, lng: numLng })) {
@@ -844,10 +924,13 @@ export async function handleReverseGeocode(lat, lng, env = process.env) {
     return { statusCode: 200, body: { status: 'unconfigured', name: null } };
   }
 
+  const origin = { lat: numLat, lng: numLng };
+  const radius = computeReverseRadiusMeters(zoom);
   let placesData = null;
   let geocodeData = null;
+  let placesApiDisabled = false;
 
-  // 1. 優先以 Google Places API (New) 搜尋 35 公尺內最近的 Google 地圖標點
+  // 1. 優先以 Google Places API (New) 依地圖縮放動態半徑（45–130m）查詢最近的 Google 地圖標點
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 3500);
@@ -856,16 +939,17 @@ export async function handleReverseGeocode(lat, lng, env = process.env) {
       headers: {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask': 'places.id,places.displayName,places.primaryType,places.types',
+        'X-Goog-FieldMask': 'places.id,places.displayName,places.primaryType,places.types,places.location',
       },
       body: JSON.stringify({
-        maxResultCount: 3,
+        maxResultCount: 10,
         rankPreference: 'DISTANCE',
         languageCode: 'zh-TW',
+        excludedTypes: GOOGLE_NEARBY_EXCLUDED_TYPES,
         locationRestriction: {
           circle: {
             center: { latitude: numLat, longitude: numLng },
-            radius: 35.0,
+            radius,
           },
         },
       }),
@@ -874,14 +958,45 @@ export async function handleReverseGeocode(lat, lng, env = process.env) {
     clearTimeout(timer);
     if (res.ok) {
       placesData = await res.json();
+    } else if (res.status === 403 || res.status === 401) {
+      placesApiDisabled = true;
     }
   } catch {
-    // 若金鑰僅開通 Routes API 未開 Places API，靜默降級
+    // 逾時或網路異常時降級
   }
 
-  const fromPlaces = pickBestPlaceFromGoogle(placesData, null);
+  const fromPlaces = pickBestPlaceFromGoogle(placesData, null, origin);
   if (fromPlaces) {
     return { statusCode: 200, body: { status: 'ok', ...fromPlaces } };
+  }
+
+  // 1b. 若 Places API (New) 未啟用，自動嘗試相容舊版 Google Places Nearby Search
+  if (placesApiDisabled || !placesData) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 3200);
+      const legacyUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${numLat},${numLng}&rankby=distance&language=zh-TW&key=${encodeURIComponent(apiKey)}`;
+      const res = await fetch(legacyUrl, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (res.ok) {
+        const legacyJson = await res.json();
+        if (legacyJson?.status === 'OK' && Array.isArray(legacyJson.results)) {
+          // 過濾出動態半徑內的最近標點
+          const degCutoff = (radius / 111000) ** 2;
+          const nearbyOnly = legacyJson.results.filter((r) => {
+            const rLat = r?.geometry?.location?.lat;
+            const rLng = r?.geometry?.location?.lng;
+            return Number.isFinite(rLat) && Number.isFinite(rLng) && sqDistDeg(numLat, numLng, rLat, rLng) <= degCutoff;
+          });
+          const fromLegacy = pickBestPlaceFromGoogle({ results: nearbyOnly }, null, origin);
+          if (fromLegacy) {
+            return { statusCode: 200, body: { status: 'ok', ...fromLegacy } };
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
   }
 
   // 2. 次順位：Google Geocoding API（POI 優先，其次取路名）
@@ -898,12 +1013,18 @@ export async function handleReverseGeocode(lat, lng, env = process.env) {
     // ignore
   }
 
-  const picked = pickBestPlaceFromGoogle(null, geocodeData);
+  const picked = pickBestPlaceFromGoogle(null, geocodeData, origin);
   if (picked) {
     return { statusCode: 200, body: { status: 'ok', ...picked } };
   }
 
-  return { statusCode: 200, body: { status: 'not_found', name: null } };
+  return {
+    statusCode: 200,
+    body: {
+      status: placesApiDisabled ? 'places_api_disabled' : 'not_found',
+      name: null,
+    },
+  };
 }
 
 /**

@@ -41,7 +41,8 @@ export default async function handler(req, res) {
       const parsed = new URL(req.url || '', 'http://localhost');
       const lat = req.query?.lat ?? parsed.searchParams.get('lat');
       const lng = req.query?.lng ?? parsed.searchParams.get('lng');
-      const result = await handleReverseGeocode(lat, lng, process.env);
+      const zoom = req.query?.zoom ?? parsed.searchParams.get('zoom');
+      const result = await handleReverseGeocode(lat, lng, process.env, zoom);
       return res.status(result.statusCode).json(result.body);
     }
 

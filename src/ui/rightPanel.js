@@ -171,7 +171,7 @@ function ensureDesktopExpenseBound() {
   });
 }
 
-export function renderRightPanel({ onStateChanged, onVisibilityChanged }) {
+export function renderRightPanel({ onStateChanged, onVisibilityChanged, getFitBoundsOptions }) {
   ensureDesktopExpenseBound();
 
   const state = getState();
@@ -253,9 +253,13 @@ export function renderRightPanel({ onStateChanged, onVisibilityChanged }) {
       onStateChanged();
       const chosen = state.days.find((d) => d.id === dayId);
       if (chosen && chosen.visible && chosen.pins.length > 0) {
+        const opts =
+          typeof getFitBoundsOptions === 'function'
+            ? getFitBoundsOptions(14)
+            : { padding: [80, 80], maxZoom: 14 };
         fitBoundsToPoints(
           chosen.pins.map((p) => [p.lat, p.lng]),
-          { padding: [80, 80], maxZoom: 14 }
+          opts
         );
       }
     });
