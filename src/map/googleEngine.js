@@ -124,7 +124,8 @@ export function loadGoogleMapsSdk(apiKey, onAuthError = null) {
 }
 
 /**
- * 輕量級投影橋接器：提供容器像素座標 ↔ 經緯度轉換（供長按加點與拖曳標點使用）
+ * 輕量級投影橋接器：提供容器像素座標 ↔ 經緯度轉換（供長按加點、平板右鍵與拖曳標點使用）
+ * 優先採用 Google OverlayView 投影，若尚未就緒自動以標準 Web Mercator 公式無縫補位
  */
 export function createGoogleProjectionHelper(googleMap) {
   const gmaps = window.google.maps;
@@ -136,13 +137,37 @@ export function createGoogleProjectionHelper(googleMap) {
   const helper = new ProjectionOverlay();
   helper.setMap(googleMap);
 
+  const fallbackMercatorToLatLng = (x, y) => {
+    const center = googleMap?.getCenter?.();
+    const zoom = googleMap?.getZoom?.();
+    const div = googleMap?.getDiv?.();
+    if (!center || !Number.isFinite(zoom) || !div) return null;
+    const rect = div.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+
+    const scale = 256 * Math.pow(2, zoom);
+    const cLat = center.lat();
+    const cLng = center.lng();
+    const sinLat = Math.max(-0.9999, Math.min(0.9999, Math.sin((cLat * Math.PI) / 180)));
+    const centerWorldX = ((cLng + 180) / 360) * scale;
+    const centerWorldY = (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * scale;
+
+    const worldX = centerWorldX + (x - rect.width / 2);
+    const worldY = centerWorldY + (y - rect.height / 2);
+    const lng = (worldX / scale) * 360 - 180;
+    const n = Math.PI - (2 * Math.PI * worldY) / scale;
+    const lat = (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+    return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+  };
+
   return {
     containerPointToLatLng(x, y) {
       const proj = helper.getProjection();
-      if (!proj) return null;
-      const ll = proj.fromContainerPixelToLatLng(new gmaps.Point(x, y));
-      if (!ll) return null;
-      return { lat: ll.lat(), lng: ll.lng() };
+      if (proj) {
+        const ll = proj.fromContainerPixelToLatLng(new gmaps.Point(x, y));
+        if (ll) return { lat: ll.lat(), lng: ll.lng() };
+      }
+      return fallbackMercatorToLatLng(x, y);
     },
     latLngToContainerPoint(lat, lng) {
       const proj = helper.getProjection();

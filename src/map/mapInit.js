@@ -148,8 +148,27 @@ function syncEngineZoomControlsUI() {
   }
 }
 
+let activeDomCleanup = null;
+
+function isInteractiveMapTarget(target) {
+  if (!target || typeof target.closest !== 'function') return false;
+  return Boolean(
+    target.closest('.custom-pin-icon') ||
+      target.closest('.route-pill-marker') ||
+      target.closest('.basemap-poi-card') ||
+      target.closest('.leaflet-control') ||
+      target.closest('#google-zoom-controls') ||
+      target.closest('#map-top-left-hud') ||
+      target.closest('#map-top-right-hud') ||
+      target.closest('#desktop-expense-corridor') ||
+      target.closest('button') ||
+      target.closest('a')
+  );
+}
+
 /**
- * 建立跨引擎通用的手機觸控長按加點控制器（保證每次長按僅新增 1 點）
+ * 建立跨引擎通用的手機／平板（含 iPadOS 觸控與 Apple Pencil）長按加點控制器
+ * 採用 capture 階段監聽確保不被 Google Maps 內部容器攔截，並嚴格去重保證每次長按僅新增 1 點
  */
 function createTouchLongPressController(container, toLatLng, onLongPressAdd) {
   let touchTimer = null;
@@ -159,6 +178,7 @@ function createTouchLongPressController(container, toLatLng, onLongPressAdd) {
   let lastLongPressAddAt = 0;
   let startX = 0;
   let startY = 0;
+  let activePointerId = null;
 
   const clearTouchTimer = () => {
     if (touchTimer) {
@@ -171,7 +191,7 @@ function createTouchLongPressController(container, toLatLng, onLongPressAdd) {
     clearTouchTimer();
     if (touchGestureConsumed) return;
     const now = Date.now();
-    if (now - lastLongPressAddAt < 900) return;
+    if (now - lastLongPressAddAt < 850) return;
     touchGestureConsumed = true;
     lastLongPressAddAt = now;
     if (navigator.vibrate) navigator.vibrate(30);
@@ -180,50 +200,53 @@ function createTouchLongPressController(container, toLatLng, onLongPressAdd) {
     }
   };
 
+  const scheduleLongPress = (clientX, clientY) => {
+    startX = clientX;
+    startY = clientY;
+    clearTouchTimer();
+    touchTimer = setTimeout(() => {
+      touchTimer = null;
+      const rect = container.getBoundingClientRect();
+      const latlng = toLatLng(startX - rect.left, startY - rect.top);
+      if (latlng) {
+        emitTouchLongPressAdd(latlng.lat, latlng.lng);
+      }
+    }, 460);
+  };
+
+  const cleanups = [];
+  const bindCap = (evt, fn, opts) => {
+    container.addEventListener(evt, fn, opts);
+    cleanups.push(() => container.removeEventListener(evt, fn, opts));
+  };
+
   if (container) {
-    container.addEventListener(
+    // 1. 觸控事件（capture 階段，優先於 Google Maps 內部手勢處理，涵蓋 iPhone／iPad／Android）
+    bindCap(
       'touchstart',
       (ev) => {
         isTouchActive = true;
         lastTouchActivityAt = Date.now();
         touchGestureConsumed = false;
+        activePointerId = null;
 
         if (!ev.touches || ev.touches.length !== 1) {
           clearTouchTimer();
           touchGestureConsumed = true;
           return;
         }
-        const target = ev.target;
-        if (
-          target?.closest?.('.custom-pin-icon') ||
-          target?.closest?.('.route-pill-marker') ||
-          target?.closest?.('.basemap-poi-card') ||
-          target?.closest?.('.leaflet-control') ||
-          target?.closest?.('#google-zoom-controls') ||
-          target?.closest?.('button') ||
-          target?.closest?.('a')
-        ) {
+        if (isInteractiveMapTarget(ev.target)) {
           clearTouchTimer();
           touchGestureConsumed = true;
           return;
         }
         const t = ev.touches[0];
-        startX = t.clientX;
-        startY = t.clientY;
-        clearTouchTimer();
-        touchTimer = setTimeout(() => {
-          touchTimer = null;
-          const rect = container.getBoundingClientRect();
-          const latlng = toLatLng(startX - rect.left, startY - rect.top);
-          if (latlng) {
-            emitTouchLongPressAdd(latlng.lat, latlng.lng);
-          }
-        }, 520);
+        scheduleLongPress(t.clientX, t.clientY);
       },
-      { passive: true }
+      { capture: true, passive: true }
     );
 
-    container.addEventListener(
+    bindCap(
       'touchmove',
       (ev) => {
         lastTouchActivityAt = Date.now();
@@ -233,12 +256,12 @@ function createTouchLongPressController(container, toLatLng, onLongPressAdd) {
           return;
         }
         const t = ev.touches[0];
-        if (Math.hypot(t.clientX - startX, t.clientY - startY) > 9) {
+        if (Math.hypot(t.clientX - startX, t.clientY - startY) > 12) {
           clearTouchTimer();
           touchGestureConsumed = true;
         }
       },
-      { passive: true }
+      { capture: true, passive: true }
     );
 
     const onTouchFinish = (ev) => {
@@ -248,8 +271,49 @@ function createTouchLongPressController(container, toLatLng, onLongPressAdd) {
         isTouchActive = false;
       }
     };
-    container.addEventListener('touchend', onTouchFinish, { passive: true });
-    container.addEventListener('touchcancel', onTouchFinish, { passive: true });
+    bindCap('touchend', onTouchFinish, { capture: true, passive: true });
+    bindCap('touchcancel', onTouchFinish, { capture: true, passive: true });
+
+    // 2. Pointer Events 備援（專為 iPad Apple Pencil 及僅派發 PointerEvent 的平板瀏覽器）
+    bindCap(
+      'pointerdown',
+      (ev) => {
+        if (ev.pointerType !== 'pen' && ev.pointerType !== 'touch') return;
+        // 若 touchstart 剛啟動計時，不重複開第二個計時器
+        if (ev.pointerType === 'touch' && touchTimer) return;
+        if (isInteractiveMapTarget(ev.target)) return;
+        isTouchActive = true;
+        lastTouchActivityAt = Date.now();
+        touchGestureConsumed = false;
+        activePointerId = ev.pointerId;
+        scheduleLongPress(ev.clientX, ev.clientY);
+      },
+      { capture: true, passive: true }
+    );
+
+    bindCap(
+      'pointermove',
+      (ev) => {
+        if (activePointerId == null || ev.pointerId !== activePointerId) return;
+        lastTouchActivityAt = Date.now();
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > 12) {
+          clearTouchTimer();
+          touchGestureConsumed = true;
+          activePointerId = null;
+        }
+      },
+      { capture: true, passive: true }
+    );
+
+    const onPointerFinish = (ev) => {
+      if (activePointerId == null || ev.pointerId !== activePointerId) return;
+      lastTouchActivityAt = Date.now();
+      clearTouchTimer();
+      activePointerId = null;
+      isTouchActive = false;
+    };
+    bindCap('pointerup', onPointerFinish, { capture: true, passive: true });
+    bindCap('pointercancel', onPointerFinish, { capture: true, passive: true });
   }
 
   return {
@@ -257,6 +321,7 @@ function createTouchLongPressController(container, toLatLng, onLongPressAdd) {
     emitTouchLongPressAdd,
     markMoved() {
       clearTouchTimer();
+      activePointerId = null;
       if (isTouchActive) touchGestureConsumed = true;
     },
     isRecentLongPress() {
@@ -267,13 +332,31 @@ function createTouchLongPressController(container, toLatLng, onLongPressAdd) {
         isTouchActive ||
         Date.now() - lastTouchActivityAt < 1400 ||
         orig?.pointerType === 'touch' ||
+        orig?.pointerType === 'pen' ||
         orig?.sourceCapabilities?.firesTouchEvents === true
       );
+    },
+    destroy() {
+      clearTouchTimer();
+      cleanups.forEach((fn) => fn());
+      cleanups.length = 0;
     },
   };
 }
 
+function runActiveDomCleanup() {
+  if (typeof activeDomCleanup === 'function') {
+    try {
+      activeDomCleanup();
+    } catch {
+      // ignore
+    }
+    activeDomCleanup = null;
+  }
+}
+
 function initLeafletMap(initialCenter = [25.044, 121.535], initialZoom = 13) {
+  runActiveDomCleanup();
   activeEngine = 'leaflet';
   const mapDiv = document.getElementById('map');
   if (mapDiv) {
@@ -297,6 +380,7 @@ function initLeafletMap(initialCenter = [25.044, 121.535], initialZoom = 13) {
     (x, y) => mapInstance.containerPointToLatLng(L.point(x, y)),
     onMapRightClick
   );
+  activeDomCleanup = () => touchCtrl.destroy();
 
   mapInstance.on('click', (e) => {
     if (touchCtrl.isRecentLongPress()) return;
@@ -327,6 +411,7 @@ function initLeafletMap(initialCenter = [25.044, 121.535], initialZoom = 13) {
 }
 
 function initGoogleMap(gmaps, initialCenter = [25.044, 121.535], initialZoom = 13) {
+  runActiveDomCleanup();
   activeEngine = 'google';
   const mapDiv = document.getElementById('map');
   if (!mapDiv) return null;
@@ -346,19 +431,51 @@ function initGoogleMap(gmaps, initialCenter = [25.044, 121.535], initialZoom = 1
   syncEngineZoomControlsUI();
 
   const { onMapClick, onMapRightClick, onBasemapPoiClick } = mapCallbacks;
-  const touchCtrl = createTouchLongPressController(
-    mapDiv,
-    (x, y) => (googleProjection ? googleProjection.containerPointToLatLng(x, y) : null),
-    (lat, lng) => {
-      hideBasemapPoiPopover();
-      if (typeof onMapRightClick === 'function') onMapRightClick(lat, lng);
-    }
-  );
+  const toLatLng = (x, y) => (googleProjection ? googleProjection.containerPointToLatLng(x, y) : null);
 
-  // 防止電腦右鍵跳出瀏覽器選單，讓右鍵專心負責新增標點
-  mapDiv.addEventListener('contextmenu', (ev) => {
-    ev.preventDefault();
+  let lastRightClickEmitAt = 0;
+  const emitMouseRightClickAdd = (lat, lng) => {
+    const now = Date.now();
+    if (now - lastRightClickEmitAt < 300) return;
+    lastRightClickEmitAt = now;
+    touchCtrl.clearTouchTimer();
+    hideBasemapPoiPopover();
+    if (typeof onMapRightClick === 'function') {
+      onMapRightClick(lat, lng);
+    }
+  };
+
+  const touchCtrl = createTouchLongPressController(mapDiv, toLatLng, (lat, lng) => {
+    hideBasemapPoiPopover();
+    if (typeof onMapRightClick === 'function') onMapRightClick(lat, lng);
   });
+
+  // 統一於 capture 階段攔截 contextmenu：
+  // 1) 阻擋瀏覽器與 iPadOS 系統「儲存圖片／複製圖片」選單
+  // 2) 在 iPad 外接巧控鍵盤／觸控板／滑鼠右鍵時（Google Maps JS 在觸控裝置會略過 rightclick 事件），直接由 DOM contextmenu 補位設點！
+  const onDomContextMenu = (ev) => {
+    ev.preventDefault();
+    if (isInteractiveMapTarget(ev.target)) return;
+    const rect = mapDiv.getBoundingClientRect();
+    const ll = toLatLng(ev.clientX - rect.left, ev.clientY - rect.top);
+    if (!ll) return;
+    if (touchCtrl.isTouchContextEvent(ev)) {
+      touchCtrl.emitTouchLongPressAdd(ll.lat, ll.lng);
+      return;
+    }
+    emitMouseRightClickAdd(ll.lat, ll.lng);
+  };
+  const onDomDragStart = (ev) => {
+    ev.preventDefault();
+  };
+  mapDiv.addEventListener('contextmenu', onDomContextMenu, { capture: true });
+  mapDiv.addEventListener('dragstart', onDomDragStart, { capture: true });
+
+  activeDomCleanup = () => {
+    touchCtrl.destroy();
+    mapDiv.removeEventListener('contextmenu', onDomContextMenu, { capture: true });
+    mapDiv.removeEventListener('dragstart', onDomDragStart, { capture: true });
+  };
 
   // 核心：點擊畫面上看得到的 Google 底圖圖示時，原生取得 IconMouseEvent.placeId（絕不誤抓隱藏店家）
   mapInstance.addListener('click', (ev) => {
@@ -391,10 +508,7 @@ function initGoogleMap(gmaps, initialCenter = [25.044, 121.535], initialZoom = 1
       touchCtrl.emitTouchLongPressAdd(lat, lng);
       return;
     }
-    touchCtrl.clearTouchTimer();
-    if (typeof onMapRightClick === 'function') {
-      onMapRightClick(lat, lng);
-    }
+    emitMouseRightClickAdd(lat, lng);
   });
 
   mapInstance.addListener('dragstart', () => touchCtrl.markMoved());
@@ -416,6 +530,7 @@ function fallbackToLeafletAfterAuthFailure() {
   } catch {
     // ignore
   }
+  runActiveDomCleanup();
   hideBasemapPoiPopover();
   if (overlayGroup) overlayGroup.clearLayers();
   if (searchMarker && typeof searchMarker.setMap === 'function') {

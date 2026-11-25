@@ -626,6 +626,23 @@ aside.right-panel {
   animation: poiCardPop 0.16s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* 防止 iPadOS / iOS 長按 Google Maps 底圖瓦片 <img> 時彈出系統「將圖片儲存到／複製圖片」選單而打斷長按設點 */
+#panel-map,
+#map {
+  -webkit-touch-callout: none !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#panel-map.map-engine-google #map img {
+  -webkit-touch-callout: none !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  -webkit-user-drag: none !important;
+  pointer-events: none !important;
+}
+
 @keyframes poiCardPop {
   from {
     opacity: 0;
