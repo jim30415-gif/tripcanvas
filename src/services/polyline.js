@@ -8,18 +8,23 @@ const decodeCache = new Map();
 
 /**
  * 將 Google Encoded Polyline 字串解碼為 [[lat, lng], ...] 座標陣列（附有界 LRU 快取與畸形輸入防護）
+ * 支援可選精度參數 precision（預設 5 = 1e5；MOTIS 2 / Transitous 為 6 = 1e6）
  * @param {string} encoded
+ * @param {number} [precision=5]
  * @returns {Array<[number, number]>}
  */
-export function decodePolyline(encoded) {
+export function decodePolyline(encoded, precision = 5) {
   if (!encoded || typeof encoded !== 'string') return [];
-  if (decodeCache.has(encoded)) {
-    const cached = decodeCache.get(encoded);
-    decodeCache.delete(encoded);
-    decodeCache.set(encoded, cached);
+  const pNum = Number.isInteger(precision) && precision >= 4 && precision <= 7 ? precision : 5;
+  const cacheKey = pNum === 5 ? encoded : `${pNum}:${encoded}`;
+  if (decodeCache.has(cacheKey)) {
+    const cached = decodeCache.get(cacheKey);
+    decodeCache.delete(cacheKey);
+    decodeCache.set(cacheKey, cached);
     return cached.map((pt) => [pt[0], pt[1]]);
   }
 
+  const factor = 10 ** pNum;
   const coords = [];
   let index = 0;
   const len = encoded.length;
@@ -52,8 +57,8 @@ export function decodePolyline(encoded) {
     const dLng = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
     lng += dLng;
 
-    const ptLat = lat / 1e5;
-    const ptLng = lng / 1e5;
+    const ptLat = lat / factor;
+    const ptLng = lng / factor;
     if (Number.isFinite(ptLat) && Number.isFinite(ptLng) && Math.abs(ptLat) <= 90 && Math.abs(ptLng) <= 180) {
       coords.push([ptLat, ptLng]);
     }
@@ -63,7 +68,7 @@ export function decodePolyline(encoded) {
     const oldest = decodeCache.keys().next().value;
     if (oldest !== undefined) decodeCache.delete(oldest);
   }
-  decodeCache.set(encoded, coords);
+  decodeCache.set(cacheKey, coords);
   return coords.map((pt) => [pt[0], pt[1]]);
 }
 

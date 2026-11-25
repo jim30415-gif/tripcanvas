@@ -219,12 +219,24 @@ export function buildTransitTransportRecord(
   return record;
 }
 
+/**
+ * 依實際汽車路網行車時間估算市區／觀光公車參考車程（納入停靠站與紅綠燈停等）
+ */
+export function estimateBusDurationFromCarMin(carDurationMin) {
+  const carMin = Number(carDurationMin);
+  if (!Number.isFinite(carMin) || carMin <= 0) return null;
+  if (carMin <= 20) {
+    return Math.max(Math.round(carMin) + 3, Math.round(carMin * 1.45));
+  }
+  return Math.max(Math.round(carMin) + 5, Math.round(carMin * 1.2 + 5));
+}
+
 function sameCoord(a, b) {
   return Math.abs(Number(a.lat) - Number(b.lat)) < 1e-6 && Math.abs(Number(a.lng) - Number(b.lng)) < 1e-6;
 }
 
 /**
- * 背景補齊所有待查詢、缺少貼路折線（舊版 JSON 匯入）或可升級為分段大眾運輸的路段
+ * 背景補齊所有待查詢、缺少貼路折線（舊版 JSON 匯入或標點移動後之貼路公車）或可升級為分段大眾運輸的路段
  */
 export async function resolvePendingSegments({ onUpdated, retryNetworkErrors = false } = {}) {
   if (resolveRunning) {
@@ -250,6 +262,24 @@ export async function resolvePendingSegments({ onUpdated, retryNetworkErrors = f
         if (!nextPin || !t) return;
 
         if (t.mode === 'transit') {
+          // 手動貼路公車若因標點移動而清除折線，背景重新沿實際馬路貼路（保留手動路線名／費用）
+          if (t.status === 'manual' && t.roadSnapped && !t.encodedPolyline) {
+            jobs.push({
+              tripId: tripIdSnapshot,
+              dayId: day.id,
+              pinId: pin.id,
+              nextPinId: nextPin.id,
+              pinACoord: { lat: Number(pin.lat), lng: Number(pin.lng) },
+              pinBCoord: { lat: Number(nextPin.lat), lng: Number(nextPin.lng) },
+              mode: 'car',
+              resnapManualBus: true,
+              expectedStatus: 'manual',
+              departureTime: '',
+              transitPreference: 'DEFAULT',
+            });
+            return;
+          }
+
           const inJapan = isJapanTrip(pin, nextPin);
           const canQueryRegionTransit = inJapan ? googleStatus.navitimeConfigured : googleStatus.configured;
 
@@ -330,7 +360,8 @@ export async function resolvePendingSegments({ onUpdated, retryNetworkErrors = f
           const curNext = curIdx >= 0 ? curDay.pins[curIdx + 1] : null;
           if (!curPin || !curNext || curNext.id !== job.nextPinId) return;
           if (!sameCoord(curPin, job.pinACoord) || !sameCoord(curNext, job.pinBCoord)) return;
-          if (!curPin.transportToNext || curPin.transportToNext.mode !== job.mode) return;
+          const expectedMode = job.resnapManualBus ? 'transit' : job.mode;
+          if (!curPin.transportToNext || curPin.transportToNext.mode !== expectedMode) return;
 
           const res = await computeSegmentRoute({
             mode: job.mode,
@@ -350,7 +381,25 @@ export async function resolvePendingSegments({ onUpdated, retryNetworkErrors = f
           if (!afterPin || !afterNext || afterNext.id !== job.nextPinId) return;
           if (!sameCoord(afterPin, job.pinACoord) || !sameCoord(afterNext, job.pinBCoord)) return;
           const curT = afterPin.transportToNext;
-          if (!curT || curT.mode !== job.mode) return;
+          if (!curT || curT.mode !== expectedMode) return;
+
+          if (job.resnapManualBus) {
+            if (curT.status !== 'manual' || !curT.roadSnapped || curT.encodedPolyline) return;
+            if (res.status === 'ok' && res.encodedPolyline) {
+              const estBusMin = curT.durationEstimated
+                ? estimateBusDurationFromCarMin(res.durationMin)
+                : curT.duration;
+              afterPin.transportToNext = {
+                ...curT,
+                provider: res.provider === 'google' ? 'manual-google' : 'manual-osrm',
+                encodedPolyline: res.encodedPolyline,
+                distanceKm: res.distanceKm ?? curT.distanceKm ?? null,
+                duration: estBusMin ?? curT.duration ?? null,
+              };
+              batchMutated = true;
+            }
+            return;
+          }
 
           if (job.mode === 'transit') {
             // 若使用者已在背景查詢期間手動改寫出發時間、偏好或手動紀錄，不覆蓋使用者修改

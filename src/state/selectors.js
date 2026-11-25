@@ -112,7 +112,8 @@ export function hasManualTransitDetails(t) {
       (t.line && t.line.trim()) ||
       (t.schedule && t.schedule.trim()) ||
       Number(t.duration) > 0 ||
-      Number(t.cost) > 0
+      Number(t.cost) > 0 ||
+      Boolean(t.roadSnapped && t.encodedPolyline)
   );
 }
 
@@ -127,7 +128,7 @@ export function hasSegmentedTransit(t) {
 }
 
 /**
- * 解析各類交通設定的誠實展示資訊（涵蓋 Google 分段大眾運輸、手動大眾運輸、陸路實查與交通支出）
+ * 解析各類交通設定的誠實展示資訊（涵蓋 Google / NAVITIME / Transitous 分段大眾運輸、貼路公車手動紀錄、陸路實查與交通支出）
  */
 export function getTransportDisplayInfo(t) {
   if (!t) return null;
@@ -138,28 +139,47 @@ export function getTransportDisplayInfo(t) {
   if (t.mode === 'transit') {
     if (hasSegmentedTransit(t)) {
       const transitSegs = t.segments.filter((s) => s.type === 'TRANSIT');
-      const primaryEmoji = transitSegs[0]?.vehicleEmoji || '🚆';
+      const isWalkOnly = transitSegs.length === 0;
+      const primaryEmoji = isWalkOnly ? '🚶' : transitSegs[0]?.vehicleEmoji || '🚆';
       const durStr = formatDurationZh(t.duration);
       const lineNames = transitSegs.map((s) => s.displayLine).filter(Boolean);
-      const leftTitle = lineNames.length > 0 ? lineNames.join(' → ') : '大眾運輸（步行）';
+      const leftTitle = lineNames.length > 0 ? lineNames.join(' → ') : '純步行（無鐵道／公車）';
 
       const timeRange =
-        t.departureTimeText && t.arrivalTimeText
+        !isWalkOnly && t.departureTimeText && t.arrivalTimeText
           ? `${t.departureTimeText}–${t.arrivalTimeText}`
           : '';
       const transferText = transitSegs.length > 1 ? `轉乘 ${transitSegs.length - 1} 次` : '';
       const subParts = [durStr, timeRange, transferText].filter(Boolean);
 
-      const pillLines = lineNames.length > 0 ? lineNames.slice(0, 2).join('→') : '大眾運輸';
+      const pillLines = lineNames.length > 0 ? lineNames.slice(0, 2).join('→') : '純步行';
       const mapPill = durStr ? `${primaryEmoji} ${pillLines} · ${durStr}` : `${primaryEmoji} ${pillLines}`;
 
       const isNavitime = t.provider === 'navitime';
+      const isTransitous = t.provider === 'transitous';
+      const badge = isWalkOnly
+        ? '僅步行'
+        : isTransitous
+          ? transitSegs[0]?.vehicleType === 'BUS'
+            ? '日本公車'
+            : '日本開放'
+          : isNavitime
+            ? '日本分段'
+            : '分段路線';
+      const fallbackSub = isWalkOnly
+        ? '此段無鐵道／公開公車，僅步行估算'
+        : isTransitous
+          ? '日本開放資料公車／大眾運輸分段'
+          : isNavitime
+            ? '日本 NAVITIME 分段路線'
+            : 'Google 分段路線';
+
       return {
         kind: 'transit-segmented',
         emoji: primaryEmoji,
         leftTitle,
-        leftSub: subParts.join(' · ') || (isNavitime ? '日本 NAVITIME 分段路線' : 'Google 分段路線'),
-        badge: isNavitime ? '日本分段' : '分段路線',
+        leftSub: subParts.join(' · ') || fallbackSub,
+        badge,
         mapPill,
         segments: t.segments,
         cost,
@@ -196,7 +216,7 @@ export function getTransportDisplayInfo(t) {
         kind: 'unsupported',
         emoji: '⚠️',
         leftTitle: '查無可用大眾運輸路線',
-        leftSub: '可調整出發時間、改手動紀錄或查 Google Maps',
+        leftSub: '可調整出發時間、改填貼路公車或查 Google Maps',
         badge: '無班次',
         mapPill: '⚠️ 查無大眾運輸',
         cost,
@@ -217,18 +237,23 @@ export function getTransportDisplayInfo(t) {
 
     const tTypeObj = TRANSIT_TYPES.find((x) => x.id === t.transitType);
     const emoji = tTypeObj?.emoji || '🚆';
+    const isRoadSnapped = Boolean(t.roadSnapped && t.encodedPolyline);
     const mainText = [t.transitType, t.line].filter(Boolean).join(' ') || '大眾運輸';
-    const durText = Number(t.duration) > 0 ? formatDurationZh(t.duration) : '';
-    const subParts = [t.schedule, durText].filter(Boolean);
+    const rawDurText = Number(t.duration) > 0 ? formatDurationZh(t.duration) : '';
+    const durText = rawDurText ? (t.durationEstimated ? `約 ${rawDurText}` : rawDurText) : '';
+    const distText =
+      isRoadSnapped && Number(t.distanceKm) > 0 ? `${Number(t.distanceKm).toFixed(1)} km` : '';
+    const subParts = [t.schedule, durText, !t.schedule ? distText : ''].filter(Boolean);
     const cleanSched = t.schedule ? t.schedule.replace('（手動紀錄範例）', '').trim() : '';
     const mapParts = [mainText, cleanSched, durText ? `(${durText})` : ''].filter(Boolean);
+    const badge = isRoadSnapped ? (t.transitType === '公車' ? '貼路公車' : '貼路紀錄') : '手動紀錄';
 
     return {
       kind: 'transit-manual',
       emoji,
       leftTitle: mainText,
-      leftSub: subParts.length ? subParts.join(' · ') : '手動紀錄',
-      badge: '手動紀錄',
+      leftSub: subParts.length ? subParts.join(' · ') : isRoadSnapped ? '實際馬路路線' : '手動紀錄',
+      badge,
       mapPill: `${emoji} ${mapParts.join(' · ')}`,
       cost,
     };

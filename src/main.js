@@ -142,7 +142,14 @@ function abortPinResolve(pinId) {
 
 function invalidateAdjacentAutoRoutes(day, pinIdx) {
   const invalidateAutoSegment = (seg) => {
-    if (!seg || seg.status === 'manual') return;
+    if (!seg) return;
+    if (seg.status === 'manual') {
+      // 手動貼路公車在鄰近標點移動後需重新貼合新馬路，保留使用者填寫的路線名、時間與費用
+      if (seg.mode === 'transit' && seg.roadSnapped) {
+        seg.encodedPolyline = '';
+      }
+      return;
+    }
     seg.encodedPolyline = '';
     seg.status = 'pending';
     if (seg.mode === 'transit') {

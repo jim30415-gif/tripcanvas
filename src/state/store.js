@@ -177,6 +177,12 @@ function normalizeTransport(t) {
   if (Number.isFinite(transVal) && transVal >= 0) {
     normalized.transferCount = Math.round(transVal);
   }
+  if (t.roadSnapped === true) {
+    normalized.roadSnapped = true;
+  }
+  if (t.durationEstimated === true) {
+    normalized.durationEstimated = true;
+  }
   const fare = normalizeFare(t.fare);
   if (fare) normalized.fare = fare;
 

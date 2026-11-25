@@ -530,6 +530,7 @@ export async function normalizeNavitimeRoute(item, origin, destination) {
 
   return {
     provider: 'navitime',
+    hasTransit: transitSegs.length > 0,
     durationMin,
     distanceKm,
     totalWalkMin,
@@ -642,6 +643,7 @@ export async function queryNavitimeTransit({
           provider: 'navitime',
           region: 'JP',
           mode: 'transit',
+          hasTransit: false,
           routes: [],
           message:
             'NAVITIME 查無此兩點之鐵路／地鐵路線（可能距離較近適合步行，或該區段僅有日本地方公車；可點下方按鈕在 Google Maps 查詢並手動填寫日圓）。',
@@ -649,6 +651,7 @@ export async function queryNavitimeTransit({
       };
     }
 
+    const hasTransit = routes.some((r) => Boolean(r.hasTransit));
     return {
       statusCode: 200,
       body: {
@@ -656,6 +659,8 @@ export async function queryNavitimeTransit({
         provider: 'navitime',
         region: 'JP',
         mode: 'transit',
+        hasTransit,
+        walkOnly: !hasTransit,
         routes,
       },
     };

@@ -1,6 +1,7 @@
 import { decodePolyline, encodePolyline, stitchEncodedPolylines } from '../src/services/polyline.js';
 import { convertMoneyToTwd, getTwdRatesSummary } from './currency.js';
 import { isJapanTrip, queryNavitimeTransit } from './navitime.js';
+import { queryTransitousTransit } from './transitous.js';
 import { fetchJsonWithTimeout, parseOptionalFiniteNumber } from './security.js';
 
 const GOOGLE_ROUTES_ENDPOINT = 'https://routes.googleapis.com/directions/v2:computeRoutes';
@@ -574,16 +575,85 @@ export async function handleComputeRoutes(body, env = process.env) {
   }
 
   // 日本大眾運輸專屬分流：Google 開發者 API 因日本鐵路授權限制不提供日本大眾運輸，
-  // 自動改由日本 NAVITIME (RapidAPI) 查詢；若尚未設定金鑰則回傳明確的日本指引與備援入口。
+  // 優先查詢日本 NAVITIME（鐵路／新幹線／地鐵／私鐵與日圓票價）；
+  // 若 NAVITIME 僅回傳純步行（RapidAPI 不含路線巴士）或查無鐵道，自動備援查詢 Transitous（日本 GTFS-JP 公開公車資料）。
   if (mode === 'transit' && isJapanTrip(origin, destination)) {
     if (navitimeKey) {
-      return queryNavitimeTransit({
+      const navRes = await queryNavitimeTransit({
         apiKey: navitimeKey,
         origin,
         destination,
         departureTime,
         transitPreference,
       });
+
+      const navRoutes = Array.isArray(navRes?.body?.routes) ? navRes.body.routes : [];
+      const navHasTransit =
+        navRes?.body?.status === 'ok' &&
+        navRoutes.some((r) => (r.segments || []).some((s) => s.type === 'TRANSIT'));
+
+      if (navHasTransit) {
+        return navRes;
+      }
+
+      const transitousDisabled = String(env?.DISABLE_TRANSITOUS_FALLBACK || '').trim() === '1';
+      const shouldTryTransitous =
+        !transitousDisabled &&
+        (navRes?.body?.status === 'ok' ||
+          navRes?.body?.status === 'unsupported' ||
+          navRes?.body?.error === 'NAVITIME_QUOTA_EXCEEDED');
+
+      if (shouldTryTransitous) {
+        const trRes = await queryTransitousTransit({
+          origin,
+          destination,
+          departureTime,
+          transitPreference,
+        });
+        const trRoutes = Array.isArray(trRes?.body?.routes) ? trRes.body.routes : [];
+        const trHasTransit =
+          trRes?.body?.status === 'ok' &&
+          trRoutes.some((r) => (r.segments || []).some((s) => s.type === 'TRANSIT'));
+
+        if (trHasTransit) {
+          return {
+            statusCode: 200,
+            body: {
+              ...trRes.body,
+              hasTransit: true,
+              walkOnly: false,
+              fallbackFrom: 'navitime',
+            },
+          };
+        }
+      }
+
+      if (navRes?.body?.status === 'ok') {
+        return {
+          statusCode: 200,
+          body: {
+            ...navRes.body,
+            hasTransit: false,
+            walkOnly: true,
+            transitousChecked: !transitousDisabled,
+          },
+        };
+      }
+
+      if (navRes?.body?.status === 'unsupported') {
+        return {
+          statusCode: 200,
+          body: {
+            ...navRes.body,
+            hasTransit: false,
+            transitousChecked: !transitousDisabled,
+            message:
+              'NAVITIME（鐵道／地鐵）與日本公開公車資料均查無此區段路線；可能為未開放資料之地方公車，可點下方 Google Maps 查車並改填貼路公車紀錄。',
+          },
+        };
+      }
+
+      return navRes;
     }
     return {
       statusCode: 200,
@@ -668,18 +738,22 @@ export async function handleComputeRoutes(body, env = process.env) {
             status: 'unsupported',
             provider: 'google',
             mode: 'transit',
+            hasTransit: false,
             routes: [],
             message: '查無此兩點與時段的大眾運輸路線（可能無營運班次或超出服務範圍）',
           },
         };
       }
 
+      const hasTransit = routes.some((r) => (r.segments || []).some((s) => s.type === 'TRANSIT'));
       return {
         statusCode: 200,
         body: {
           status: 'ok',
           provider: 'google',
           mode: 'transit',
+          hasTransit,
+          walkOnly: !hasTransit,
           routes,
         },
       };

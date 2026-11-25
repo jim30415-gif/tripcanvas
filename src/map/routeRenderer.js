@@ -427,35 +427,72 @@ export function drawRouteSegmentOnMap(overlayGroup, day, pinA, pinB, pinIdx, isA
     return;
   }
 
-  // C. 手動紀錄大眾運輸（尚未透過 Google Routes 自動查詢）：柔和虛線示意
+  // C. 手動紀錄大眾運輸：若有實際貼路折線（例如手動公車）沿真實馬路繪製，否則維持柔和虛線弧線示意
   if (t.mode === 'transit' && info.kind !== 'pending') {
-    const transitCoords = generateCurvedPath(pinA.lat, pinA.lng, pinB.lat, pinB.lng);
-    addPolyline(
-      overlayGroup,
-      transitCoords,
-      {
-        color: '#FFFDF9',
-        weight: 6.5,
-        opacity: isActive ? 0.88 : 0.55,
-        dashArray: '6, 8',
-        lineCap: 'round',
-        interactive: false,
-      },
-      { zIndex: 14 }
-    );
+    const snappedCoords = t.encodedPolyline ? decodePolyline(t.encodedPolyline) : [];
+    const hasRoadPoly = snappedCoords.length >= 2;
+    const transitCoords = hasRoadPoly
+      ? snappedCoords
+      : generateCurvedPath(pinA.lat, pinA.lng, pinB.lat, pinB.lng);
 
-    addPolyline(
-      overlayGroup,
-      transitCoords,
-      {
-        color: safeDayColor,
-        weight: 3.6,
-        opacity: isActive ? 0.88 : 0.55,
-        dashArray: '6, 8',
-        lineCap: 'round',
-      },
-      { onClick: openEdit, zIndex: 16 }
-    );
+    if (hasRoadPoly) {
+      addPolyline(
+        overlayGroup,
+        transitCoords,
+        {
+          color: '#FFFDF9',
+          weight: 7.4,
+          opacity: isActive ? 0.94 : 0.55,
+          lineCap: 'round',
+          lineJoin: 'round',
+          interactive: false,
+        },
+        { zIndex: 20 }
+      );
+
+      addPolyline(
+        overlayGroup,
+        transitCoords,
+        {
+          color: safeDayColor,
+          weight: 4.4,
+          opacity: isActive ? 0.94 : 0.6,
+          lineCap: 'round',
+          lineJoin: 'round',
+        },
+        { onClick: openEdit, tooltip: escapeHTML(info.mapPill), zIndex: 22 }
+      );
+
+      drawPinAccessConnector(overlayGroup, pinA, transitCoords[0], isActive);
+      drawPinAccessConnector(overlayGroup, pinB, transitCoords[transitCoords.length - 1], isActive);
+    } else {
+      addPolyline(
+        overlayGroup,
+        transitCoords,
+        {
+          color: '#FFFDF9',
+          weight: 6.5,
+          opacity: isActive ? 0.88 : 0.55,
+          dashArray: '6, 8',
+          lineCap: 'round',
+          interactive: false,
+        },
+        { zIndex: 14 }
+      );
+
+      addPolyline(
+        overlayGroup,
+        transitCoords,
+        {
+          color: safeDayColor,
+          weight: 3.6,
+          opacity: isActive ? 0.88 : 0.55,
+          dashArray: '6, 8',
+          lineCap: 'round',
+        },
+        { onClick: openEdit, zIndex: 16 }
+      );
+    }
 
     const midPt = getPolylineMidpoint(transitCoords);
     const isEmpty = info.kind === 'transit-empty';

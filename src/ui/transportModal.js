@@ -1,7 +1,11 @@
 import { TRANSPORT_MODES, TRANSIT_PREFERENCES, TRANSIT_TYPES } from '../config/constants.js';
 import { getState, saveState } from '../state/store.js';
 import { hasManualTransitDetails, hasSegmentedTransit } from '../state/selectors.js';
-import { computeSegmentRoute, buildTransitTransportRecord } from '../services/routeManager.js';
+import {
+  computeSegmentRoute,
+  buildTransitTransportRecord,
+  estimateBusDurationFromCarMin,
+} from '../services/routeManager.js';
 import {
   convertToTwdSync,
   ensureFxRatesLoaded,
@@ -34,6 +38,16 @@ function toDatetimeLocalValue(isoString) {
   if (Number.isNaN(date.getTime())) return '';
   const pad = (n) => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function routeHasTransitSegments(route) {
+  return Boolean(route && Array.isArray(route.segments) && route.segments.some((s) => s.type === 'TRANSIT'));
+}
+
+function getTransitProviderLabel(provider) {
+  if (provider === 'navitime') return 'NAVITIME';
+  if (provider === 'transitous') return 'Transitous';
+  return 'Google';
 }
 
 function getSelectedAutoTransitRoute(ctx) {
@@ -76,7 +90,7 @@ function resolveTransportInputCost() {
 }
 
 /**
- * 同步交通支出輸入欄、外幣手動換算新台幣預覽，與 Google / NAVITIME 自動票價提示
+ * 同步交通支出輸入欄、外幣手動換算新台幣預覽，與 Google / NAVITIME / Transitous 自動票價提示
  */
 function renderTransportCostHint({ autoFillFare = false } = {}) {
   const ctx = editingTransportContext;
@@ -87,8 +101,7 @@ function renderTransportCostHint({ autoFillFare = false } = {}) {
 
   const selectedTransit = getSelectedAutoTransitRoute(ctx);
   const fare = selectedTransit?.fare || null;
-  const providerLabel =
-    (selectedTransit?.provider || ctx.transitResult?.provider) === 'navitime' ? 'NAVITIME' : 'Google';
+  const providerLabel = getTransitProviderLabel(selectedTransit?.provider || ctx.transitResult?.provider);
 
   if (autoFillFare && fare?.amountTwd && !ctx.userEditedCost) {
     if (currencySel) currencySel.value = 'TWD';
@@ -154,7 +167,7 @@ function renderTransportCostHint({ autoFillFare = false } = {}) {
       return;
     }
 
-    if (selectedTransit) {
+    if (selectedTransit && ctx.transitSubTab === 'auto' && routeHasTransitSegments(selectedTransit)) {
       hintEl.innerHTML = `<div class="text-xs text-owl-muted">${providerLabel} 未提供此段票價，可直接輸入金額（支援切換日圓等外幣自動換台幣）。</div>`;
       return;
     }
@@ -170,6 +183,97 @@ function renderTransportCostHint({ autoFillFare = false } = {}) {
     walk: '步行一般為 0 元，若有接駁或通行費也可手動補充。',
   };
   hintEl.innerHTML = `<div class="text-xs text-owl-muted">${modeHints[ctx.selectedMode] || ''}</div>`;
+}
+
+function renderManualBusRoadPreview() {
+  const ctx = editingTransportContext;
+  const previewEl = document.getElementById('manual-bus-road-preview');
+  const durInput = document.getElementById('input-transit-duration');
+  if (!ctx || !previewEl) return;
+
+  const isBusManual = ctx.selectedMode === 'transit' && ctx.selectedTransitType === '公車';
+  if (!isBusManual) {
+    previewEl.classList.add('hidden');
+    previewEl.innerHTML = '';
+    if (durInput) durInput.placeholder = '選填，例：15';
+    return;
+  }
+
+  previewEl.classList.remove('hidden');
+  const roadRes = ctx.manualBusRoadResult;
+  if (!roadRes || roadRes.status === 'pending') {
+    previewEl.innerHTML = `
+      <div class="flex items-center gap-2 rounded-xl bg-[#EBF2EC]/80 border border-[#C7DCCB] px-3 py-2 text-xs font-semibold text-[#3E5C45]">
+        <span class="w-3.5 h-3.5 rounded-full border-2 border-[#4F6F57] border-t-transparent animate-spin shrink-0"></span>
+        <span>正在計算實際馬路公車路線與參考車程...</span>
+      </div>
+    `;
+    return;
+  }
+
+  if (roadRes.status === 'ok' && roadRes.encodedPolyline) {
+    const distNum = Number(roadRes.distanceKm);
+    const distPart = Number.isFinite(distNum) && distNum > 0 ? `道路約 ${distNum.toFixed(1)} km` : '已對齊實際道路';
+    const estBusMin = estimateBusDurationFromCarMin(roadRes.durationMin);
+    const estPart = estBusMin ? `，參考公車約 ${formatDurationZh(estBusMin)}（未填時間自動帶入）` : '';
+    if (durInput) {
+      durInput.placeholder = estBusMin ? `未填自動估約 ${estBusMin} 分` : '選填，例：10';
+    }
+    previewEl.innerHTML = `
+      <div class="flex items-start gap-2 rounded-xl bg-[#EBF2EC] border border-[#C7DCCB] px-3 py-2 text-xs text-[#3E5C45] leading-relaxed">
+        <span class="shrink-0">🛣️</span>
+        <span><strong>自動貼路公車</strong>：儲存後將沿實際馬路繪製路線（${escapeHTML(distPart)}${escapeHTML(estPart)}）。</span>
+      </div>
+    `;
+    return;
+  }
+
+  if (durInput) durInput.placeholder = '選填，例：15';
+  previewEl.innerHTML = `
+    <div class="rounded-xl bg-owl-card border border-owl-border/80 px-3 py-2 text-xs text-owl-subtext">
+      此兩點暫無法取得道路路網，儲存時將改以柔和弧線示意。
+    </div>
+  `;
+}
+
+async function runManualBusRoadPreview() {
+  const ctx = editingTransportContext;
+  if (!ctx || ctx.selectedMode !== 'transit' || ctx.selectedTransitType !== '公車') {
+    renderManualBusRoadPreview();
+    return;
+  }
+
+  // 若已有完整含車程之貼路結果直接呈現
+  if (ctx.manualBusRoadResult?.status === 'ok' && ctx.manualBusRoadResult.encodedPolyline && ctx.manualBusRoadResult.durationMin) {
+    renderManualBusRoadPreview();
+    return;
+  }
+
+  const token = ++ctx.manualBusToken;
+  ctx.manualBusRoadResult = { status: 'pending' };
+  renderManualBusRoadPreview();
+
+  const res = await computeSegmentRoute({
+    mode: 'car',
+    pinA: ctx.pinA,
+    pinB: ctx.pinB,
+  });
+
+  if (!editingTransportContext || editingTransportContext !== ctx || ctx.manualBusToken !== token) return;
+  ctx.manualBusRoadResult = res;
+  renderManualBusRoadPreview();
+}
+
+function switchToManualBusMode() {
+  const ctx = editingTransportContext;
+  if (!ctx) return;
+  ctx.transitSubTab = 'manual';
+  ctx.selectedTransitType = '公車';
+  renderTransitTabState();
+  renderTransitTypeChips();
+  renderTransportCostHint();
+  runManualBusRoadPreview();
+  document.getElementById('input-transit-line')?.focus();
 }
 
 function renderTransitTypeChips() {
@@ -190,8 +294,15 @@ function renderTransitTypeChips() {
     btn.addEventListener('click', () => {
       ctx.selectedTransitType = ctx.selectedTransitType === btn.dataset.ttype ? '' : btn.dataset.ttype;
       renderTransitTypeChips();
+      if (ctx.selectedTransitType === '公車') {
+        runManualBusRoadPreview();
+      } else {
+        renderManualBusRoadPreview();
+      }
     });
   });
+
+  renderManualBusRoadPreview();
 }
 
 function renderTransitPreferenceChips() {
@@ -353,17 +464,29 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
 
   if (res.status === 'unsupported') {
     routesWrap.classList.add('hidden');
+    const gmapsUrl = buildGoogleMapsDirUrl(ctx.pinA, ctx.pinB, 'transit');
     statusEl.innerHTML = `
-      <div class="rounded-xl bg-[#EFECE7] border border-[#CFC5BA] p-3 flex items-start gap-2 text-sm text-[#5E5248]">
-        <i data-lucide="alert-triangle" class="w-4 h-4 text-[#A65D57] shrink-0 mt-0.5"></i>
-        <div class="leading-relaxed">
-          <div class="font-extrabold">${ctx.isJapan ? '查無日本鐵道／地鐵分段路線' : '此時段查無大眾運輸班次'}</div>
-          <p class="text-xs text-[#7D6E62] mt-0.5">${escapeHTML(res.message || '請調整上方出發時間、改查 Google Maps，或切換至手動紀錄填寫。')}</p>
+      <div class="rounded-xl bg-[#EFECE7] border border-[#CFC5BA] p-3.5 space-y-2.5 text-sm text-[#5E5248]">
+        <div class="flex items-start gap-2">
+          <i data-lucide="alert-triangle" class="w-4 h-4 text-[#A65D57] shrink-0 mt-0.5"></i>
+          <div class="leading-relaxed">
+            <div class="font-extrabold">${ctx.isJapan ? '查無日本鐵道／公開公車路線' : '此時段查無大眾運輸班次'}</div>
+            <p class="text-xs text-[#7D6E62] mt-0.5">${escapeHTML(res.message || '請調整上方出發時間、改查 Google Maps，或改填貼路公車紀錄。')}</p>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-1.5 pt-0.5">
+          <button type="button" id="btn-unsupported-switch-bus" class="px-3 py-1.5 rounded-lg bg-owl-primary hover:bg-owl-primaryHover text-white text-xs font-bold transition">
+            🚌 改填公車紀錄（自動貼路）
+          </button>
+          <a href="${escapeHTML(gmapsUrl)}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-owl-darkTop hover:bg-owl-darkBottom text-owl-cream text-xs font-bold transition">
+            Google Maps 查這段公車 ↗
+          </a>
         </div>
       </div>
     `;
     refreshIcons(statusEl);
     renderTransportCostHint();
+    document.getElementById('btn-unsupported-switch-bus')?.addEventListener('click', switchToManualBusMode);
     return;
   }
 
@@ -383,28 +506,80 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
     return;
   }
 
-  // 成功取得分段大眾運輸路線（全球 Google 或日本 NAVITIME）！
+  // 成功取得分段大眾運輸路線（全球 Google、日本 NAVITIME 或日本 Transitous 開放公車資料）
   const routes = res.routes;
   ctx.selectedRouteIndex = Math.min(ctx.selectedRouteIndex || 0, routes.length - 1);
   const selected = routes[ctx.selectedRouteIndex];
-  const isNavitime = (selected.provider || res.provider) === 'navitime';
+  const provider = selected.provider || res.provider || 'google';
+  const isNavitime = provider === 'navitime';
+  const isTransitous = provider === 'transitous';
+  const hasRealTransit = routeHasTransitSegments(selected);
   const distKmNum = Number(selected.distanceKm);
   const distSummary = Number.isFinite(distKmNum) && distKmNum > 0 ? ` · ${distKmNum.toFixed(1)} km` : '';
 
-  statusEl.innerHTML = `
-    <div class="space-y-1">
-      <div class="flex items-center justify-between gap-2 text-sm">
-        <div class="flex items-center gap-1.5 text-[#4F6F57] font-bold">
-          <i data-lucide="check-circle-2" class="w-4 h-4 shrink-0"></i>
-          <span>${isNavitime ? '已取得日本 NAVITIME 分段路線' : '已取得 Google 分段路線與班次'}</span>
+  if (!hasRealTransit) {
+    const gmapsUrl = buildGoogleMapsDirUrl(ctx.pinA, ctx.pinB, 'transit');
+    statusEl.innerHTML = `
+      <div class="space-y-2">
+        <div class="rounded-xl bg-[#FAF3E6] border border-[#DFC79C] p-3.5 space-y-2.5 text-sm text-[#5A4426]">
+          <div class="flex items-start gap-2">
+            <i data-lucide="alert-triangle" class="w-4 h-4 text-[#B47A2A] shrink-0 mt-0.5"></i>
+            <div class="leading-relaxed">
+              <div class="font-extrabold">${ctx.isJapan ? '此段查無日本鐵路／公開公車路線' : '此段查無大眾運輸乘車班次'}（僅有步行 ${escapeHTML(formatDurationZh(selected.durationMin))}）</div>
+              <p class="text-xs text-[#7C6038] mt-0.5">
+                ${
+                  ctx.isJapan
+                    ? 'NAVITIME 免費版不含日本地方公車，且公開公車資料（Transitous）尚無此業者路線。建議先開 Google Maps 看公車班次，再改填公車紀錄，地圖會自動沿實際馬路畫線。'
+                    : '此時段系統僅列出步行路線，若實際有公車或接駁車可改填公車紀錄（自動沿馬路畫線）。'
+                }
+              </p>
+            </div>
+          </div>
+          <div class="flex flex-wrap items-center gap-1.5 pt-0.5">
+            <button type="button" id="btn-walkonly-switch-bus" class="px-3 py-1.5 rounded-lg bg-owl-primary hover:bg-owl-primaryHover text-white text-xs font-bold transition">
+              🚌 改填公車紀錄（自動貼路）
+            </button>
+            <a href="${escapeHTML(gmapsUrl)}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-owl-darkTop hover:bg-owl-darkBottom text-owl-cream text-xs font-bold transition">
+              Google Maps 查這段公車 ↗
+            </a>
+          </div>
         </div>
-        <span class="text-xs font-extrabold text-owl-primaryDeep tabular-nums-strict">
-          總計 ${escapeHTML(formatDurationZh(selected.durationMin))}${escapeHTML(distSummary)}
-        </span>
+        <div class="flex items-center justify-between gap-2 text-xs text-owl-subtext px-0.5">
+          <span>若打算直接步行，亦可直接套用下方步行路線：</span>
+          <span class="font-extrabold text-owl-primaryDeep tabular-nums-strict">
+            總計 ${escapeHTML(formatDurationZh(selected.durationMin))}${escapeHTML(distSummary)}
+          </span>
+        </div>
       </div>
-      ${isNavitime ? '<div class="text-xs text-owl-muted">涵蓋日本 JR／新幹線／地鐵／私鐵與步行（平均車程估算）；若需搭地方公車可點下方 Google Maps 對照。</div>' : ''}
-    </div>
-  `;
+    `;
+    document.getElementById('btn-walkonly-switch-bus')?.addEventListener('click', switchToManualBusMode);
+  } else {
+    const headerTitle = isTransitous
+      ? '已透過日本開放資料取得公車／大眾運輸路線'
+      : isNavitime
+        ? '已取得日本 NAVITIME 分段路線'
+        : '已取得 Google 分段路線與班次';
+    const subNote = isTransitous
+      ? '<div class="text-xs text-owl-muted">資料來源：<a href="https://transitous.org/sources/" target="_blank" rel="noopener noreferrer" class="underline hover:text-owl-primaryDeep">Transitous（日本 GTFS-JP）</a> 與 OpenStreetMap；若無自動票價可直接於下方填寫日圓換算台幣。</div>'
+      : isNavitime
+        ? '<div class="text-xs text-owl-muted">涵蓋日本 JR／新幹線／地鐵／私鐵與步行（平均車程估算）；若需搭地方公車可點下方 Google Maps 對照。</div>'
+        : '';
+
+    statusEl.innerHTML = `
+      <div class="space-y-1">
+        <div class="flex items-center justify-between gap-2 text-sm">
+          <div class="flex items-center gap-1.5 text-[#4F6F57] font-bold">
+            <i data-lucide="check-circle-2" class="w-4 h-4 shrink-0"></i>
+            <span>${headerTitle}</span>
+          </div>
+          <span class="text-xs font-extrabold text-owl-primaryDeep tabular-nums-strict">
+            總計 ${escapeHTML(formatDurationZh(selected.durationMin))}${escapeHTML(distSummary)}
+          </span>
+        </div>
+        ${subNote}
+      </div>
+    `;
+  }
 
   routesWrap.classList.remove('hidden');
 
@@ -646,6 +821,7 @@ function renderTransportModalControls() {
       renderTransportModalControls();
       if (ctx.selectedMode === 'transit') {
         if (ctx.transitSubTab === 'auto') runModalTransitQuery(false);
+        else if (ctx.selectedTransitType === '公車') runManualBusRoadPreview();
       } else {
         runModalLandQuery(false);
       }
@@ -701,6 +877,8 @@ export function openTransportModal(dayId, pinIndex) {
   const existing = pinA.transportToNext;
 
   const existingHasSegmented = hasSegmentedTransit(existing);
+  const existingIsManualTransit =
+    existing?.mode === 'transit' && existing?.status === 'manual' && !existing?.autoUpgradeOnGoogle;
   const existingCost = Number(existing?.cost) > 0 ? Math.round(Number(existing.cost)) : '';
   const inJapan = isJapanTrip(pinA, pinB);
 
@@ -714,12 +892,23 @@ export function openTransportModal(dayId, pinIndex) {
     isSaving: false,
     selectedMode: existing?.mode || 'car',
     selectedTransitType: existing?.mode === 'transit' ? existing.transitType || '' : '',
-    transitSubTab: 'auto',
+    transitSubTab: existingIsManualTransit ? 'manual' : 'auto',
     transitPreference: existing?.transitPreference || 'DEFAULT',
     departureTime: existing?.departureTime || '',
     selectedRouteIndex: existing?.selectedRouteIndex || 0,
     userEditedCost: Boolean(existingCost && !existing?.autoUpgradeOnGoogle),
     landResult: null,
+    manualBusRoadResult:
+      existing?.mode === 'transit' && existing?.roadSnapped && existing?.encodedPolyline
+        ? {
+            status: 'ok',
+            provider: existing.provider === 'manual-google' ? 'google' : 'osrm',
+            encodedPolyline: existing.encodedPolyline,
+            distanceKm: existing.distanceKm ?? null,
+            durationMin: null,
+          }
+        : null,
+    manualBusToken: 0,
     transitResult: existingHasSegmented
       ? {
           status: 'ok',
@@ -793,12 +982,14 @@ export function openTransportModal(dayId, pinIndex) {
     depTimeInput.classList.add('hidden');
   }
 
-  // 還原大眾運輸手動欄位
-  document.getElementById('input-transit-line').value = existing?.mode === 'transit' ? existing.line || '' : '';
-  document.getElementById('input-transit-schedule').value =
-    existing?.mode === 'transit' ? existing.schedule || '' : '';
+  // 還原大眾運輸手動欄位（僅在原紀錄為手動模式時帶入，避免將自動分段／純步行的舊時間與備註殘留到手動公車表單）
+  const restoreManualFields = existing?.mode === 'transit' && !existingHasSegmented;
+  document.getElementById('input-transit-line').value = restoreManualFields ? existing.line || '' : '';
+  document.getElementById('input-transit-schedule').value = restoreManualFields ? existing.schedule || '' : '';
   document.getElementById('input-transit-duration').value =
-    existing?.mode === 'transit' && Number(existing.duration) > 0 ? existing.duration : '';
+    restoreManualFields && Number(existing.duration) > 0 && !existing.durationEstimated
+      ? existing.duration
+      : '';
 
   renderTransportModalControls();
   const modalEl = document.getElementById('modal-transport');
@@ -806,7 +997,11 @@ export function openTransportModal(dayId, pinIndex) {
   refreshIcons(modalEl);
 
   if (editingTransportContext.selectedMode === 'transit') {
-    if (!existingHasSegmented) {
+    if (editingTransportContext.transitSubTab === 'manual') {
+      if (editingTransportContext.selectedTransitType === '公車') {
+        runManualBusRoadPreview();
+      }
+    } else if (!existingHasSegmented) {
       runModalTransitQuery(false);
     }
   } else {
@@ -873,18 +1068,70 @@ async function saveTransportSetting() {
     const schedule = document.getElementById('input-transit-schedule').value.trim();
     const rawDur = document.getElementById('input-transit-duration').value.trim();
     const parsedDur = Number(rawDur);
-    const duration = rawDur && Number.isFinite(parsedDur) && parsedDur > 0 ? Math.max(1, Math.round(parsedDur)) : null;
+    let duration =
+      rawDur && Number.isFinite(parsedDur) && parsedDur > 0 ? Math.max(1, Math.round(parsedDur)) : null;
+    let durationEstimated = false;
+    let encodedPolyline = '';
+    let distanceKm = null;
+    let roadSnapped = false;
+    let provider = 'manual';
 
-    pinA.transportToNext = {
+    // 手動「公車」紀錄：自動抓取實際馬路路網折線與參考公車車程，讓地圖貼路顯示
+    if (ctx.selectedTransitType === '公車') {
+      const saveBtn = document.getElementById('btn-save-transport');
+      ctx.isSaving = true;
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = '套用中…';
+      }
+
+      let roadRes = ctx.manualBusRoadResult;
+      try {
+        if (!roadRes || roadRes.status === 'pending' || (roadRes.status === 'ok' && !roadRes.durationMin && duration === null)) {
+          roadRes = await computeSegmentRoute({
+            mode: 'car',
+            pinA: ctx.pinA,
+            pinB: ctx.pinB,
+          });
+        }
+      } finally {
+        ctx.isSaving = false;
+        if (saveBtn && editingTransportContext === ctx) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = '套用設定';
+        }
+      }
+
+      if (!editingTransportContext || editingTransportContext !== ctx) return;
+      if (roadRes?.status === 'ok' && roadRes.encodedPolyline) {
+        encodedPolyline = roadRes.encodedPolyline;
+        distanceKm = roadRes.distanceKm ?? null;
+        roadSnapped = true;
+        provider = roadRes.provider === 'google' ? 'manual-google' : 'manual-osrm';
+        if (duration === null && Number(roadRes.durationMin) > 0) {
+          duration = estimateBusDurationFromCarMin(roadRes.durationMin);
+          durationEstimated = Boolean(duration);
+        }
+      }
+    }
+
+    const latestDayManual = getState().days.find((d) => d.id === ctx.dayId);
+    const latestPinAManual =
+      latestDayManual?.pins.find((p) => p.id === ctx.pinAId) || latestDayManual?.pins[ctx.pinIndex];
+    if (!latestPinAManual) return;
+
+    latestPinAManual.transportToNext = {
       mode: 'transit',
       status: 'manual',
-      provider: 'manual',
+      provider,
       duration,
-      distanceKm: null,
+      distanceKm,
       cost,
       ...foreignMeta,
       fare: null,
-      encodedPolyline: '',
+      encodedPolyline,
+      ...(roadSnapped ? { roadSnapped: true } : {}),
+      ...(durationEstimated ? { durationEstimated: true } : {}),
       segments: [],
       transitType: ctx.selectedTransitType || '',
       line,
@@ -895,9 +1142,11 @@ async function saveTransportSetting() {
     closeTransportModal();
     if (typeof onChangeCallback === 'function') onChangeCallback();
     showToast(
-      hasManualTransitDetails(pinA.transportToNext)
-        ? '已儲存大眾運輸手動紀錄與支出'
-        : '已設為大眾運輸（待設定班次或手動補記）',
+      roadSnapped
+        ? '已儲存公車紀錄並套用實際馬路路線'
+        : hasManualTransitDetails(latestPinAManual.transportToNext)
+          ? '已儲存大眾運輸手動紀錄與支出'
+          : '已設為大眾運輸（待設定班次或手動補記）',
       'success'
     );
     return;
@@ -1005,6 +1254,11 @@ export function bindTransportModalEvents({ onStateChanged }) {
     editingTransportContext.transitSubTab = 'manual';
     renderTransitTabState();
     renderTransportCostHint();
+    if (editingTransportContext.selectedTransitType === '公車') {
+      runManualBusRoadPreview();
+    } else {
+      renderManualBusRoadPreview();
+    }
   });
 
   document.getElementById('select-transit-time-mode').addEventListener('change', (e) => {
