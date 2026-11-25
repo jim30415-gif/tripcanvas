@@ -7,6 +7,7 @@ import {
   handleSearchPlaces,
   handleStatusRequest,
 } from './server/routesHandler.js';
+import { handleStaticMapRequest } from './server/staticMap.js';
 import {
   handleDriveCallback,
   handleDriveLogin,
@@ -211,7 +212,11 @@ function createRoutesApiPlugin(env) {
 
       try {
         const body = await readJsonBody(req);
-        const result = await handleComputeRoutes(body, env);
+        const postAction = parsedUrl.searchParams.get('action') || '';
+        const result =
+          postAction === 'staticmap'
+            ? await handleStaticMapRequest(body, env)
+            : await handleComputeRoutes(body, env);
         res.statusCode = result.statusCode;
         res.end(JSON.stringify(result.body));
       } catch (err) {

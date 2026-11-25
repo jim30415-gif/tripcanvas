@@ -6,6 +6,7 @@ import {
   handleSearchPlaces,
   handleStatusRequest,
 } from '../server/routesHandler.js';
+import { handleStaticMapRequest } from '../server/staticMap.js';
 import {
   checkRateLimit,
   checkSameOriginRequest,
@@ -122,7 +123,11 @@ export default async function handler(req, res) {
       return res.status(415).json({ error: 'UNSUPPORTED_MEDIA_TYPE', message: '請使用 application/json 格式提交請求' });
     }
 
-    const rate = checkRateLimit('routes_post', ip, 40, 60_000);
+    const postAction = getSingleParam(parsed, req.query, 'action') || '';
+    const isStaticMap = postAction === 'staticmap';
+    const rate = isStaticMap
+      ? checkRateLimit('routes_staticmap', ip, 30, 60_000)
+      : checkRateLimit('routes_post', ip, 40, 60_000);
     if (!rate.allowed) {
       res.setHeader('Retry-After', String(rate.retryAfterSec));
       return res.status(rate.statusCode).json(rate.body);
@@ -142,7 +147,9 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'INVALID_JSON', message: '請求內容格式不正確' });
     }
 
-    const result = await handleComputeRoutes(body, process.env);
+    const result = isStaticMap
+      ? await handleStaticMapRequest(body, process.env)
+      : await handleComputeRoutes(body, process.env);
     return res.status(result.statusCode).json(result.body);
   } catch (err) {
     console.error('[api/routes] unhandled error:', err?.message || err);

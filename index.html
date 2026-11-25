@@ -120,7 +120,7 @@
           <i data-lucide="cloud" class="w-4 h-4 shrink-0"></i>
           <span class="whitespace-nowrap">本機備份</span>
         </button>
-        <button id="btn-export-json" type="button" title="匯出目前旅遊計畫 JSON" class="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold text-owl-subtext hover:text-owl-primaryDeep hover:bg-owl-softBg border border-owl-border bg-owl-card transition">
+        <button id="btn-export-json" type="button" title="匯出 A4 一圖流懶人包或 JSON 備份" class="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold text-owl-subtext hover:text-owl-primaryDeep hover:bg-owl-softBg border border-owl-border bg-owl-card transition">
           <i data-lucide="download" class="w-4 h-4"></i>
           <span>匯出</span>
         </button>
@@ -378,13 +378,13 @@
 
       <div id="trips-drawer-list" class="flex-1 overflow-y-auto custom-scroll p-3 space-y-2.5"></div>
 
-      <!-- 手機端專用：匯出 / 匯入檔案備份工具列 -->
+      <!-- 手機端專用：匯出（A4 一圖流 / JSON）與匯入工具列 -->
       <div class="md:hidden px-3 py-2.5 border-t border-owl-border/75 bg-owl-panel shrink-0 space-y-2">
-        <div class="text-xs font-bold text-owl-muted px-0.5">檔案備份工具</div>
+        <div class="text-xs font-bold text-owl-muted px-0.5">匯出懶人包 / 備份還原</div>
         <div class="grid grid-cols-2 gap-2">
           <button id="btn-export-json-mobile" type="button" class="py-2.5 px-3 rounded-xl bg-owl-card hover:bg-owl-softBg border border-owl-border text-xs font-bold text-owl-text flex items-center justify-center gap-1.5 transition active:scale-95">
             <i data-lucide="download" class="w-4 h-4 shrink-0"></i>
-            <span>匯出 JSON</span>
+            <span>匯出行程</span>
           </button>
           <label class="py-2.5 px-3 rounded-xl bg-owl-card hover:bg-owl-softBg border border-owl-border text-xs font-bold text-owl-text flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95 focus-within:ring-2 focus-within:ring-owl-primary/40">
             <i data-lucide="upload" class="w-4 h-4 shrink-0"></i>
@@ -764,6 +764,116 @@
             套用設定
           </button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 彈窗 2.5：匯出行程（標準 A4 一圖流懶人包 + JSON 備份，z-index: 3000） ==================== -->
+  <div id="modal-export" role="dialog" aria-modal="true" aria-labelledby="modal-export-title" class="hidden fixed inset-0 z-[3000] bg-[#2B1F16]/55 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div class="bg-owl-card w-full sm:max-w-3xl max-h-[92dvh] rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-owl-border">
+      <!-- 標頭 -->
+      <div class="px-5 py-3.5 border-b border-owl-border/80 bg-owl-panel flex items-center justify-between gap-2 shrink-0">
+        <div class="min-w-0">
+          <h3 id="modal-export-title" class="text-lg font-extrabold text-owl-text flex items-center gap-2">
+            <i data-lucide="download" class="w-5 h-5 text-owl-primary shrink-0"></i>
+            <span>匯出行程</span>
+          </h3>
+          <p id="export-modal-subtitle" class="text-xs text-owl-subtext mt-0.5 truncate">統一標準 A4 懶人包或 JSON 備份</p>
+        </div>
+        <button id="btn-close-export" type="button" aria-label="關閉匯出視窗" class="w-9 h-9 rounded-full hover:bg-owl-softBg flex items-center justify-center text-owl-subtext transition shrink-0">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- 模式切換列：A4 一圖流懶人包 vs JSON 備份檔 -->
+      <div class="px-5 pt-3.5 pb-2 bg-owl-card shrink-0">
+        <div role="tablist" aria-label="選擇匯出格式" class="flex items-center gap-1 p-1 rounded-2xl bg-owl-softBg border border-owl-border/80">
+          <button id="btn-export-tab-poster" role="tab" aria-selected="true" type="button" class="flex-1 py-2 px-3 rounded-xl text-sm font-extrabold bg-owl-primary text-white shadow-2xs transition flex items-center justify-center gap-1.5">
+            <i data-lucide="image" class="w-4 h-4 shrink-0"></i>
+            <span>A4 一圖流懶人包</span>
+          </button>
+          <button id="btn-export-tab-json" role="tab" aria-selected="false" type="button" class="flex-1 py-2 px-3 rounded-xl text-sm font-bold text-owl-subtext hover:text-owl-text transition flex items-center justify-center gap-1.5">
+            <i data-lucide="file-json" class="w-4 h-4 shrink-0"></i>
+            <span>JSON 備份檔</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 內容主體（可捲動） -->
+      <div class="flex-1 overflow-y-auto custom-scroll px-5 pb-4 pt-1.5 space-y-3.5">
+        <!-- 分頁 A：A4 一圖流懶人包 -->
+        <div id="export-pane-poster" class="space-y-3.5">
+          <!-- 頁面選擇 + 版面密度切換 -->
+          <div class="rounded-2xl border border-owl-cardBorder bg-owl-panel p-3 space-y-2.5">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <span class="text-xs font-extrabold text-owl-subtext">選擇預覽頁面</span>
+              <div class="flex items-center gap-2">
+                <span id="export-a4-meta" class="hidden sm:inline text-xs font-bold text-owl-muted">A4 210×297 mm</span>
+                <div class="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-owl-softBg border border-owl-border/80">
+                  <button id="btn-export-density-detailed" type="button" class="px-2.5 py-1 rounded-lg text-xs font-extrabold bg-owl-primary text-white shadow-2xs transition">完整明細版</button>
+                  <button id="btn-export-density-compact" type="button" class="px-2.5 py-1 rounded-lg text-xs font-bold text-owl-subtext hover:text-owl-text transition">精簡分享版</button>
+                </div>
+              </div>
+            </div>
+            <div id="export-page-chips" class="flex flex-wrap gap-1.5"></div>
+          </div>
+
+          <!-- 標準 A4 即時預覽畫框 -->
+          <div class="rounded-2xl border border-owl-border/80 bg-[#EAE0D3]/75 p-3 sm:p-4 flex flex-col items-center gap-2.5">
+            <div class="relative w-full max-w-[330px] sm:max-w-[390px] aspect-[210/297] rounded-xl overflow-hidden shadow-lg border border-owl-border bg-[#F5EFE6]">
+              <img id="export-a4-preview-img" alt="A4 行程懶人包預覽" class="w-full h-full object-contain block" />
+              <div id="export-a4-loading" class="hidden absolute inset-0 bg-[#F5EFE6]/85 backdrop-blur-[2px] flex flex-col items-center justify-center gap-2.5 px-4 text-center">
+                <i data-lucide="loader-2" class="w-7 h-7 text-owl-primary animate-spin"></i>
+                <div class="text-xs sm:text-sm font-extrabold text-owl-text">正在合成實景底圖與標準 A4 排版...</div>
+              </div>
+            </div>
+            <div id="export-map-source-note" class="inline-flex items-center justify-center text-center text-[11px] sm:text-xs font-bold px-3 py-1 rounded-full border text-owl-primaryDeep bg-owl-softBg border-owl-border">
+              準備中...
+            </div>
+          </div>
+        </div>
+
+        <!-- 分頁 B：JSON 備份檔 -->
+        <div id="export-pane-json" class="hidden py-2 space-y-4">
+          <div class="rounded-2xl border border-owl-cardBorder bg-owl-panel p-5 space-y-3">
+            <div class="flex items-start gap-3">
+              <div class="w-11 h-11 rounded-2xl bg-owl-softBg border border-owl-border text-owl-primaryDeep flex items-center justify-center shrink-0">
+                <i data-lucide="file-json" class="w-5 h-5"></i>
+              </div>
+              <div class="min-w-0 flex-1 space-y-1">
+                <h4 class="text-base font-extrabold text-owl-text">匯出可還原的 JSON 備份檔</h4>
+                <p class="text-sm text-owl-subtext leading-relaxed">
+                  完整保存目前旅遊計畫的所有天數、標點座標、路線路徑、交通轉乘、旅遊筆記、支出紀錄與已上傳的標點圖片，之後可隨時在任何裝置上按「匯入」還原。
+                </p>
+              </div>
+            </div>
+
+            <div id="export-json-summary" class="rounded-xl bg-white border border-owl-border px-3.5 py-2.5 text-xs sm:text-sm font-bold text-owl-text"></div>
+
+            <div class="pt-1">
+              <button id="btn-export-json-confirm" type="button" class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-owl-primary hover:bg-owl-primaryHover text-white text-sm font-extrabold shadow-sm transition active:scale-95">
+                <i data-lucide="download" class="w-4 h-4"></i>
+                <span>下載 JSON 備份檔</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 底部操作列（A4 模式顯示） -->
+      <div id="export-poster-footer" class="px-4 sm:px-5 pt-3 pb-[max(14px,env(safe-area-inset-bottom))] sm:py-3.5 border-t border-owl-border/80 bg-owl-panel flex flex-wrap items-center justify-end gap-2 shrink-0">
+        <button id="btn-export-a4-print" type="button" class="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-white hover:bg-owl-softBg border border-owl-border text-xs sm:text-sm font-bold text-owl-text transition active:scale-95">
+          <i data-lucide="printer" class="w-4 h-4 text-owl-primary shrink-0"></i>
+          <span id="export-a4-print-label">列印 / 存 PDF</span>
+        </button>
+        <button id="btn-export-a4-all" type="button" class="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-owl-darkTop hover:bg-owl-darkBottom text-owl-cream text-xs sm:text-sm font-bold shadow-xs transition active:scale-95">
+          <i data-lucide="layers" class="w-4 h-4 text-owl-gold shrink-0"></i>
+          <span id="export-a4-all-label">下載全部 A4</span>
+        </button>
+        <button id="btn-export-a4-current" type="button" class="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-owl-primary hover:bg-owl-primaryHover text-white text-xs sm:text-sm font-extrabold shadow-sm transition active:scale-95">
+          <i data-lucide="download" class="w-4 h-4 shrink-0"></i>
+          <span>下載此頁 A4 PNG</span>
+        </button>
       </div>
     </div>
   </div>

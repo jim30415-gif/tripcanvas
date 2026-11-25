@@ -33,6 +33,7 @@ import { renderLeftPanel } from './ui/leftPanel.js';
 import { renderRightPanel, closeDesktopExpenseSheet } from './ui/rightPanel.js';
 import { openPinDetailModal, bindPinModalEvents } from './ui/pinModal.js';
 import { openTransportModal, bindTransportModalEvents } from './ui/transportModal.js';
+import { openExportModal, bindExportModalEvents } from './ui/exportModal.js';
 import { bindSearchBarEvents } from './ui/searchBar.js';
 import { bindTripsDrawerEvents, closeTripsDrawer, renderTripsDrawer } from './ui/tripsDrawer.js';
 import { bindDriveSyncUI } from './ui/driveSyncUI.js';
@@ -636,10 +637,10 @@ function bindGlobalEvents() {
     syncDesktopSidebarCollapseUI();
   });
 
-  document.getElementById('btn-export-json')?.addEventListener('click', exportJSON);
+  document.getElementById('btn-export-json')?.addEventListener('click', openExportModal);
   document.getElementById('btn-export-json-mobile')?.addEventListener('click', () => {
     closeTripsDrawer();
-    exportJSON();
+    openExportModal();
   });
 
   const handleImportChange = (e) => {
@@ -672,6 +673,7 @@ function bindGlobalEvents() {
     onDeletePin: (dayId, pinId) => deletePinWithUndo(dayId, pinId),
   });
   bindTransportModalEvents({ onStateChanged: renderAll });
+  bindExportModalEvents({ onExportJson: exportJSON });
   bindDriveSyncUI();
   bindMobileNav({
     onStateChanged: renderAll,
