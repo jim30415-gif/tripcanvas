@@ -1,4 +1,3 @@
-import L from 'leaflet';
 import { SILENT_TILE_SOURCES } from '../config/constants.js';
 import {
   createGoogleOverlayGroup,
@@ -7,7 +6,10 @@ import {
   mountBasemapPoiCard,
   resolveGoogleMapsJsKey,
 } from './googleEngine.js';
+import { isPinRepositioning } from './pinRenderer.js';
 
+let leafletLib = null;
+let leafletLoadPromise = null;
 let activeEngine = 'leaflet'; // 'google' | 'leaflet'
 let mapInstance = null; // Leaflet Map or google.maps.Map
 let overlayGroup = null;
@@ -16,6 +18,10 @@ let searchMarker = null;
 let resizeObserver = null;
 let googleProjection = null;
 let basemapPoiOverlay = null;
+let activeBasemapPoiOnClose = null;
+let pendingFitBoundsIdleListener = null;
+let invalidateRafId = null;
+let fallbackInProgress = false;
 let mapCallbacks = {};
 let zoomControlsBound = false;
 
@@ -27,7 +33,38 @@ let tileRuntime = {
   token: 0,
 };
 
-function createOfflineCanvasGridLayer(options) {
+async function ensureLeaflet() {
+  if (leafletLib) return leafletLib;
+  if (!leafletLoadPromise) {
+    leafletLoadPromise = Promise.all([import('leaflet'), import('leaflet/dist/leaflet.css')])
+      .then(([mod]) => {
+        leafletLib = mod.default || mod;
+        return leafletLib;
+      })
+      .catch((err) => {
+        leafletLoadPromise = null;
+        throw err;
+      });
+  }
+  return leafletLoadPromise;
+}
+
+export function getLeafletLib() {
+  return leafletLib;
+}
+
+function clearPendingFitBoundsIdle() {
+  if (pendingFitBoundsIdleListener) {
+    try {
+      window.google?.maps?.event?.removeListener?.(pendingFitBoundsIdleListener);
+    } catch {
+      // ignore
+    }
+    pendingFitBoundsIdleListener = null;
+  }
+}
+
+function createOfflineCanvasGridLayer(L, options) {
   const OfflineGridLayer = L.GridLayer.extend({
     createTile(coords) {
       const tile = document.createElement('canvas');
@@ -69,12 +106,19 @@ function createOfflineCanvasGridLayer(options) {
 }
 
 function mountTileSourceSilently(sourceIndex) {
-  if (activeEngine !== 'leaflet' || !mapInstance) return;
+  const L = leafletLib;
+  if (activeEngine !== 'leaflet' || !mapInstance || !L) return;
   if (mapInstance._animatingZoom) {
     mapInstance.once('zoomend', () => mountTileSourceSilently(sourceIndex));
     return;
   }
-  const source = SILENT_TILE_SOURCES[sourceIndex] || SILENT_TILE_SOURCES[SILENT_TILE_SOURCES.length - 1];
+
+  let resolvedIndex = sourceIndex;
+  const candidate = SILENT_TILE_SOURCES[resolvedIndex] || SILENT_TILE_SOURCES[SILENT_TILE_SOURCES.length - 1];
+  if (candidate.type !== 'canvas' && typeof navigator !== 'undefined' && navigator.onLine === false) {
+    resolvedIndex = SILENT_TILE_SOURCES.length - 1;
+  }
+  const source = SILENT_TILE_SOURCES[resolvedIndex] || SILENT_TILE_SOURCES[SILENT_TILE_SOURCES.length - 1];
 
   if (activeBaseLayer) {
     activeBaseLayer.off('tileload tileerror');
@@ -84,7 +128,7 @@ function mountTileSourceSilently(sourceIndex) {
 
   const token = ++tileRuntime.token;
   tileRuntime = {
-    sourceIndex,
+    sourceIndex: resolvedIndex,
     tileSuccessCount: 0,
     tileErrorCount: 0,
     switched: false,
@@ -92,10 +136,14 @@ function mountTileSourceSilently(sourceIndex) {
   };
 
   if (source.type === 'canvas') {
-    activeBaseLayer = createOfflineCanvasGridLayer(source.options);
+    activeBaseLayer = createOfflineCanvasGridLayer(L, source.options);
     activeBaseLayer.addTo(mapInstance);
     return;
   }
+
+  const size = mapInstance.getSize?.();
+  const viewportTiles = size ? Math.ceil(size.x / 256) * Math.ceil(size.y / 256) : 6;
+  const errorThreshold = Math.min(8, Math.max(4, viewportTiles - 1));
 
   activeBaseLayer = L.tileLayer(source.url, { ...source.options });
 
@@ -108,16 +156,16 @@ function mountTileSourceSilently(sourceIndex) {
     if (tileRuntime.token !== token) return;
     tileRuntime.tileErrorCount++;
     if (
-      tileRuntime.tileErrorCount > 10 &&
+      tileRuntime.tileErrorCount >= errorThreshold &&
       tileRuntime.tileSuccessCount === 0 &&
       !tileRuntime.switched &&
-      sourceIndex + 1 < SILENT_TILE_SOURCES.length
+      resolvedIndex + 1 < SILENT_TILE_SOURCES.length
     ) {
       tileRuntime.switched = true;
       // 延後至下一個事件循環再切換底圖，避免在 Leaflet _updateLevels() 同步清除瓦片期間觸發 removeLayer 導致 _map 為 null
       setTimeout(() => {
         if (tileRuntime.token === token) {
-          mountTileSourceSilently(sourceIndex + 1);
+          mountTileSourceSilently(resolvedIndex + 1);
         }
       }, 60);
     }
@@ -137,12 +185,16 @@ function syncEngineZoomControlsUI() {
     zoomControlsBound = true;
     document.getElementById('btn-gmap-zoom-in')?.addEventListener('click', () => {
       if (activeEngine === 'google' && mapInstance) {
-        mapInstance.setZoom((mapInstance.getZoom() || 13) + 1);
+        const curZoom = mapInstance.getZoom();
+        const baseZoom = Number.isFinite(curZoom) ? curZoom : 13;
+        mapInstance.setZoom(baseZoom + 1);
       }
     });
     document.getElementById('btn-gmap-zoom-out')?.addEventListener('click', () => {
       if (activeEngine === 'google' && mapInstance) {
-        mapInstance.setZoom(Math.max(2, (mapInstance.getZoom() || 13) - 1));
+        const curZoom = mapInstance.getZoom();
+        const baseZoom = Number.isFinite(curZoom) ? curZoom : 13;
+        mapInstance.setZoom(Math.max(2, baseZoom - 1));
       }
     });
   }
@@ -151,18 +203,19 @@ function syncEngineZoomControlsUI() {
 let activeDomCleanup = null;
 
 function isInteractiveMapTarget(target) {
-  if (!target || typeof target.closest !== 'function') return false;
+  const el = target instanceof Element ? target : target?.parentElement;
+  if (!el || typeof el.closest !== 'function') return false;
   return Boolean(
-    target.closest('.custom-pin-icon') ||
-      target.closest('.route-pill-marker') ||
-      target.closest('.basemap-poi-card') ||
-      target.closest('.leaflet-control') ||
-      target.closest('#google-zoom-controls') ||
-      target.closest('#map-top-left-hud') ||
-      target.closest('#map-top-right-hud') ||
-      target.closest('#desktop-expense-corridor') ||
-      target.closest('button') ||
-      target.closest('a')
+    el.closest('.custom-pin-icon') ||
+      el.closest('.route-pill-marker') ||
+      el.closest('.basemap-poi-card') ||
+      el.closest('.leaflet-control') ||
+      el.closest('#google-zoom-controls') ||
+      el.closest('#map-top-left-hud') ||
+      el.closest('#map-top-right-hud') ||
+      el.closest('#desktop-expense-corridor') ||
+      el.closest('button') ||
+      el.closest('a')
   );
 }
 
@@ -171,6 +224,7 @@ function isInteractiveMapTarget(target) {
  * 採用 capture 階段監聽確保不被 Google Maps 內部容器攔截，並嚴格去重保證每次長按僅新增 1 點
  */
 function createTouchLongPressController(container, toLatLng, onLongPressAdd) {
+  const supportsTouchEvents = typeof window !== 'undefined' && 'ontouchstart' in window;
   let touchTimer = null;
   let isTouchActive = false;
   let lastTouchActivityAt = 0;
@@ -179,6 +233,7 @@ function createTouchLongPressController(container, toLatLng, onLongPressAdd) {
   let startX = 0;
   let startY = 0;
   let activePointerId = null;
+  const activePointers = new Set();
 
   const clearTouchTimer = () => {
     if (touchTimer) {
@@ -189,7 +244,7 @@ function createTouchLongPressController(container, toLatLng, onLongPressAdd) {
 
   const emitTouchLongPressAdd = (lat, lng) => {
     clearTouchTimer();
-    if (touchGestureConsumed) return;
+    if (touchGestureConsumed || isPinRepositioning()) return;
     const now = Date.now();
     if (now - lastLongPressAddAt < 850) return;
     touchGestureConsumed = true;
@@ -201,11 +256,16 @@ function createTouchLongPressController(container, toLatLng, onLongPressAdd) {
   };
 
   const scheduleLongPress = (clientX, clientY) => {
+    if (isPinRepositioning()) {
+      clearTouchTimer();
+      return;
+    }
     startX = clientX;
     startY = clientY;
     clearTouchTimer();
     touchTimer = setTimeout(() => {
       touchTimer = null;
+      if (isPinRepositioning()) return;
       const rect = container.getBoundingClientRect();
       const latlng = toLatLng(startX - rect.left, startY - rect.top);
       if (latlng) {
@@ -235,7 +295,7 @@ function createTouchLongPressController(container, toLatLng, onLongPressAdd) {
           touchGestureConsumed = true;
           return;
         }
-        if (isInteractiveMapTarget(ev.target)) {
+        if (isPinRepositioning() || isInteractiveMapTarget(ev.target)) {
           clearTouchTimer();
           touchGestureConsumed = true;
           return;
@@ -274,14 +334,21 @@ function createTouchLongPressController(container, toLatLng, onLongPressAdd) {
     bindCap('touchend', onTouchFinish, { capture: true, passive: true });
     bindCap('touchcancel', onTouchFinish, { capture: true, passive: true });
 
-    // 2. Pointer Events 備援（專為 iPad Apple Pencil 及僅派發 PointerEvent 的平板瀏覽器）
+    // 2. Pointer Events 備援（專為 iPad Apple Pencil 及無 TouchEvent 的平板／觸控筆瀏覽器）
     bindCap(
       'pointerdown',
       (ev) => {
         if (ev.pointerType !== 'pen' && ev.pointerType !== 'touch') return;
-        // 若 touchstart 剛啟動計時，不重複開第二個計時器
-        if (ev.pointerType === 'touch' && touchTimer) return;
-        if (isInteractiveMapTarget(ev.target)) return;
+        activePointers.add(ev.pointerId);
+        if (activePointers.size > 1) {
+          clearTouchTimer();
+          touchGestureConsumed = true;
+          activePointerId = null;
+          return;
+        }
+        // 在支援 TouchEvent 的瀏覽器上，單指 touch 統一交由 touchstart 排程，避免 pointerdown 早於 touchstart 觸發雙重計時
+        if (ev.pointerType === 'touch' && supportsTouchEvents) return;
+        if (isPinRepositioning() || isInteractiveMapTarget(ev.target)) return;
         isTouchActive = true;
         lastTouchActivityAt = Date.now();
         touchGestureConsumed = false;
@@ -306,11 +373,14 @@ function createTouchLongPressController(container, toLatLng, onLongPressAdd) {
     );
 
     const onPointerFinish = (ev) => {
+      activePointers.delete(ev.pointerId);
       if (activePointerId == null || ev.pointerId !== activePointerId) return;
       lastTouchActivityAt = Date.now();
       clearTouchTimer();
       activePointerId = null;
-      isTouchActive = false;
+      if (activePointers.size === 0) {
+        isTouchActive = false;
+      }
     };
     bindCap('pointerup', onPointerFinish, { capture: true, passive: true });
     bindCap('pointercancel', onPointerFinish, { capture: true, passive: true });
@@ -338,6 +408,7 @@ function createTouchLongPressController(container, toLatLng, onLongPressAdd) {
     },
     destroy() {
       clearTouchTimer();
+      activePointers.clear();
       cleanups.forEach((fn) => fn());
       cleanups.length = 0;
     },
@@ -355,8 +426,10 @@ function runActiveDomCleanup() {
   }
 }
 
-function initLeafletMap(initialCenter = [25.044, 121.535], initialZoom = 13) {
+async function initLeafletMap(initialCenter = [25.044, 121.535], initialZoom = 13) {
+  const L = await ensureLeaflet();
   runActiveDomCleanup();
+  clearPendingFitBoundsIdle();
   activeEngine = 'leaflet';
   const mapDiv = document.getElementById('map');
   if (mapDiv) {
@@ -412,6 +485,7 @@ function initLeafletMap(initialCenter = [25.044, 121.535], initialZoom = 13) {
 
 function initGoogleMap(gmaps, initialCenter = [25.044, 121.535], initialZoom = 13) {
   runActiveDomCleanup();
+  clearPendingFitBoundsIdle();
   activeEngine = 'google';
   const mapDiv = document.getElementById('map');
   if (!mapDiv) return null;
@@ -435,6 +509,7 @@ function initGoogleMap(gmaps, initialCenter = [25.044, 121.535], initialZoom = 1
 
   let lastRightClickEmitAt = 0;
   const emitMouseRightClickAdd = (lat, lng) => {
+    if (isPinRepositioning()) return;
     const now = Date.now();
     if (now - lastRightClickEmitAt < 300) return;
     lastRightClickEmitAt = now;
@@ -455,7 +530,7 @@ function initGoogleMap(gmaps, initialCenter = [25.044, 121.535], initialZoom = 1
   // 2) 在 iPad 外接巧控鍵盤／觸控板／滑鼠右鍵時（Google Maps JS 在觸控裝置會略過 rightclick 事件），直接由 DOM contextmenu 補位設點！
   const onDomContextMenu = (ev) => {
     ev.preventDefault();
-    if (isInteractiveMapTarget(ev.target)) return;
+    if (isPinRepositioning() || isInteractiveMapTarget(ev.target)) return;
     const rect = mapDiv.getBoundingClientRect();
     const ll = toLatLng(ev.clientX - rect.left, ev.clientY - rect.top);
     if (!ll) return;
@@ -518,8 +593,9 @@ function initGoogleMap(gmaps, initialCenter = [25.044, 121.535], initialZoom = 1
   return mapInstance;
 }
 
-function fallbackToLeafletAfterAuthFailure() {
-  if (activeEngine !== 'google') return;
+async function fallbackToLeafletAfterAuthFailure() {
+  if (activeEngine !== 'google' || fallbackInProgress) return;
+  fallbackInProgress = true;
   let center = [25.044, 121.535];
   let zoom = 13;
   try {
@@ -531,19 +607,28 @@ function fallbackToLeafletAfterAuthFailure() {
     // ignore
   }
   runActiveDomCleanup();
+  clearPendingFitBoundsIdle();
   hideBasemapPoiPopover();
   if (overlayGroup) overlayGroup.clearLayers();
-  if (searchMarker && typeof searchMarker.setMap === 'function') {
-    searchMarker.setMap(null);
-    searchMarker = null;
+  clearSearchHighlightMarker();
+  if (mapInstance) {
+    try {
+      window.google?.maps?.event?.clearInstanceListeners?.(mapInstance);
+    } catch {
+      // ignore
+    }
   }
   if (googleProjection) {
     googleProjection.destroy();
     googleProjection = null;
   }
-  initLeafletMap(center, zoom);
-  if (typeof mapCallbacks.onEngineChanged === 'function') {
-    mapCallbacks.onEngineChanged('leaflet', 'GOOGLE_MAPS_AUTH_FAILURE');
+  try {
+    await initLeafletMap(center, zoom);
+    if (typeof mapCallbacks.onEngineChanged === 'function') {
+      mapCallbacks.onEngineChanged('leaflet', 'GOOGLE_MAPS_AUTH_FAILURE');
+    }
+  } finally {
+    fallbackInProgress = false;
   }
 }
 
@@ -564,7 +649,7 @@ function attachResizeObserver() {
 /**
  * 初始化地圖引擎：
  * - 若已設定 GOOGLE_MAPS_JS_API_KEY（或 VITE_GOOGLE_MAPS_API_KEY），優先啟用官方 Google Maps JS SDK（原生底圖圖示點擊取 placeId）
- * - 否則或載入／驗證失敗時，自動無縫降級回 Leaflet
+ * - 否則或載入／驗證失敗時，動態延遲載入 Leaflet 無縫降級
  */
 export async function initMap({ onMapClick, onMapRightClick, onBasemapPoiClick, onEngineChanged } = {}) {
   mapCallbacks = { onMapClick, onMapRightClick, onBasemapPoiClick, onEngineChanged };
@@ -573,7 +658,7 @@ export async function initMap({ onMapClick, onMapRightClick, onBasemapPoiClick, 
   if (jsKey) {
     try {
       const gmaps = await loadGoogleMapsSdk(jsKey, () => {
-        fallbackToLeafletAfterAuthFailure();
+        void fallbackToLeafletAfterAuthFailure();
       });
       initGoogleMap(gmaps);
       return { engine: 'google', map: mapInstance };
@@ -582,7 +667,7 @@ export async function initMap({ onMapClick, onMapRightClick, onBasemapPoiClick, 
     }
   }
 
-  initLeafletMap();
+  await initLeafletMap();
   return { engine: 'leaflet', map: mapInstance };
 }
 
@@ -623,15 +708,21 @@ export function onNextMapZoomEnd(fn) {
 
 export function invalidateMapSize() {
   if (!mapInstance) return;
-  if (activeEngine === 'leaflet') {
-    mapInstance.invalidateSize();
-  } else if (window.google?.maps?.event) {
-    window.google.maps.event.trigger(mapInstance, 'resize');
-  }
+  if (invalidateRafId !== null) return;
+  invalidateRafId = requestAnimationFrame(() => {
+    invalidateRafId = null;
+    if (!mapInstance) return;
+    if (activeEngine === 'leaflet') {
+      mapInstance.invalidateSize();
+    } else if (window.google?.maps?.event) {
+      window.google.maps.event.trigger(mapInstance, 'resize');
+    }
+  });
 }
 
 export function flyToPoint(lat, lng, zoom = 16) {
   if (!mapInstance) return;
+  clearPendingFitBoundsIdle();
   if (activeEngine === 'google') {
     mapInstance.panTo({ lat, lng });
     if (Number.isFinite(zoom)) {
@@ -644,6 +735,7 @@ export function flyToPoint(lat, lng, zoom = 16) {
 
 export function fitBoundsToPoints(pts, options = { padding: [70, 70], maxZoom: 15 }) {
   if (!mapInstance || !pts || pts.length === 0) return;
+  clearPendingFitBoundsIdle();
 
   const maxZoom = options?.maxZoom || 15;
   const topPad = Array.isArray(options?.paddingTopLeft)
@@ -671,9 +763,9 @@ export function fitBoundsToPoints(pts, options = { padding: [70, 70], maxZoom: 1
     const gmaps = window.google?.maps;
     if (!gmaps) return;
     if (pts.length === 1) {
-      mapInstance.panTo({ lat: pts[0][0], lng: pts[0][1] });
+      mapInstance.setCenter({ lat: pts[0][0], lng: pts[0][1] });
       mapInstance.setZoom(maxZoom);
-      // 若左右／上下留白不對稱（浮動工作區），稍微平移鏡頭讓單點落在可視走廊中央
+      // 若左右／上下留白不對稱（浮動工作區），平移鏡頭讓單點落在可視走廊中央
       const offsetX = Math.round((rightPad - leftPad) / 2);
       const offsetY = Math.round((bottomPad - topPad) / 2);
       if (Math.abs(offsetX) > 4 || Math.abs(offsetY) > 4) {
@@ -690,7 +782,8 @@ export function fitBoundsToPoints(pts, options = { padding: [70, 70], maxZoom: 1
       left: Math.max(24, leftPad),
     });
     if (gmaps.event?.addListenerOnce) {
-      gmaps.event.addListenerOnce(mapInstance, 'idle', () => {
+      pendingFitBoundsIdleListener = gmaps.event.addListenerOnce(mapInstance, 'idle', () => {
+        pendingFitBoundsIdleListener = null;
         if (activeEngine === 'google' && mapInstance && mapInstance.getZoom() > maxZoom) {
           mapInstance.setZoom(maxZoom);
         }
@@ -700,8 +793,10 @@ export function fitBoundsToPoints(pts, options = { padding: [70, 70], maxZoom: 1
   }
 
   // Leaflet 分支
+  const L = leafletLib;
+  if (!L) return;
   if (pts.length === 1) {
-    if (bottomPad > topPad || rightPad > leftPad) {
+    if (Math.abs(rightPad - leftPad) > 4 || Math.abs(bottomPad - topPad) > 4) {
       const projected = mapInstance.project(pts[0], maxZoom);
       const offsetX = (rightPad - leftPad) / 2;
       const offsetY = (bottomPad - topPad) / 2;
@@ -715,14 +810,27 @@ export function fitBoundsToPoints(pts, options = { padding: [70, 70], maxZoom: 1
   }
 }
 
+export function clearSearchHighlightMarker() {
+  if (!searchMarker) return;
+  try {
+    if (typeof searchMarker.setMap === 'function') {
+      searchMarker.setMap(null);
+    } else if (mapInstance && typeof mapInstance.removeLayer === 'function') {
+      mapInstance.removeLayer(searchMarker);
+    }
+  } catch {
+    // ignore
+  }
+  searchMarker = null;
+}
+
 export function showSearchHighlightMarker(lat, lng) {
   if (!mapInstance) return;
+  clearSearchHighlightMarker();
+
   if (activeEngine === 'google') {
     const gmaps = window.google?.maps;
     if (!gmaps) return;
-    if (searchMarker && typeof searchMarker.setMap === 'function') {
-      searchMarker.setMap(null);
-    }
     searchMarker = new gmaps.Marker({
       position: { lat, lng },
       map: mapInstance,
@@ -740,7 +848,8 @@ export function showSearchHighlightMarker(lat, lng) {
     return;
   }
 
-  if (searchMarker) mapInstance.removeLayer(searchMarker);
+  const L = leafletLib;
+  if (!L) return;
   searchMarker = L.circleMarker([lat, lng], {
     radius: 10,
     color: '#816448',
@@ -750,20 +859,7 @@ export function showSearchHighlightMarker(lat, lng) {
   }).addTo(mapInstance);
 }
 
-export function showBasemapPoiPopover(opts) {
-  hideBasemapPoiPopover();
-  if (activeEngine !== 'google' || !mapInstance) return null;
-  basemapPoiOverlay = mountBasemapPoiCard(mapInstance, {
-    ...opts,
-    onClose: () => {
-      hideBasemapPoiPopover();
-      if (typeof opts?.onClose === 'function') opts.onClose();
-    },
-  });
-  return basemapPoiOverlay;
-}
-
-export function hideBasemapPoiPopover() {
+function clearBasemapPoiOverlayDom() {
   if (basemapPoiOverlay) {
     try {
       basemapPoiOverlay.setMap(null);
@@ -771,5 +867,31 @@ export function hideBasemapPoiPopover() {
       // ignore
     }
     basemapPoiOverlay = null;
+  }
+}
+
+export function showBasemapPoiPopover(opts) {
+  clearBasemapPoiOverlayDom();
+  activeBasemapPoiOnClose = typeof opts?.onClose === 'function' ? opts.onClose : null;
+  if (activeEngine !== 'google' || !mapInstance) return null;
+  basemapPoiOverlay = mountBasemapPoiCard(mapInstance, {
+    ...opts,
+    onClose: () => {
+      hideBasemapPoiPopover();
+    },
+  });
+  return basemapPoiOverlay;
+}
+
+export function hideBasemapPoiPopover() {
+  clearBasemapPoiOverlayDom();
+  const cb = activeBasemapPoiOnClose;
+  activeBasemapPoiOnClose = null;
+  if (typeof cb === 'function') {
+    try {
+      cb();
+    } catch {
+      // ignore
+    }
   }
 }

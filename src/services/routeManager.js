@@ -2,21 +2,45 @@ import { ROUTE_CACHE_STORAGE_KEY } from '../config/constants.js';
 import { isJapanTrip, makeRouteCacheKey } from '../utils/geo.js';
 import { getGoogleRoutesStatus, queryGoogleRoutesProxy } from './googleRoutes.js';
 import { queryFossgisOSRM } from './osrmFallback.js';
-import { getState, saveState } from '../state/store.js';
+import { getActiveTrip, getState, saveState } from '../state/store.js';
 
 const MAX_CACHE_ENTRIES = 120;
+const TTL_LAND_OK_MS = 7 * 24 * 60 * 60 * 1000; // 7 天
+const TTL_TRANSIT_NOW_MS = 10 * 60 * 1000; // 「現在出發」班次快取 10 分鐘
+const TTL_TRANSIT_SCHEDULED_MS = 6 * 60 * 60 * 1000; // 指定時刻班次快取 6 小時
+const TTL_UNSUPPORTED_MS = 15 * 60 * 1000; // 查無路線快取 15 分鐘
+
 const routeCache = loadRouteCache();
 const inFlightRequests = new Map();
+let persistTimer = null;
+let resolveRunning = false;
+let resolveQueuedOpts = null;
+
+function isCacheEntryFresh(key, entry, now = Date.now()) {
+  if (!entry || typeof entry !== 'object') return false;
+  const cachedAt = Number(entry._cachedAt) || 0;
+  if (!cachedAt) return false;
+  const age = now - cachedAt;
+  if (age < 0) return false;
+  if (entry.status === 'unsupported') return age <= TTL_UNSUPPORTED_MS;
+  if (key.startsWith('transit|')) {
+    const isNowQuery = key.endsWith('|now');
+    return age <= (isNowQuery ? TTL_TRANSIT_NOW_MS : TTL_TRANSIT_SCHEDULED_MS);
+  }
+  return age <= TTL_LAND_OK_MS;
+}
 
 function loadRouteCache() {
   const map = new Map();
   try {
+    if (typeof localStorage === 'undefined') return map;
     const raw = localStorage.getItem(ROUTE_CACHE_STORAGE_KEY);
     if (!raw) return map;
     const entries = JSON.parse(raw);
+    const now = Date.now();
     if (Array.isArray(entries)) {
       for (const [k, v] of entries) {
-        if (typeof k === 'string' && v && typeof v === 'object') {
+        if (typeof k === 'string' && v && typeof v === 'object' && isCacheEntryFresh(k, v, now)) {
           map.set(k, v);
         }
       }
@@ -27,27 +51,42 @@ function loadRouteCache() {
   return map;
 }
 
-function persistRouteCache() {
-  try {
-    while (routeCache.size > MAX_CACHE_ENTRIES) {
-      const oldestKey = routeCache.keys().next().value;
-      routeCache.delete(oldestKey);
+function persistRouteCacheDebounced() {
+  if (typeof localStorage === 'undefined') return;
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    try {
+      while (routeCache.size > MAX_CACHE_ENTRIES) {
+        const oldestKey = routeCache.keys().next().value;
+        routeCache.delete(oldestKey);
+      }
+      localStorage.setItem(ROUTE_CACHE_STORAGE_KEY, JSON.stringify(Array.from(routeCache.entries())));
+    } catch {
+      // 空間不足時靜默降級為記憶體快取
     }
-    localStorage.setItem(ROUTE_CACHE_STORAGE_KEY, JSON.stringify(Array.from(routeCache.entries())));
-  } catch {
-    // 空間不足時靜默降級為記憶體快取
-  }
+  }, 400);
 }
 
 function setCachedRoute(key, value) {
   if (routeCache.has(key)) routeCache.delete(key);
-  routeCache.set(key, value);
-  persistRouteCache();
+  routeCache.set(key, { ...value, _cachedAt: Date.now() });
+  persistRouteCacheDebounced();
+}
+
+function readFreshCachedRoute(key) {
+  const entry = routeCache.get(key);
+  if (!entry) return null;
+  if (!isCacheEntryFresh(key, entry)) {
+    routeCache.delete(key);
+    return null;
+  }
+  return entry;
 }
 
 export function getCachedRoute(mode, pinA, pinB, extra = {}) {
   const key = makeRouteCacheKey(mode, pinA, pinB, extra);
-  return routeCache.get(key) || null;
+  return readFreshCachedRoute(key);
 }
 
 /**
@@ -73,9 +112,8 @@ export async function computeSegmentRoute({
     try {
       // A. 大眾運輸：透過 /api/routes 呼叫 Google Routes API v2 或日本 NAVITIME
       if (mode === 'transit') {
-        if (!forceRefresh && routeCache.has(cacheKey)) {
-          return routeCache.get(cacheKey);
-        }
+        const cachedTransit = !forceRefresh ? readFreshCachedRoute(cacheKey) : null;
+        if (cachedTransit) return cachedTransit;
         const res = await queryGoogleRoutesProxy({
           mode: 'transit',
           pinA,
@@ -91,7 +129,7 @@ export async function computeSegmentRoute({
 
       // B. 陸路交通（car / scooter / bike / walk）
       const googleStatus = await getGoogleRoutesStatus(forceRefresh);
-      const cached = !forceRefresh ? routeCache.get(cacheKey) : null;
+      const cached = !forceRefresh ? readFreshCachedRoute(cacheKey) : null;
 
       // 若快取已存在且（非備援 OSRM 或尚未設定 Google Key），直接使用快取
       if (cached && (!googleStatus.configured || cached.provider === 'google')) {
@@ -114,7 +152,9 @@ export async function computeSegmentRoute({
       }
       return osrmRes;
     } finally {
-      inFlightRequests.delete(cacheKey);
+      if (inFlightRequests.get(cacheKey) === task) {
+        inFlightRequests.delete(cacheKey);
+      }
     }
   })();
 
@@ -179,107 +219,209 @@ export function buildTransitTransportRecord(
   return record;
 }
 
+function sameCoord(a, b) {
+  return Math.abs(Number(a.lat) - Number(b.lat)) < 1e-6 && Math.abs(Number(a.lng) - Number(b.lng)) < 1e-6;
+}
+
 /**
  * 背景補齊所有待查詢、缺少貼路折線（舊版 JSON 匯入）或可升級為分段大眾運輸的路段
  */
 export async function resolvePendingSegments({ onUpdated, retryNetworkErrors = false } = {}) {
-  const state = getState();
-  const googleStatus = await getGoogleRoutesStatus();
-  const jobs = [];
+  if (resolveRunning) {
+    resolveQueuedOpts = {
+      onUpdated: onUpdated || resolveQueuedOpts?.onUpdated,
+      retryNetworkErrors: Boolean(retryNetworkErrors || resolveQueuedOpts?.retryNetworkErrors),
+    };
+    return;
+  }
 
-  state.days.forEach((day) => {
-    day.pins.forEach((pin, idx) => {
-      const nextPin = day.pins[idx + 1];
-      const t = pin.transportToNext;
-      if (!nextPin || !t) return;
+  resolveRunning = true;
+  try {
+    const tripIdSnapshot = getActiveTrip()?.id || '';
+    const state = getState();
+    const googleStatus = await getGoogleRoutesStatus();
+    const jobs = [];
+    let mutatedOffline = false;
 
-      if (t.mode === 'transit') {
-        const inJapan = isJapanTrip(pin, nextPin);
-        const canQueryRegionTransit = inJapan ? googleStatus.navitimeConfigured : googleStatus.configured;
-        const shouldAutoQueryTransit =
-          canQueryRegionTransit &&
-          (t.status === 'pending' || (t.autoUpgradeOnGoogle && t.status === 'manual'));
+    state.days.forEach((day) => {
+      day.pins.forEach((pin, idx) => {
+        const nextPin = day.pins[idx + 1];
+        const t = pin.transportToNext;
+        if (!nextPin || !t) return;
 
-        if (shouldAutoQueryTransit) {
-          jobs.push({ dayId: day.id, pinId: pin.id, nextPinId: nextPin.id, idx, mode: 'transit', t });
-        }
-        return;
-      }
+        if (t.mode === 'transit') {
+          const inJapan = isJapanTrip(pin, nextPin);
+          const canQueryRegionTransit = inJapan ? googleStatus.navitimeConfigured : googleStatus.configured;
 
-      const needsLandGeometry =
-        t.status === 'pending' ||
-        (t.status === 'ok' && !t.encodedPolyline) ||
-        (retryNetworkErrors && t.status === 'network_error');
+          // 若大眾運輸處於 pending 但該區域未設定自動查詢或目前離線，立刻結束 pending 狀態避免永遠卡轉圈
+          if (t.status === 'pending' && !canQueryRegionTransit) {
+            pin.transportToNext = {
+              ...t,
+              status: googleStatus.reachable ? 'manual' : 'network_error',
+            };
+            mutatedOffline = true;
+            return;
+          }
 
-      if (needsLandGeometry) {
-        jobs.push({ dayId: day.id, pinId: pin.id, nextPinId: nextPin.id, idx, mode: t.mode, t });
-      }
-    });
-  });
+          const shouldAutoQueryTransit =
+            canQueryRegionTransit &&
+            (t.status === 'pending' ||
+              (t.autoUpgradeOnGoogle && t.status === 'manual') ||
+              (retryNetworkErrors && t.status === 'network_error'));
 
-  if (jobs.length === 0) return;
-
-  // 每次處理 2 筆，避免一次大量並發觸發外部限流
-  const batchSize = 2;
-  for (let i = 0; i < jobs.length; i += batchSize) {
-    const batch = jobs.slice(i, i + batchSize);
-    await Promise.all(
-      batch.map(async (job) => {
-        const latestState = getState();
-        const curDay = latestState.days.find((d) => d.id === job.dayId);
-        const curPin = curDay?.pins[job.idx];
-        const curNext = curDay?.pins[job.idx + 1];
-        if (!curPin || curPin.id !== job.pinId || !curNext || curNext.id !== job.nextPinId) return;
-        if (!curPin.transportToNext || curPin.transportToNext.mode !== job.mode) return;
-
-        const res = await computeSegmentRoute({
-          mode: job.mode,
-          pinA: curPin,
-          pinB: curNext,
-          departureTime: job.t.departureTime || '',
-          transitPreference: job.t.transitPreference || 'DEFAULT',
-        });
-
-        // 再次確認路段未在使用者操作期間被變更
-        const afterState = getState();
-        const afterDay = afterState.days.find((d) => d.id === job.dayId);
-        const afterPin = afterDay?.pins[job.idx];
-        const afterNext = afterDay?.pins[job.idx + 1];
-        if (!afterPin || afterPin.id !== job.pinId || !afterNext || afterNext.id !== job.nextPinId) return;
-        if (!afterPin.transportToNext || afterPin.transportToNext.mode !== job.mode) return;
-
-        if (job.mode === 'transit') {
-          if (res.status === 'ok' && Array.isArray(res.routes) && res.routes.length > 0) {
-            const chosenIdx = Math.min(afterPin.transportToNext.selectedRouteIndex || 0, res.routes.length - 1);
-            const chosenRoute = res.routes[chosenIdx];
-            // 若有回傳票價優先自動帶入新台幣票價，否則保留既有費用
-            const autoCost = chosenRoute.fare?.amountTwd ?? afterPin.transportToNext.cost ?? 0;
-            afterPin.transportToNext = buildTransitTransportRecord(chosenRoute, {
-              provider: chosenRoute.provider || res.provider || 'google',
-              departureTime: afterPin.transportToNext.departureTime || '',
-              transitPreference: afterPin.transportToNext.transitPreference || 'DEFAULT',
-              selectedRouteIndex: chosenIdx,
-              cost: autoCost,
+          if (shouldAutoQueryTransit) {
+            jobs.push({
+              tripId: tripIdSnapshot,
+              dayId: day.id,
+              pinId: pin.id,
+              nextPinId: nextPin.id,
+              pinACoord: { lat: Number(pin.lat), lng: Number(pin.lng) },
+              pinBCoord: { lat: Number(nextPin.lat), lng: Number(nextPin.lng) },
+              mode: 'transit',
+              expectedStatus: t.status,
+              departureTime: t.departureTime || '',
+              transitPreference: t.transitPreference || 'DEFAULT',
             });
-            saveState(null, { markEdited: false, skipCloudSync: true });
-            if (typeof onUpdated === 'function') onUpdated();
           }
           return;
         }
 
-        afterPin.transportToNext = {
-          ...afterPin.transportToNext,
-          status: res.status,
-          provider: res.provider || afterPin.transportToNext.provider || 'osrm',
-          distanceKm: res.status === 'ok' ? res.distanceKm : null,
-          duration: res.status === 'ok' ? res.durationMin : null,
-          encodedPolyline: res.status === 'ok' ? res.encodedPolyline || '' : '',
-          fallbackNote: res.status === 'ok' ? res.fallbackNote || '' : '',
-          cost: Math.max(0, Math.round(Number(afterPin.transportToNext.cost) || 0)),
-        };
+        const needsLandGeometry =
+          t.status === 'pending' ||
+          (t.status === 'ok' && !t.encodedPolyline) ||
+          (retryNetworkErrors && t.status === 'network_error');
+
+        if (needsLandGeometry) {
+          jobs.push({
+            tripId: tripIdSnapshot,
+            dayId: day.id,
+            pinId: pin.id,
+            nextPinId: nextPin.id,
+            pinACoord: { lat: Number(pin.lat), lng: Number(pin.lng) },
+            pinBCoord: { lat: Number(nextPin.lat), lng: Number(nextPin.lng) },
+            mode: t.mode,
+            expectedStatus: t.status,
+            departureTime: '',
+            transitPreference: 'DEFAULT',
+          });
+        }
+      });
+    });
+
+    if (mutatedOffline) {
+      saveState(null, { markEdited: false, skipCloudSync: true });
+      if (typeof onUpdated === 'function') onUpdated();
+    }
+
+    if (jobs.length === 0) return;
+
+    const batchSize = 2;
+    for (let i = 0; i < jobs.length; i += batchSize) {
+      const batch = jobs.slice(i, i + batchSize);
+      let batchMutated = false;
+
+      await Promise.all(
+        batch.map(async (job) => {
+          if ((getActiveTrip()?.id || '') !== job.tripId) return;
+          const latestState = getState();
+          const curDay = latestState.days.find((d) => d.id === job.dayId);
+          const curIdx = curDay ? curDay.pins.findIndex((p) => p.id === job.pinId) : -1;
+          const curPin = curIdx >= 0 ? curDay.pins[curIdx] : null;
+          const curNext = curIdx >= 0 ? curDay.pins[curIdx + 1] : null;
+          if (!curPin || !curNext || curNext.id !== job.nextPinId) return;
+          if (!sameCoord(curPin, job.pinACoord) || !sameCoord(curNext, job.pinBCoord)) return;
+          if (!curPin.transportToNext || curPin.transportToNext.mode !== job.mode) return;
+
+          const res = await computeSegmentRoute({
+            mode: job.mode,
+            pinA: curPin,
+            pinB: curNext,
+            departureTime: job.departureTime,
+            transitPreference: job.transitPreference,
+          });
+
+          // 再次確認計畫、相鄰標點、座標與使用者設定在非同步查詢期間均未被改動
+          if ((getActiveTrip()?.id || '') !== job.tripId) return;
+          const afterState = getState();
+          const afterDay = afterState.days.find((d) => d.id === job.dayId);
+          const afterIdx = afterDay ? afterDay.pins.findIndex((p) => p.id === job.pinId) : -1;
+          const afterPin = afterIdx >= 0 ? afterDay.pins[afterIdx] : null;
+          const afterNext = afterIdx >= 0 ? afterDay.pins[afterIdx + 1] : null;
+          if (!afterPin || !afterNext || afterNext.id !== job.nextPinId) return;
+          if (!sameCoord(afterPin, job.pinACoord) || !sameCoord(afterNext, job.pinBCoord)) return;
+          const curT = afterPin.transportToNext;
+          if (!curT || curT.mode !== job.mode) return;
+
+          if (job.mode === 'transit') {
+            // 若使用者已在背景查詢期間手動改寫出發時間、偏好或手動紀錄，不覆蓋使用者修改
+            if (
+              curT.status !== job.expectedStatus ||
+              (curT.departureTime || '') !== job.departureTime ||
+              (curT.transitPreference || 'DEFAULT') !== job.transitPreference
+            ) {
+              return;
+            }
+
+            if (res.status === 'ok' && Array.isArray(res.routes) && res.routes.length > 0) {
+              const chosenIdx = Math.min(curT.selectedRouteIndex || 0, res.routes.length - 1);
+              const chosenRoute = res.routes[chosenIdx];
+              const hasApiFare = Boolean(chosenRoute.fare?.amountTwd);
+              const autoCost = hasApiFare ? chosenRoute.fare.amountTwd : curT.cost ?? 0;
+              afterPin.transportToNext = buildTransitTransportRecord(chosenRoute, {
+                provider: chosenRoute.provider || res.provider || 'google',
+                departureTime: curT.departureTime || '',
+                transitPreference: curT.transitPreference || 'DEFAULT',
+                selectedRouteIndex: chosenIdx,
+                cost: autoCost,
+                originalCost: hasApiFare ? null : curT.originalCost,
+                originalCurrency: hasApiFare ? '' : curT.originalCurrency || '',
+              });
+              batchMutated = true;
+              return;
+            }
+
+            // 非 ok 結果：明確脫離 pending，避免永久卡在「查詢大眾運輸中...」
+            if (curT.status === 'pending') {
+              const nextStatus =
+                res.status === 'unsupported'
+                  ? 'unsupported'
+                  : res.status === 'api_unconfigured' || res.status === 'japan_transit_requires_navitime'
+                    ? 'manual'
+                    : 'network_error';
+              afterPin.transportToNext = {
+                ...curT,
+                status: nextStatus,
+              };
+              batchMutated = true;
+            }
+            return;
+          }
+
+          afterPin.transportToNext = {
+            ...curT,
+            status: res.status,
+            provider: res.provider || curT.provider || 'osrm',
+            distanceKm: res.status === 'ok' ? res.distanceKm : null,
+            duration: res.status === 'ok' ? res.durationMin : null,
+            encodedPolyline: res.status === 'ok' ? res.encodedPolyline || '' : '',
+            fallbackNote: res.status === 'ok' ? res.fallbackNote || '' : '',
+            cost: Math.max(0, Math.round(Number(curT.cost) || 0)),
+          };
+          batchMutated = true;
+        })
+      );
+
+      if (batchMutated) {
         saveState(null, { markEdited: false, skipCloudSync: true });
         if (typeof onUpdated === 'function') onUpdated();
-      })
-    );
+      }
+    }
+  } finally {
+    resolveRunning = false;
+    if (resolveQueuedOpts) {
+      const next = resolveQueuedOpts;
+      resolveQueuedOpts = null;
+      void resolvePendingSegments(next);
+    }
   }
 }

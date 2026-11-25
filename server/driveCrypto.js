@@ -72,7 +72,7 @@ export function timingSafeEqualStr(a, b) {
 }
 
 export function parseCookies(cookieHeader) {
-  const result = {};
+  const result = Object.create(null);
   if (!cookieHeader || typeof cookieHeader !== 'string') return result;
   const parts = cookieHeader.split(';');
   for (const part of parts) {
@@ -80,7 +80,9 @@ export function parseCookies(cookieHeader) {
     if (eqIdx === -1) continue;
     const key = part.slice(0, eqIdx).trim();
     const val = part.slice(eqIdx + 1).trim();
-    if (!key) continue;
+    if (!key || key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
+    // RFC 6265 §5.4：保留最先出現（最具體路徑）的同名 Cookie
+    if (key in result) continue;
     try {
       result[key] = decodeURIComponent(val);
     } catch {

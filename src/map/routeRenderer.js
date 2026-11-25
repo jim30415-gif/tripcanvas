@@ -1,23 +1,17 @@
-import L from 'leaflet';
 import { TRANSPORT_MODES } from '../config/constants.js';
 import { getTransportDisplayInfo, hasSegmentedTransit } from '../state/selectors.js';
 import { getCachedRoute } from '../services/routeManager.js';
 import { decodePolyline, getPolylineMidpoint } from '../services/polyline.js';
 import { calcDistanceKm, generateCurvedPath } from '../utils/geo.js';
-import { escapeHTML, formatDistanceMetersZh, formatDurationZh } from '../utils/format.js';
+import {
+  escapeHTML,
+  formatDistanceMetersZh,
+  formatDurationZh,
+  pickReadableChipColor,
+  sanitizeHexColor,
+} from '../utils/format.js';
 import { createGoogleHtmlOverlay } from './googleEngine.js';
-
-/**
- * 判斷 hex 顏色是否過淺（避免白色或極淺黃色在淺底地圖上看不清楚）
- */
-function pickReadableLineColor(lineColor, fallbackColor) {
-  if (!lineColor || !/^#[0-9A-Fa-f]{6}$/.test(lineColor)) return fallbackColor;
-  const r = parseInt(lineColor.slice(1, 3), 16);
-  const g = parseInt(lineColor.slice(3, 5), 16);
-  const b = parseInt(lineColor.slice(5, 7), 16);
-  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return luminance > 0.82 ? fallbackColor : lineColor;
-}
+import { getLeafletLib } from './mapInit.js';
 
 /**
  * 跨引擎折線繪製器（同步支援 Google Maps JS Polyline 與 Leaflet Polyline，包含點狀／短虛線樣式）
@@ -84,6 +78,8 @@ function addPolyline(overlayGroup, coords, opts = {}, { onClick = null, tooltip 
   }
 
   // Leaflet 分支
+  const L = getLeafletLib();
+  if (!L) return null;
   const line = L.polyline(coords, opts).addTo(overlayGroup);
   if (tooltip) {
     line.bindTooltip(tooltip, {
@@ -132,6 +128,8 @@ function addStopDot(overlayGroup, lat, lng, { radius, color, opacity, tooltip, p
     return dot;
   }
 
+  const L = getLeafletLib();
+  if (!L) return null;
   const dot = L.circleMarker([lat, lng], {
     radius,
     color,
@@ -165,7 +163,10 @@ function addRoutePill(overlayGroup, midPt, pillHtml, zIndex, onClick) {
       })
     );
     const el = overlay.getElement();
-    el.addEventListener('mousedown', (ev) => ev.stopPropagation());
+    window.google?.maps?.OverlayView?.preventMapHitsFrom?.(el);
+    ['mousedown', 'pointerdown', 'pointerup', 'touchstart', 'touchend', 'dblclick'].forEach((evtName) => {
+      el.addEventListener(evtName, (ev) => ev.stopPropagation());
+    });
     el.addEventListener('click', (ev) => {
       ev.stopPropagation();
       if (typeof onClick === 'function') onClick(ev);
@@ -173,6 +174,8 @@ function addRoutePill(overlayGroup, midPt, pillHtml, zIndex, onClick) {
     return overlay;
   }
 
+  const L = getLeafletLib();
+  if (!L) return null;
   const pillMarker = L.marker(midPt, {
     icon: L.divIcon({ html: pillHtml, className: 'route-label-icon', iconSize: [0, 0], iconAnchor: [0, 0] }),
     zIndexOffset: zIndex,
@@ -207,7 +210,7 @@ function drawPinAccessConnector(overlayGroup, pin, roadEndpoint, isActive) {
  * 繪製 Google Routes API 回傳的分段大眾運輸路徑：
  * 「步行實景虛線 → 上車站點 → 官方代表色實線軌道／公車路徑 → 下車／轉乘站點 → 步行實景虛線」
  */
-function drawSegmentedTransitRoute(overlayGroup, day, pinA, pinB, t, info, isActive, openEdit) {
+function drawSegmentedTransitRoute(overlayGroup, day, safeDayColor, pinA, pinB, t, info, isActive, openEdit) {
   const allPoints = [];
   let primaryTransitCoords = null;
   let longestTransitLen = 0;
@@ -237,6 +240,7 @@ function drawSegmentedTransitRoute(overlayGroup, day, pinA, pinB, t, info, isAct
       );
 
       const distText = formatDistanceMetersZh(seg.distanceMeters);
+      const walkTip = `🚶 步行約 ${escapeHTML(formatDurationZh(seg.durationMin))}${distText ? `（${escapeHTML(distText)}）` : ''}`;
       addPolyline(
         overlayGroup,
         coords,
@@ -250,7 +254,7 @@ function drawSegmentedTransitRoute(overlayGroup, day, pinA, pinB, t, info, isAct
         },
         {
           onClick: openEdit,
-          tooltip: `🚶 步行約 ${formatDurationZh(seg.durationMin)}${distText ? `（${distText}）` : ''}`,
+          tooltip: walkTip,
           zIndex: 20,
         }
       );
@@ -258,7 +262,7 @@ function drawSegmentedTransitRoute(overlayGroup, day, pinA, pinB, t, info, isAct
     }
 
     // TRANSIT 段：貼合實際捷運軌道／鐵路／公車路線，優先使用官方路線代表色
-    const segColor = pickReadableLineColor(seg.lineColor, day.color);
+    const segColor = pickReadableChipColor(seg.lineColor, safeDayColor);
     const transitCoords =
       coords.length >= 2
         ? coords
@@ -290,10 +294,10 @@ function drawSegmentedTransitRoute(overlayGroup, day, pinA, pinB, t, info, isAct
       );
 
       const tipParts = [
-        `${seg.vehicleEmoji || '🚆'} ${seg.displayLine || '大眾運輸'}`,
-        seg.headsign ? `往 ${seg.headsign}` : '',
-        seg.stopCount ? `${seg.stopCount} 站` : '',
-        formatDurationZh(seg.durationMin),
+        `${escapeHTML(seg.vehicleEmoji || '🚆')} ${escapeHTML(seg.displayLine || '大眾運輸')}`,
+        seg.headsign ? `往 ${escapeHTML(seg.headsign)}` : '',
+        seg.stopCount ? `${escapeHTML(String(seg.stopCount))} 站` : '',
+        escapeHTML(formatDurationZh(seg.durationMin)),
       ].filter(Boolean);
 
       addPolyline(
@@ -323,7 +327,7 @@ function drawSegmentedTransitRoute(overlayGroup, day, pinA, pinB, t, info, isAct
         radius: isActive ? 5.2 : 4.2,
         color: segColor,
         opacity: isActive ? 1 : 0.72,
-        tooltip: `${seg.vehicleEmoji || '🚆'} ${role}：${escapeHTML(stop.name || '站點')}${escapeHTML(timeSuffix)}`,
+        tooltip: `${escapeHTML(seg.vehicleEmoji || '🚆')} ${escapeHTML(role)}：${escapeHTML(stop.name || '站點')}${escapeHTML(timeSuffix)}`,
         plainTitle,
         onClick: openEdit,
       });
@@ -352,15 +356,15 @@ function drawSegmentedTransitRoute(overlayGroup, day, pinA, pinB, t, info, isAct
     .filter((s) => s.type === 'TRANSIT')
     .slice(0, 2)
     .map((s) => {
-      const bg = pickReadableLineColor(s.lineColor, day.color);
+      const bg = pickReadableChipColor(s.lineColor, safeDayColor);
       return `<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[11px] font-extrabold leading-none text-white" style="background:${bg};">${escapeHTML(s.displayLine)}</span>`;
     })
     .join('<span class="text-owl-muted text-[11px]">›</span>');
 
   const durStr = formatDurationZh(t.duration);
   const pillHtml = `
-    <div class="route-pill-marker inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#FBF8F3]/95 backdrop-blur-sm shadow-float border text-xs font-bold text-[#3A2C21] whitespace-nowrap cursor-pointer" style="border-color:${day.color}; transform: translate(-50%, -50%);">
-      <span class="text-sm leading-none">${info.emoji}</span>
+    <div class="route-pill-marker inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#FBF8F3]/95 backdrop-blur-sm shadow-float border text-xs font-bold text-[#3A2C21] whitespace-nowrap cursor-pointer" style="border-color:${safeDayColor}; transform: translate(-50%, -50%);">
+      <span class="text-sm leading-none">${escapeHTML(info.emoji)}</span>
       ${transitBadges || `<span>${escapeHTML(info.mapPill)}</span>`}
       ${transitBadges && durStr ? `<span class="text-[11px] font-extrabold text-[#6B513A] tabular-nums-strict">${escapeHTML(durStr)}</span>` : ''}
     </div>
@@ -378,11 +382,13 @@ export function drawRouteSegmentOnMap(overlayGroup, day, pinA, pinB, pinIdx, isA
   const t = pinA.transportToNext;
   if (!t) return;
 
+  const safeDayColor = sanitizeHexColor(day.color);
   const modeMeta = TRANSPORT_MODES[t.mode] || TRANSPORT_MODES.car;
   const info = getTransportDisplayInfo(t);
   const openEdit = (ev) => {
     if (!overlayGroup?.isGoogle && ev) {
-      L.DomEvent.stopPropagation(ev);
+      const L = getLeafletLib();
+      if (L) L.DomEvent.stopPropagation(ev);
     }
     if (typeof onOpenTransportModal === 'function') {
       onOpenTransportModal(day.id, pinIdx);
@@ -391,7 +397,7 @@ export function drawRouteSegmentOnMap(overlayGroup, day, pinA, pinB, pinIdx, isA
 
   // A. Google Routes API 分段大眾運輸（步行 → 大眾運輸實際路線與站點 → 步行）
   if (t.mode === 'transit' && hasSegmentedTransit(t)) {
-    drawSegmentedTransitRoute(overlayGroup, day, pinA, pinB, t, info, isActive, openEdit);
+    drawSegmentedTransitRoute(overlayGroup, day, safeDayColor, pinA, pinB, t, info, isActive, openEdit);
     return;
   }
 
@@ -442,7 +448,7 @@ export function drawRouteSegmentOnMap(overlayGroup, day, pinA, pinB, pinIdx, isA
       overlayGroup,
       transitCoords,
       {
-        color: day.color,
+        color: safeDayColor,
         weight: 3.6,
         opacity: isActive ? 0.88 : 0.55,
         dashArray: '6, 8',
@@ -454,8 +460,8 @@ export function drawRouteSegmentOnMap(overlayGroup, day, pinA, pinB, pinIdx, isA
     const midPt = getPolylineMidpoint(transitCoords);
     const isEmpty = info.kind === 'transit-empty';
     const pillHtml = `
-      <div class="route-pill-marker inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full ${isEmpty ? 'bg-[#F5EFE6]/95 text-[#786454] border-[#CBBBA8]' : 'bg-[#FBF8F3]/95 text-[#3A2C21]'} backdrop-blur-sm shadow-float border text-xs font-bold whitespace-nowrap cursor-pointer" style="${isEmpty ? '' : `border-color:${day.color};`} transform: translate(-50%, -50%);">
-        <span class="w-2 h-2 rounded-full shrink-0" style="background:${day.color}; opacity:${isEmpty ? 0.55 : 1};"></span>
+      <div class="route-pill-marker inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full ${isEmpty ? 'bg-[#F5EFE6]/95 text-[#786454] border-[#CBBBA8]' : 'bg-[#FBF8F3]/95 text-[#3A2C21]'} backdrop-blur-sm shadow-float border text-xs font-bold whitespace-nowrap cursor-pointer" style="${isEmpty ? '' : `border-color:${safeDayColor};`} transform: translate(-50%, -50%);">
+        <span class="w-2 h-2 rounded-full shrink-0" style="background:${safeDayColor}; opacity:${isEmpty ? 0.55 : 1};"></span>
         <span>${escapeHTML(info.mapPill)}</span>
       </div>
     `;
@@ -516,7 +522,7 @@ export function drawRouteSegmentOnMap(overlayGroup, day, pinA, pinB, pinIdx, isA
     overlayGroup,
     roadCoords,
     {
-      color: day.color,
+      color: safeDayColor,
       weight: modeMeta.weight,
       opacity: isActive ? 0.96 : 0.62,
       dashArray: modeMeta.dashArray,
@@ -532,8 +538,8 @@ export function drawRouteSegmentOnMap(overlayGroup, day, pinA, pinB, pinIdx, isA
 
   const midPt = getPolylineMidpoint(roadCoords);
   const pillHtml = `
-    <div class="route-pill-marker inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#FBF8F3]/95 backdrop-blur-sm shadow-float border text-xs font-bold text-[#3A2C21] whitespace-nowrap cursor-pointer" style="border-color: ${day.color}; transform: translate(-50%, -50%);">
-      <span class="w-2 h-2 rounded-full shrink-0" style="background:${day.color};"></span>
+    <div class="route-pill-marker inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#FBF8F3]/95 backdrop-blur-sm shadow-float border text-xs font-bold text-[#3A2C21] whitespace-nowrap cursor-pointer" style="border-color: ${safeDayColor}; transform: translate(-50%, -50%);">
+      <span class="w-2 h-2 rounded-full shrink-0" style="background:${safeDayColor};"></span>
       <span>${escapeHTML(info.mapPill)}</span>
     </div>
   `;

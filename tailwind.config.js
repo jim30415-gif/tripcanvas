@@ -21,7 +21,7 @@ export default {
           accentBorder: '#A48262',
           text: '#3A2C21',
           subtext: '#786454',
-          muted: '#A08D7C',
+          muted: '#786655',
           darkTop: '#4A382B',
           darkBottom: '#3D2E23',
           gold: '#E5C59E',

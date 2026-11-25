@@ -529,7 +529,6 @@ aside.right-panel {
     border-color: rgba(226, 214, 197, 0.85) !important;
     backdrop-filter: blur(10px) saturate(1.1);
     -webkit-backdrop-filter: blur(10px) saturate(1.1);
-    transition: width 0.22s cubic-bezier(0.22, 1, 0.36, 1), left 0.22s cubic-bezier(0.22, 1, 0.36, 1);
   }
   #desktop-expense-sheet {
     display: none !important;
@@ -573,8 +572,21 @@ aside.right-panel {
     right: 12px;
   }
 
+  /* 保留開放地圖版權標註（精巧半透明定位於左下圓球上方，不遮蔽操作亦合乎 OSM / CARTO 授權） */
   .leaflet-bottom.leaflet-right .leaflet-control-attribution {
-    display: none !important;
+    position: fixed !important;
+    left: 10px !important;
+    right: auto !important;
+    bottom: calc(74px + env(safe-area-inset-bottom)) !important;
+    max-width: 170px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border-radius: 8px !important;
+    font-size: 9px !important;
+    padding: 1px 6px !important;
+    opacity: 0.76;
+    z-index: 440;
   }
 }
 
@@ -627,8 +639,8 @@ aside.right-panel {
   }
 }
 
-/* 手機端 (< 640px) 表單欄位採用 16px 字級，安全防止 iOS Safari 聚焦自動放大並保留無障礙雙指縮放 */
-@media (max-width: 639px) {
+/* 手機與觸控平板（含 iPad Safari）表單欄位採用 16px 字級，安全防止聚焦自動放大並保留無障礙雙指縮放 */
+@media (max-width: 639px), (pointer: coarse) {
   #map-search-input,
   #modal-pin-detail input[type='text'],
   #modal-pin-detail input[type='number'],

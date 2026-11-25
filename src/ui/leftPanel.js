@@ -1,20 +1,19 @@
 import { getState } from '../state/store.js';
 import { getActiveDay, getTransportDisplayInfo } from '../state/selectors.js';
 import { buildGoogleMapsPlaceUrl } from '../utils/geo.js';
-import { escapeHTML, refreshIcons, renderImageContent } from '../utils/format.js';
+import {
+  escapeHTML,
+  pickReadableChipColor,
+  refreshIcons,
+  renderImageContent,
+  sanitizeHexColor,
+} from '../utils/format.js';
+import { isCustomDialogOpen } from './dialog.js';
 
 let isDayDropdownOpen = false;
 let dayDropdownEventsBound = false;
 let latestCallbacks = {};
-
-function pickReadableChipBg(color, fallback) {
-  if (!color || !/^#[0-9A-Fa-f]{6}$/.test(color)) return fallback;
-  const r = parseInt(color.slice(1, 3), 16);
-  const g = parseInt(color.slice(3, 5), 16);
-  const b = parseInt(color.slice(5, 7), 16);
-  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return luminance > 0.82 ? fallback : color;
-}
+let activeDragCancel = null;
 
 function closeDayDropdown() {
   isDayDropdownOpen = false;
@@ -48,10 +47,11 @@ function renderLeftDayDropdown() {
   const itemsHtml = state.days
     .map((d, idx) => {
       const active = d.id === state.activeDayId;
+      const safeColor = sanitizeHexColor(d.color);
       return `
         <button
           type="button"
-          data-quick-day-id="${d.id}"
+          data-quick-day-id="${escapeHTML(d.id)}"
           class="btn-quick-switch-day w-full px-3.5 py-2.5 text-left flex items-center justify-between gap-2 transition ${
             active
               ? 'bg-owl-selectedBg text-owl-primaryDeep font-extrabold'
@@ -59,7 +59,7 @@ function renderLeftDayDropdown() {
           }"
         >
           <div class="flex items-center gap-2.5 min-w-0">
-            <span class="w-3 h-3 rounded-full shrink-0" style="background:${d.color}; opacity:${d.visible ? 1 : 0.45};"></span>
+            <span class="w-3 h-3 rounded-full shrink-0" style="background:${safeColor}; opacity:${d.visible ? 1 : 0.45};"></span>
             <span class="text-sm truncate">${escapeHTML(d.name || `Day ${idx + 1}`)}</span>
           </div>
           <div class="flex items-center gap-2 shrink-0">
@@ -86,7 +86,7 @@ function renderLeftDayDropdown() {
       </button>
     </div>
   `;
-  refreshIcons();
+  refreshIcons(dropdown);
   dropdown.setAttribute('aria-hidden', 'false');
   dropdown.classList.add('is-open');
 
@@ -133,26 +133,26 @@ function ensureDayDropdownBound() {
   });
 
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && isDayDropdownOpen) {
+    if (e.key === 'Escape' && isDayDropdownOpen && !isCustomDialogOpen()) {
       closeDayDropdown();
     }
   });
 }
 
-function renderSegmentedTransitChips(segments, dayColor) {
+function renderSegmentedTransitChips(segments, safeDayColor) {
   const chips = segments.map((seg) => {
     if (seg.type === 'WALK') {
-      return `<span class="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md bg-owl-card border border-owl-cardBorder text-xs font-bold text-owl-subtext whitespace-nowrap">🚶 ${seg.durationMin}分</span>`;
+      return `<span class="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md bg-owl-card border border-owl-cardBorder text-xs font-bold text-owl-subtext whitespace-nowrap">🚶 ${escapeHTML(String(seg.durationMin ?? 0))}分</span>`;
     }
-    const bg = pickReadableChipBg(seg.lineColor, dayColor);
+    const bg = pickReadableChipColor(seg.lineColor, safeDayColor);
     const stopHint = seg.stopCount ? ` ${seg.stopCount}站` : '';
-    return `<span class="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md text-xs font-bold text-white whitespace-nowrap shadow-2xs" style="background:${bg};">${seg.vehicleEmoji || '🚆'} ${escapeHTML(seg.displayLine || '大眾運輸')}${escapeHTML(stopHint)}</span>`;
+    return `<span class="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md text-xs font-bold text-white whitespace-nowrap shadow-2xs" style="background:${bg};">${escapeHTML(seg.vehicleEmoji || '🚆')} ${escapeHTML(seg.displayLine || '大眾運輸')}${escapeHTML(stopHint)}</span>`;
   });
 
   return chips.join('<span class="text-xs text-owl-muted font-bold">›</span>');
 }
 
-function renderConnectorHTML(day, pin, idx) {
+function renderConnectorHTML(day, safeDayColor, pin, idx) {
   const t = pin.transportToNext;
   if (!t) {
     return `
@@ -171,7 +171,7 @@ function renderConnectorHTML(day, pin, idx) {
   const info = getTransportDisplayInfo(t);
   const isAlert = info.kind === 'unsupported' || info.kind === 'network_error';
   const isUnrecorded = info.kind === 'transit-empty';
-  const lineColor = isAlert ? '#C5BAB0' : `${day.color}55`;
+  const lineColor = isAlert ? '#C5BAB0' : `${safeDayColor}55`;
 
   // 分段大眾運輸專屬卡片（支出統一由中央總支出檢視，卡片維持清爽）
   if (info.kind === 'transit-segmented' && Array.isArray(info.segments)) {
@@ -180,7 +180,7 @@ function renderConnectorHTML(day, pin, idx) {
         <div class="transport-connector-line absolute top-0 bottom-0 left-[23px] w-0.5" style="background: ${lineColor};"></div>
         <button type="button" data-transport-idx="${idx}" class="btn-open-transport group relative z-10 w-full flex flex-col gap-1.5 px-3 py-2 rounded-xl border bg-owl-selectedBg/95 hover:bg-owl-softBg border-owl-cardBorder hover:border-owl-accentBorder text-left transition">
           <div class="flex flex-wrap items-center gap-1">
-            ${renderSegmentedTransitChips(info.segments, day.color)}
+            ${renderSegmentedTransitChips(info.segments, safeDayColor)}
           </div>
           <div class="flex items-center justify-between gap-1.5">
             <span class="text-xs font-semibold text-owl-subtext truncate tabular-nums-strict">${escapeHTML(info.leftSub)}</span>
@@ -202,7 +202,7 @@ function renderConnectorHTML(day, pin, idx) {
       <div class="transport-connector-line absolute top-0 bottom-0 left-[23px] w-0.5" style="background: ${lineColor};"></div>
       <button type="button" data-transport-idx="${idx}" class="btn-open-transport group relative z-10 w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl border transition text-left ${cardClasses}">
         <div class="flex items-center gap-2 min-w-0">
-          <span class="text-base leading-none shrink-0">${info.emoji}</span>
+          <span class="text-base leading-none shrink-0">${escapeHTML(info.emoji || '')}</span>
           <div class="min-w-0">
             <div class="text-sm font-bold truncate ${isAlert ? 'text-[#63564B]' : 'text-owl-text'}">${escapeHTML(info.leftTitle)}</div>
             <div class="text-xs font-medium truncate ${isAlert ? 'text-[#847568]' : 'text-owl-subtext'}">${escapeHTML(info.leftSub)}</div>
@@ -247,6 +247,7 @@ function bindItineraryInteractions(day, { onOpenPinDetail, onOpenTransport, onRe
 
     let longPressTimer = null;
     let isDragging = false;
+    let startedOnHandle = false;
     let startX = 0;
     let startY = 0;
     let pointerId = null;
@@ -308,10 +309,12 @@ function bindItineraryInteractions(day, { onOpenPinDetail, onOpenTransport, onRe
 
       for (let i = 0; i < blocks.length; i++) {
         const bCard = blocks[i].querySelector('.pin-card');
+        if (!bCard) continue;
         const bRect = bCard.getBoundingClientRect();
         const midY = bRect.top + bRect.height / 2;
         if (clientY < midY) {
-          newTarget = i;
+          // 向下拖曳時 splice(pinIndex, 1) 會讓後續索引前移 1，因此需減 1 才對齊紅線指示位置
+          newTarget = pinIndex < i ? i - 1 : i;
           blocks[i].parentNode.insertBefore(indicatorEl, blocks[i]);
           inserted = true;
           break;
@@ -325,13 +328,19 @@ function bindItineraryInteractions(day, { onOpenPinDetail, onOpenTransport, onRe
       targetIndex = newTarget;
     };
 
+    const cancelDrag = () => endDrag(false);
+
     const endDrag = (commit) => {
       clearTimer();
+      listEl.removeEventListener('scroll', onListScroll);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('pointercancel', onPointerCancel);
       window.removeEventListener('touchmove', blockTouchScroll);
       listEl.style.overflowY = '';
+      if (activeDragCancel === cancelDrag) {
+        activeDragCancel = null;
+      }
       try {
         if (pointerId != null && card.hasPointerCapture?.(pointerId)) {
           card.releasePointerCapture(pointerId);
@@ -339,6 +348,8 @@ function bindItineraryInteractions(day, { onOpenPinDetail, onOpenTransport, onRe
       } catch {
         // ignore
       }
+      pointerId = null;
+      startedOnHandle = false;
 
       if (!isDragging) return;
       isDragging = false;
@@ -364,7 +375,7 @@ function bindItineraryInteractions(day, { onOpenPinDetail, onOpenTransport, onRe
       const dy = Math.abs(e.clientY - startY);
 
       if (!isDragging) {
-        if (e.target.closest('.drag-handle') && dy > 5) {
+        if (startedOnHandle && dy > 5) {
           startDrag(e.clientY);
           return;
         }
@@ -387,30 +398,46 @@ function bindItineraryInteractions(day, { onOpenPinDetail, onOpenTransport, onRe
 
     const onPointerUp = (e) => {
       if (e.pointerId !== pointerId) return;
-      listEl.removeEventListener('scroll', onListScroll);
       const moved = Math.hypot(e.clientX - startX, e.clientY - startY);
       const wasDragging = isDragging;
+      const wasHandle = startedOnHandle;
       endDrag(true);
 
-      if (!wasDragging && moved < 9 && !e.target.closest('.drag-handle') && !e.target.closest('.btn-card-gmaps')) {
+      if (
+        !wasDragging &&
+        !wasHandle &&
+        moved < 9 &&
+        !e.target.closest('.drag-handle') &&
+        !e.target.closest('.btn-card-gmaps') &&
+        !e.target.closest('.btn-card-delete')
+      ) {
         onOpenPinDetail(day.id, pinId);
       }
     };
 
     const onPointerCancel = () => {
-      listEl.removeEventListener('scroll', onListScroll);
       endDrag(false);
     };
 
+    card.addEventListener('keydown', (e) => {
+      if (e.target !== card) return;
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        onOpenPinDetail(day.id, pinId);
+      }
+    });
+
     card.addEventListener('pointerdown', (e) => {
       if (e.button !== 0 && e.pointerType === 'mouse') return;
-      if (e.target.closest('.btn-card-gmaps')) return;
+      if (e.target.closest('.btn-card-gmaps') || e.target.closest('.btn-card-delete')) return;
+      if (pointerId !== null) return;
       startX = e.clientX;
       startY = e.clientY;
       pointerId = e.pointerId;
+      startedOnHandle = Boolean(e.target.closest('.drag-handle'));
+      activeDragCancel = cancelDrag;
 
-      const isHandle = Boolean(e.target.closest('.drag-handle'));
-      const pressDelay = isHandle ? 75 : e.pointerType === 'touch' ? 420 : 250;
+      const pressDelay = startedOnHandle ? 75 : e.pointerType === 'touch' ? 420 : 250;
       longPressTimer = setTimeout(() => {
         card.classList.add('longpress-active');
         setTimeout(() => card.classList.remove('longpress-active'), 450);
@@ -426,6 +453,9 @@ function bindItineraryInteractions(day, { onOpenPinDetail, onOpenTransport, onRe
 }
 
 export function renderLeftPanel(callbacks) {
+  if (typeof activeDragCancel === 'function') {
+    activeDragCancel();
+  }
   latestCallbacks = callbacks || {};
   ensureDayDropdownBound();
 
@@ -434,7 +464,8 @@ export function renderLeftPanel(callbacks) {
   const listEl = document.getElementById('itinerary-list');
   if (!day || !listEl) return;
 
-  document.getElementById('left-day-dot').style.backgroundColor = day.color;
+  const safeDayColor = sanitizeHexColor(day.color);
+  document.getElementById('left-day-dot').style.backgroundColor = safeDayColor;
   document.getElementById('left-day-title').textContent = day.name;
   document.getElementById('left-pin-count').textContent = `${day.pins.length} 個標點`;
 
@@ -452,7 +483,7 @@ export function renderLeftPanel(callbacks) {
         <p class="text-sm text-owl-subtext mt-1.5 leading-relaxed">電腦請「右鍵點擊」地圖、手機請「長按」地圖空處，<br/>或直接使用上方搜尋列加入景點！</p>
       </div>
     `;
-    refreshIcons();
+    refreshIcons(listEl);
     return;
   }
 
@@ -462,13 +493,14 @@ export function renderLeftPanel(callbacks) {
     const hasNext = idx < day.pins.length - 1;
     const hasImg = Boolean(pin.image);
     const gmapsUrl = buildGoogleMapsPlaceUrl(pin);
+    const safePinId = escapeHTML(pin.id);
 
     html += `
-      <div class="pin-item-block" data-pin-index="${idx}" data-pin-id="${pin.id}">
-        <div class="pin-card group relative bg-owl-card hover:bg-owl-selectedBg/75 border border-owl-cardBorder hover:border-owl-accentBorder rounded-2xl p-3 shadow-xs hover:shadow-soft transition cursor-pointer touch-pan-y" data-pin-index="${idx}" data-pin-id="${pin.id}">
+      <div class="pin-item-block" data-pin-index="${idx}" data-pin-id="${safePinId}">
+        <div tabindex="0" role="button" aria-label="編輯景點 ${escapeHTML(pin.name)}" class="pin-card group relative bg-owl-card hover:bg-owl-selectedBg/75 border border-owl-cardBorder hover:border-owl-accentBorder rounded-2xl p-3 shadow-xs hover:shadow-soft transition cursor-pointer touch-pan-y focus:outline-none focus-visible:ring-2 focus-visible:ring-owl-primary/40" data-pin-index="${idx}" data-pin-id="${safePinId}">
           <div class="flex items-center gap-2">
             <div class="drag-handle flex flex-col items-center justify-center gap-1 min-w-[38px] min-h-[44px] -ml-1.5 pl-1.5 pr-1 py-1 cursor-grab active:cursor-grabbing text-owl-muted group-hover:text-owl-primaryDeep shrink-0 touch-none" title="按住上下拖曳調整順序">
-              <span class="w-6 h-6 rounded-full text-white text-xs font-extrabold flex items-center justify-center shadow-xs" style="background:${day.color};">
+              <span class="w-6 h-6 rounded-full text-white text-xs font-extrabold flex items-center justify-center shadow-xs" style="background:${safeDayColor};">
                 ${idx + 1}
               </span>
               <i data-lucide="grip-horizontal" class="w-3.5 h-3.5"></i>
@@ -519,7 +551,7 @@ export function renderLeftPanel(callbacks) {
               </a>
               <button
                 type="button"
-                data-delete-pin-id="${pin.id}"
+                data-delete-pin-id="${safePinId}"
                 title="快速刪除此景點"
                 aria-label="刪除 ${escapeHTML(pin.name)}"
                 class="btn-card-delete w-7 h-7 rounded-lg text-owl-muted hover:text-[#A65D57] hover:bg-[#F9EDEC] flex items-center justify-center transition active:scale-90"
@@ -530,12 +562,12 @@ export function renderLeftPanel(callbacks) {
           </div>
         </div>
 
-        ${hasNext ? renderConnectorHTML(day, pin, idx) : ''}
+        ${hasNext ? renderConnectorHTML(day, safeDayColor, pin, idx) : ''}
       </div>
     `;
   });
 
   listEl.innerHTML = html;
-  refreshIcons();
+  refreshIcons(listEl);
   bindItineraryInteractions(day, callbacks);
 }

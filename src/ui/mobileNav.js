@@ -1,12 +1,13 @@
 import { getState, saveState } from '../state/store.js';
 import { calcExpenseBreakdown, getActiveDay } from '../state/selectors.js';
-import { escapeHTML, formatTWD, refreshIcons } from '../utils/format.js';
+import { escapeHTML, formatTWD, refreshIcons, sanitizeHexColor } from '../utils/format.js';
 import { fitBoundsToPoints, invalidateMapSize } from '../map/mapInit.js';
-import { openCustomDialog, showToast } from './dialog.js';
+import { isCustomDialogOpen, openCustomDialog, showToast } from './dialog.js';
 
 let activeOverlay = 'none'; // 'none' | 'itinerary' | 'days' | 'expense'
 let selectedDayId = null; // 點擊天數正方形後，在該天旁顯示眼睛＋齒輪小圓（不再跳出行程清單）
 let gearSettingsDayId = null; // 點擊齒輪小圓後展開的詳細設定卡（更名、刪除、顯隱）
+let lastViewportWasMobile = null;
 let callbacks = {
   onStateChanged: () => {},
   onVisibilityChanged: () => {},
@@ -94,7 +95,7 @@ function renderMobileExpenseSheet(breakdown) {
           .map((d) => {
             if (d.amount <= 0) return '';
             const pct = (d.amount / breakdown.grandTotal) * 100;
-            return `<div class="h-full first:rounded-l-full last:rounded-r-full transition-all" style="width:${pct}%; background:${d.color}; opacity:${d.visible ? 1 : 0.35};"></div>`;
+            return `<div class="h-full first:rounded-l-full last:rounded-r-full transition-all" style="width:${pct}%; background:${sanitizeHexColor(d.color)}; opacity:${d.visible ? 1 : 0.35};"></div>`;
           })
           .join('')
       : '';
@@ -107,7 +108,7 @@ function renderMobileExpenseSheet(breakdown) {
         <div class="space-y-1">
           <div class="flex items-center justify-between gap-2 text-xs sm:text-[13px] leading-tight">
             <span class="inline-flex items-center gap-1.5 text-[#F2E7D9] font-semibold">
-              <span>${c.emoji}</span>
+              <span>${escapeHTML(c.emoji || '')}</span>
               <span>${escapeHTML(c.label)}</span>
             </span>
             <span class="tabular-nums-strict text-[#FAF4EC] font-bold">
@@ -116,7 +117,7 @@ function renderMobileExpenseSheet(breakdown) {
             </span>
           </div>
           <div class="w-full h-1.5 rounded-full bg-white/15 overflow-hidden">
-            <div class="h-full rounded-full transition-all" style="width:${Math.min(100, c.pct)}%; background:${c.color};"></div>
+            <div class="h-full rounded-full transition-all" style="width:${Math.min(100, c.pct)}%; background:${sanitizeHexColor(c.color)};"></div>
           </div>
         </div>
       `
@@ -124,12 +125,13 @@ function renderMobileExpenseSheet(breakdown) {
       .join('');
 
     const daysHtml = breakdown.days
-      .map(
-        (d) => `
+      .map((d) => {
+        const safeColor = sanitizeHexColor(d.color);
+        return `
         <div class="space-y-1 ${d.visible ? '' : 'opacity-60'}">
           <div class="flex items-center justify-between gap-2 text-xs sm:text-[13px] leading-tight">
             <span class="inline-flex items-center gap-1.5 min-w-0 text-[#F2E7D9] font-semibold">
-              <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${d.color};"></span>
+              <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${safeColor};"></span>
               <span class="truncate">${escapeHTML(d.name)}</span>
             </span>
             <span class="tabular-nums-strict text-[#FAF4EC] font-bold shrink-0">
@@ -138,11 +140,11 @@ function renderMobileExpenseSheet(breakdown) {
             </span>
           </div>
           <div class="w-full h-1.5 rounded-full bg-white/15 overflow-hidden">
-            <div class="h-full rounded-full transition-all" style="width:${Math.min(100, d.pct)}%; background:${d.color};"></div>
+            <div class="h-full rounded-full transition-all" style="width:${Math.min(100, d.pct)}%; background:${safeColor};"></div>
           </div>
         </div>
-      `
-      )
+      `;
+      })
       .join('');
 
     detailBody = `
@@ -185,6 +187,7 @@ function renderMobileExpenseSheet(breakdown) {
     </div>
   `;
 
+  refreshIcons(sheet);
   sheet.querySelector('#btn-close-mobile-expense')?.addEventListener('click', () => {
     closeAllMobileOverlays();
   });
@@ -204,11 +207,14 @@ function renderMobileDayDetailSheet() {
     return;
   }
 
+  const dayId = day.id;
+  const safeColor = sanitizeHexColor(day.color);
+
   sheet.innerHTML = `
     <div class="space-y-3.5">
       <div class="flex items-start justify-between gap-2">
         <div class="flex items-center gap-2.5 min-w-0">
-          <span class="w-3.5 h-3.5 rounded-full shrink-0 ring-2 ring-owl-card shadow-2xs" style="background:${day.color};"></span>
+          <span class="w-3.5 h-3.5 rounded-full shrink-0 ring-2 ring-owl-card shadow-2xs" style="background:${safeColor};"></span>
           <div class="min-w-0">
             <div class="text-xs font-bold text-owl-muted leading-none">第 ${dayIndex + 1} 天 · 圖層設定（${day.pins.length} 個標點）</div>
             <h4 class="text-base font-extrabold text-owl-text truncate mt-1">${escapeHTML(day.name)}</h4>
@@ -254,16 +260,17 @@ function renderMobileDayDetailSheet() {
     </div>
   `;
 
+  refreshIcons(sheet);
+
   sheet.querySelector('#btn-close-mobile-day-detail')?.addEventListener('click', () => {
     gearSettingsDayId = null;
     renderMobileDaysPopup();
     syncOrbsAndPanels();
-    refreshIcons();
   });
 
   sheet.querySelector('#btn-mobile-day-eye')?.addEventListener('click', () => {
     const latestState = getState();
-    const target = latestState.days.find((d) => d.id === day.id);
+    const target = latestState.days.find((d) => d.id === dayId);
     if (!target) return;
     target.visible = !target.visible;
     saveState((msg) => showToast(msg, 'error'));
@@ -271,17 +278,18 @@ function renderMobileDayDetailSheet() {
   });
 
   sheet.querySelector('#btn-mobile-day-rename')?.addEventListener('click', async () => {
-    const latestState = getState();
-    const target = latestState.days.find((d) => d.id === day.id);
-    if (!target) return;
+    const initialTarget = getState().days.find((d) => d.id === dayId);
+    if (!initialTarget) return;
     const newName = await openCustomDialog({
       title: '修改天數圖層名稱',
       message: '輸入這一天的行程名稱：',
-      inputValue: target.name,
+      inputValue: initialTarget.name,
       placeholder: '例：Day 3 · 九份山城一日遊',
       confirmText: '儲存名稱',
     });
     if (newName) {
+      const target = getState().days.find((d) => d.id === dayId);
+      if (!target) return;
       target.name = newName;
       saveState((msg) => showToast(msg, 'error'));
       callbacks.onStateChanged();
@@ -290,25 +298,27 @@ function renderMobileDayDetailSheet() {
   });
 
   sheet.querySelector('#btn-mobile-day-delete')?.addEventListener('click', async () => {
-    const latestState = getState();
-    if (latestState.days.length <= 1) {
+    const beforeState = getState();
+    if (beforeState.days.length <= 1) {
       showToast('至少需要保留一個天數圖層', 'error');
       return;
     }
-    const target = latestState.days.find((d) => d.id === day.id);
-    if (!target) return;
+    const targetBefore = beforeState.days.find((d) => d.id === dayId);
+    if (!targetBefore) return;
     const ok = await openCustomDialog({
       title: '確定刪除此天數圖層？',
-      message: `「${target.name}」內含的 ${target.pins.length} 個標點與支出資料將會一併移除。`,
+      message: `「${targetBefore.name}」內含的 ${targetBefore.pins.length} 個標點與支出資料將會一併移除。`,
       confirmText: '確定刪除',
       danger: true,
     });
     if (ok) {
-      latestState.days = latestState.days.filter((d) => d.id !== target.id);
-      if (latestState.activeDayId === target.id) {
+      const latestState = getState();
+      if (latestState.days.length <= 1) return;
+      latestState.days = latestState.days.filter((d) => d.id !== dayId);
+      if (latestState.activeDayId === dayId && latestState.days[0]) {
         latestState.activeDayId = latestState.days[0].id;
       }
-      if (selectedDayId === target.id) selectedDayId = latestState.activeDayId;
+      if (selectedDayId === dayId) selectedDayId = latestState.activeDayId;
       gearSettingsDayId = null;
       saveState((msg) => showToast(msg, 'error'));
       callbacks.onStateChanged();
@@ -351,6 +361,8 @@ function renderMobileDaysPopup() {
       const isActive = day.id === state.activeDayId;
       const isSelected = day.id === selectedDayId;
       const isGearOpen = day.id === gearSettingsDayId;
+      const safeDayId = escapeHTML(day.id);
+      const safeColor = sanitizeHexColor(day.color);
       const delayMs = Math.min(totalCount - 1 - idx, 6) * 24;
       const tileClass = isSelected
         ? 'mobile-day-tile-selected'
@@ -365,7 +377,7 @@ function renderMobileDaysPopup() {
           <div class="flex flex-col items-center gap-1.5 mr-1.5 mobile-day-square-animate">
             <button
               type="button"
-              data-inline-eye-day-id="${day.id}"
+              data-inline-eye-day-id="${safeDayId}"
               title="${day.visible ? '隱藏此天數地圖顯示' : '開啟此天數地圖顯示'}"
               aria-label="${day.visible ? '隱藏此天數圖層' : '顯示此天數圖層'}"
               class="btn-mobile-inline-eye mobile-hit-expand w-[32px] h-[32px] rounded-full shadow-float flex items-center justify-center transition active:scale-90 ${
@@ -376,7 +388,7 @@ function renderMobileDaysPopup() {
             </button>
             <button
               type="button"
-              data-inline-gear-day-id="${day.id}"
+              data-inline-gear-day-id="${safeDayId}"
               title="單日詳細設定（更名、刪除、顯示切換）"
               aria-label="單日詳細設定"
               class="btn-mobile-inline-gear mobile-hit-expand w-[32px] h-[32px] rounded-full shadow-float flex items-center justify-center transition active:scale-90 ${
@@ -390,16 +402,16 @@ function renderMobileDaysPopup() {
         : '';
 
       return `
-        <div class="mobile-day-row flex items-center justify-end" data-row-day-id="${day.id}">
+        <div class="mobile-day-row flex items-center justify-end" data-row-day-id="${safeDayId}">
           ${inlineMiniOrbsHtml}
           <button
             type="button"
-            data-mobile-day-id="${day.id}"
+            data-mobile-day-id="${safeDayId}"
             title="${escapeHTML(day.name)}（點擊切換至這一天並顯示眼睛與設定按鈕）"
             style="animation-delay: ${delayMs}ms;"
             class="mobile-day-square mobile-day-square-animate w-[58px] h-[58px] rounded-2xl shadow-float flex flex-col items-center justify-center gap-1 shrink-0 transition active:scale-95 ${tileClass} ${dimClass}"
           >
-            <span class="w-2.5 h-2.5 rounded-full shrink-0 shadow-2xs" style="background:${day.color};"></span>
+            <span class="w-2.5 h-2.5 rounded-full shrink-0 shadow-2xs" style="background:${safeColor};"></span>
             <span class="text-xs font-extrabold text-owl-text leading-none tracking-tight whitespace-nowrap">第 ${idx + 1} 天</span>
           </button>
         </div>
@@ -408,6 +420,7 @@ function renderMobileDaysPopup() {
     .join('');
 
   popup.innerHTML = addSquareHtml + rowsHtml;
+  refreshIcons(popup);
 
   popup.querySelector('#btn-mobile-add-day')?.addEventListener('click', () => {
     callbacks.onAddDay();
@@ -416,7 +429,6 @@ function renderMobileDaysPopup() {
     gearSettingsDayId = null;
     renderMobileDaysPopup();
     syncOrbsAndPanels();
-    refreshIcons();
   });
 
   // 點擊任一天數正方形：切換作用中天數並於正方形旁彈出眼睛＋齒輪小圓（不自動彈出行程清單）
@@ -442,7 +454,6 @@ function renderMobileDaysPopup() {
         renderMobileDaysPopup();
         renderMobileDayDetailSheet();
         syncOrbsAndPanels();
-        refreshIcons();
       }
 
       if (chosen.visible && chosen.pins.length > 0) {
@@ -477,7 +488,6 @@ function renderMobileDaysPopup() {
       renderMobileDaysPopup();
       renderMobileDayDetailSheet();
       syncOrbsAndPanels();
-      refreshIcons();
     });
   });
 }
@@ -500,6 +510,13 @@ export function getMobileFitBoundsOptions({ daysPopupOpen = false } = {}) {
 }
 
 export function renderMobileHud() {
+  const mobile = isMobileViewport();
+  lastViewportWasMobile = mobile;
+  if (!mobile) {
+    syncOrbsAndPanels();
+    return;
+  }
+
   const state = getState();
   const activeDay = getActiveDay(state);
   const breakdown = calcExpenseBreakdown(state);
@@ -511,14 +528,13 @@ export function renderMobileHud() {
 
   const orbDot = document.getElementById('mobile-orb-day-dot');
   if (orbDot && activeDay) {
-    orbDot.style.backgroundColor = activeDay.color;
+    orbDot.style.backgroundColor = sanitizeHexColor(activeDay.color);
   }
 
   renderMobileDaysPopup();
   renderMobileDayDetailSheet();
   renderMobileExpenseSheet(breakdown);
   syncOrbsAndPanels();
-  refreshIcons();
 }
 
 export function closeAllMobileOverlays() {
@@ -529,18 +545,7 @@ export function closeAllMobileOverlays() {
 }
 
 export function setMobileTab(tabName) {
-  if (tabName === 'left') {
-    activeOverlay = 'itinerary';
-    selectedDayId = null;
-    gearSettingsDayId = null;
-  } else if (tabName === 'right') {
-    activeOverlay = 'days';
-  } else {
-    activeOverlay = 'none';
-    selectedDayId = null;
-    gearSettingsDayId = null;
-  }
-  syncOrbsAndPanels();
+  closeAllMobileOverlays();
   if (tabName === 'map') {
     setTimeout(() => invalidateMapSize(), 120);
   }
@@ -576,7 +581,6 @@ export function bindMobileNav({ onStateChanged, onVisibilityChanged, onAddDay } 
       renderMobileDaysPopup();
       renderMobileDayDetailSheet();
       syncOrbsAndPanels();
-      refreshIcons();
     }
   });
 
@@ -586,18 +590,21 @@ export function bindMobileNav({ onStateChanged, onVisibilityChanged, onAddDay } 
     activeOverlay = activeOverlay === 'expense' ? 'none' : 'expense';
     renderMobileExpenseSheet(calcExpenseBreakdown(getState()));
     syncOrbsAndPanels();
-    refreshIcons();
   });
 
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && activeOverlay !== 'none') {
+    if (e.key === 'Escape' && activeOverlay !== 'none' && !isCustomDialogOpen()) {
       closeAllMobileOverlays();
     }
   });
 
   window.addEventListener('resize', () => {
-    if (!isMobileViewport() && activeOverlay !== 'none') {
+    const mobileNow = isMobileViewport();
+    if (!mobileNow && activeOverlay !== 'none') {
       closeAllMobileOverlays();
+    } else if (mobileNow && lastViewportWasMobile === false) {
+      renderMobileHud();
     }
+    lastViewportWasMobile = mobileNow;
   });
 }

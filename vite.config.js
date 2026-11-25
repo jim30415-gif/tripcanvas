@@ -18,14 +18,31 @@ import {
 
 function readJsonBody(req, maxBytes = 256 * 1024) {
   return new Promise((resolve, reject) => {
-    let raw = '';
+    const chunks = [];
+    let totalBytes = 0;
+    let settled = false;
+
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    };
+
     req.on('data', (chunk) => {
-      raw += chunk;
-      if (Buffer.byteLength(raw, 'utf8') > maxBytes) {
-        reject(new Error('PAYLOAD_TOO_LARGE'));
+      if (settled) return;
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      totalBytes += buf.length;
+      if (totalBytes > maxBytes) {
+        req.destroy();
+        fail(new Error('PAYLOAD_TOO_LARGE'));
+        return;
       }
+      chunks.push(buf);
     });
     req.on('end', () => {
+      if (settled) return;
+      settled = true;
+      const raw = Buffer.concat(chunks, totalBytes).toString('utf8');
       if (!raw) return resolve({});
       try {
         resolve(JSON.parse(raw));
@@ -33,12 +50,13 @@ function readJsonBody(req, maxBytes = 256 * 1024) {
         reject(err);
       }
     });
-    req.on('error', reject);
+    req.on('error', fail);
   });
 }
 
 function sendDriveResult(res, result) {
   res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
   if (Array.isArray(result.cookies) && result.cookies.length > 0) {
     res.setHeader('Set-Cookie', result.cookies);
   }
@@ -57,7 +75,12 @@ function createRoutesApiPlugin(env) {
   const attachMiddleware = (middlewares) => {
     middlewares.use(async (req, res, next) => {
       const fullUrl = req.url || '';
-      const parsedUrl = new URL(fullUrl, 'http://localhost');
+      let parsedUrl;
+      try {
+        parsedUrl = new URL(fullUrl, 'http://localhost');
+      } catch {
+        parsedUrl = new URL('/', 'http://localhost');
+      }
       const urlPath = parsedUrl.pathname;
 
       if (urlPath === '/api/drive-callback') {
@@ -222,7 +245,6 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       strictPort: false,
-      allowedHosts: true,
     },
   };
 });

@@ -6,28 +6,50 @@ import { handleDriveCallback } from '../server/driveHandler.js';
  */
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+
   if (req.method !== 'GET') {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     return res.status(405).json({ error: 'METHOD_NOT_ALLOWED', message: '僅支援 GET 回呼請求' });
   }
 
-  const parsed = new URL(req.url || '/', 'http://localhost');
-  const query = {
-    code: req.query?.code || parsed.searchParams.get('code') || '',
-    state: req.query?.state || parsed.searchParams.get('state') || '',
-    error: req.query?.error || parsed.searchParams.get('error') || '',
-  };
+  try {
+    let parsed;
+    try {
+      parsed = new URL(typeof req.url === 'string' && req.url ? req.url : '/', 'http://localhost');
+    } catch {
+      parsed = new URL('/', 'http://localhost');
+    }
 
-  const result = await handleDriveCallback({
-    query,
-    headers: req.headers,
-    env: process.env,
-  });
+    const pick = (key) => {
+      const fromUrl = parsed.searchParams.get(key);
+      if (fromUrl !== null) return fromUrl;
+      const raw = req.query?.[key];
+      return Array.isArray(raw) ? String(raw[0] || '') : String(raw || '');
+    };
 
-  if (Array.isArray(result.cookies) && result.cookies.length > 0) {
-    res.setHeader('Set-Cookie', result.cookies);
+    const query = {
+      code: pick('code'),
+      state: pick('state'),
+      error: pick('error'),
+    };
+
+    const result = await handleDriveCallback({
+      query,
+      headers: req.headers,
+      env: process.env,
+    });
+
+    if (Array.isArray(result.cookies) && result.cookies.length > 0) {
+      res.setHeader('Set-Cookie', result.cookies);
+    }
+    res.statusCode = result.statusCode;
+    res.setHeader('Location', result.redirectUrl);
+    res.end();
+  } catch (err) {
+    console.error('[api/drive-callback] unhandled error:', err?.message || err);
+    res.statusCode = 302;
+    res.setHeader('Location', '/?drive_auth=error');
+    res.end();
   }
-  res.statusCode = result.statusCode;
-  res.setHeader('Location', result.redirectUrl);
-  res.end();
 }

@@ -8,6 +8,8 @@ import {
 import { mergeWorkspaces } from '../state/workspaceMerge.js';
 
 const PUSH_DEBOUNCE_MS = 1400;
+const KEEPALIVE_MAX_BYTES = 60_000;
+const VISIBLE_RESYNC_COOLDOWN_MS = 15_000;
 
 const syncState = {
   configured: false,
@@ -28,6 +30,10 @@ let pushTimer = null;
 let syncInFlight = false;
 let dirtyWhileSyncing = false;
 let initialized = false;
+let localRevision = 0;
+let authEpoch = 0;
+let lastKnownModifiedTime = null;
+let lastCompletedSyncMs = 0;
 
 function emit() {
   const snapshot = getDriveSyncState();
@@ -71,22 +77,35 @@ function consumeAuthResultParam() {
   }
 }
 
-async function fetchDriveJson(url, options = {}) {
-  const res = await fetch(url, {
-    credentials: 'same-origin',
-    cache: 'no-store',
-    ...options,
-  });
-  let data = null;
+async function fetchDriveJson(url, options = {}, timeoutMs = 15_000) {
+  const useKeepalive = Boolean(options.keepalive);
+  const controller = !useKeepalive && timeoutMs > 0 ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
-    data = await res.json();
-  } catch {
-    data = null;
+    const res = await fetch(url, {
+      credentials: 'same-origin',
+      cache: 'no-store',
+      ...options,
+      ...(controller ? { signal: controller.signal } : {}),
+    });
+    let data = null;
+    try {
+      data = await res.json();
+    } catch {
+      data = null;
+    }
+    return { res, data };
+  } finally {
+    if (timer) clearTimeout(timer);
   }
-  return { res, data };
 }
 
-async function pushWorkspaceOnce({ silent = true, keepalive = false } = {}) {
+function getUtf8ByteLength(str) {
+  if (typeof Blob !== 'undefined') return new Blob([str]).size;
+  return str.length * 2;
+}
+
+async function pushWorkspaceOnce({ silent = true, keepalive = false, isPageHide = false } = {}) {
   if (!syncState.authenticated) return false;
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     updateState({ status: 'offline', hasPendingChanges: true, lastError: '目前離線，恢復連線後將自動同步' });
@@ -98,6 +117,8 @@ async function pushWorkspaceOnce({ silent = true, keepalive = false } = {}) {
     return false;
   }
 
+  const startEpoch = authEpoch;
+  const pushedRevision = localRevision;
   syncInFlight = true;
   dirtyWhileSyncing = false;
   if (pushTimer) {
@@ -107,16 +128,37 @@ async function pushWorkspaceOnce({ silent = true, keepalive = false } = {}) {
 
   updateState({ status: 'syncing', lastError: '' });
 
+  let triggerConflictMerge = false;
+
   try {
-    const payload = JSON.stringify({ workspace: getWorkspace() });
-    const { res, data } = await fetchDriveJson('/api/drive?action=push', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: payload,
-      keepalive,
+    const payload = JSON.stringify({
+      workspace: getWorkspace(),
+      ...(lastKnownModifiedTime ? { expectedModifiedTime: lastKnownModifiedTime } : {}),
     });
+    const byteLen = getUtf8ByteLength(payload);
+    const canKeepalive = keepalive && byteLen <= KEEPALIVE_MAX_BYTES;
+    // pagehide 時若體積超過瀏覽器 64 KiB keepalive 限制，避免拋 TypeError 改由下次開啟自動續傳
+    if (isPageHide && keepalive && !canKeepalive) {
+      updateState({ status: 'pending', hasPendingChanges: true });
+      return false;
+    }
+
+    const { res, data } = await fetchDriveJson(
+      '/api/drive?action=push',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+        keepalive: canKeepalive,
+      },
+      15_000
+    );
+
+    if (authEpoch !== startEpoch) return false;
 
     if (res.status === 401 && data?.status === 'auth_expired') {
+      authEpoch++;
+      lastKnownModifiedTime = null;
       updateState({
         authenticated: false,
         user: null,
@@ -129,6 +171,13 @@ async function pushWorkspaceOnce({ silent = true, keepalive = false } = {}) {
       return false;
     }
 
+    // 偵測到其他裝置更新了雲端檔案 → 自動執行 pull + 無損合併再重推，絕不盲目覆蓋
+    if (res.status === 409 && data?.status === 'conflict') {
+      triggerConflictMerge = true;
+      updateState({ status: 'syncing', hasPendingChanges: true, lastError: '' });
+      return false;
+    }
+
     if (!res.ok || data?.status !== 'ok') {
       const msg = data?.message || `同步至 Google 雲端硬碟失敗 (${res.status})`;
       updateState({ status: 'error', hasPendingChanges: true, lastError: msg });
@@ -138,15 +187,21 @@ async function pushWorkspaceOnce({ silent = true, keepalive = false } = {}) {
       return false;
     }
 
+    if (data.file?.modifiedTime) {
+      lastKnownModifiedTime = data.file.modifiedTime;
+    }
+    lastCompletedSyncMs = Date.now();
+    const stillDirty = localRevision !== pushedRevision || dirtyWhileSyncing;
     updateState({
-      status: 'synced',
-      hasPendingChanges: false,
+      status: stillDirty ? 'pending' : 'synced',
+      hasPendingChanges: stillDirty,
       lastSyncedAt: data.file?.modifiedTime || new Date().toISOString(),
       lastError: '',
       user: data.user || syncState.user,
     });
     return true;
   } catch {
+    if (authEpoch !== startEpoch) return false;
     updateState({
       status: typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'error',
       hasPendingChanges: true,
@@ -155,15 +210,25 @@ async function pushWorkspaceOnce({ silent = true, keepalive = false } = {}) {
     return false;
   } finally {
     syncInFlight = false;
-    if (dirtyWhileSyncing && syncState.authenticated) {
-      scheduleAutoPush();
+    if (authEpoch === startEpoch && syncState.authenticated) {
+      if (triggerConflictMerge) {
+        void syncWithGoogleDrive({ isManual: false });
+      } else if (dirtyWhileSyncing || localRevision !== pushedRevision) {
+        scheduleAutoPush();
+      }
     }
   }
 }
 
 export function scheduleAutoPush() {
   if (!syncState.authenticated) return;
-  updateState({ hasPendingChanges: true, status: syncInFlight ? 'syncing' : 'pending' });
+  localRevision++;
+  if (syncInFlight) {
+    dirtyWhileSyncing = true;
+    updateState({ hasPendingChanges: true, status: 'syncing' });
+    return;
+  }
+  updateState({ hasPendingChanges: true, status: 'pending' });
   if (pushTimer) clearTimeout(pushTimer);
   pushTimer = setTimeout(() => {
     pushTimer = null;
@@ -190,6 +255,8 @@ export async function syncWithGoogleDrive({ isManual = false, isPostLogin = fals
     return false;
   }
 
+  const startEpoch = authEpoch;
+  const startRevision = localRevision;
   syncInFlight = true;
   dirtyWhileSyncing = false;
   if (pushTimer) {
@@ -200,10 +267,13 @@ export async function syncWithGoogleDrive({ isManual = false, isPostLogin = fals
   updateState({ status: 'syncing', lastError: '' });
 
   try {
-    const { res, data } = await fetchDriveJson('/api/drive?action=pull', { method: 'GET' });
+    const { res, data } = await fetchDriveJson('/api/drive?action=pull', { method: 'GET' }, 15_000);
+    if (authEpoch !== startEpoch) return false;
 
     if (res.status === 401) {
       const expired = data?.status === 'auth_expired';
+      authEpoch++;
+      lastKnownModifiedTime = null;
       updateState({
         authenticated: false,
         user: null,
@@ -231,6 +301,23 @@ export async function syncWithGoogleDrive({ isManual = false, isPostLogin = fals
     }
 
     const localWs = getWorkspace();
+
+    // 雲端同步檔內容損毀時，絕不自動用範例行程覆蓋，僅允許使用者有真實本機編輯且手動點擊同步時修復
+    if (data?.status === 'corrupted_file') {
+      if (localWs?.isPristineDemo || !isManual) {
+        const msg = data?.message || '雲端同步檔內容異常，已暫停自動覆寫以保護原檔';
+        updateState({ status: 'error', lastError: msg });
+        if (typeof onToastCb === 'function') {
+          onToastCb(msg, 'error');
+        }
+        return false;
+      }
+    }
+
+    if (data?.file?.modifiedTime) {
+      lastKnownModifiedTime = data.file.modifiedTime;
+    }
+
     const cloudWs = data?.exists && data?.workspace ? normalizeWorkspace(data.workspace) : null;
     const merged = mergeWorkspaces(localWs, cloudWs);
 
@@ -249,11 +336,35 @@ export async function syncWithGoogleDrive({ isManual = false, isPostLogin = fals
     let finalSyncedAt = data?.file?.modifiedTime || new Date().toISOString();
 
     if (pushNeeded) {
-      const pushResp = await fetchDriveJson('/api/drive?action=push', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspace: getWorkspace() }),
-      });
+      const pushResp = await fetchDriveJson(
+        '/api/drive?action=push',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workspace: getWorkspace(),
+            ...(lastKnownModifiedTime ? { expectedModifiedTime: lastKnownModifiedTime } : {}),
+          }),
+        },
+        15_000
+      );
+
+      if (authEpoch !== startEpoch) return false;
+
+      if (pushResp.res.status === 401 && pushResp.data?.status === 'auth_expired') {
+        authEpoch++;
+        lastKnownModifiedTime = null;
+        updateState({
+          authenticated: false,
+          user: null,
+          status: 'auth_expired',
+          lastError: pushResp.data?.message || 'Google 登入授權已過期，請重新登入',
+        });
+        if ((isManual || isPostLogin) && typeof onToastCb === 'function') {
+          onToastCb('Google 雲端授權已過期，請重新登入同步（本機行程皆完整保留）', 'error');
+        }
+        return false;
+      }
 
       if (!pushResp.res.ok || pushResp.data?.status !== 'ok') {
         const msg = pushResp.data?.message || '寫入 Google 雲端硬碟失敗，請稍後再試';
@@ -268,11 +379,16 @@ export async function syncWithGoogleDrive({ isManual = false, isPostLogin = fals
       }
 
       finalSyncedAt = pushResp.data.file?.modifiedTime || new Date().toISOString();
+      if (pushResp.data.file?.modifiedTime) {
+        lastKnownModifiedTime = pushResp.data.file.modifiedTime;
+      }
     }
 
+    lastCompletedSyncMs = Date.now();
+    const stillDirty = localRevision !== startRevision || dirtyWhileSyncing;
     updateState({
-      status: 'synced',
-      hasPendingChanges: false,
+      status: stillDirty ? 'pending' : 'synced',
+      hasPendingChanges: stillDirty,
       lastSyncedAt: finalSyncedAt,
       lastError: '',
       user: data?.user || syncState.user,
@@ -298,6 +414,7 @@ export async function syncWithGoogleDrive({ isManual = false, isPostLogin = fals
 
     return true;
   } catch {
+    if (authEpoch !== startEpoch) return false;
     updateState({
       status: typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'error',
       lastError: '連線異常，已載入本機備份行程',
@@ -308,7 +425,7 @@ export async function syncWithGoogleDrive({ isManual = false, isPostLogin = fals
     return false;
   } finally {
     syncInFlight = false;
-    if (dirtyWhileSyncing && syncState.authenticated) {
+    if (authEpoch === startEpoch && syncState.authenticated && (dirtyWhileSyncing || localRevision !== startRevision)) {
       scheduleAutoPush();
     }
   }
@@ -322,12 +439,15 @@ export async function startGoogleDriveLogin() {
 }
 
 export async function logoutGoogleDrive() {
+  authEpoch++;
+  lastKnownModifiedTime = null;
+  dirtyWhileSyncing = false;
   if (pushTimer) {
     clearTimeout(pushTimer);
     pushTimer = null;
   }
   try {
-    await fetchDriveJson('/api/drive?action=logout', { method: 'POST' });
+    await fetchDriveJson('/api/drive?action=logout', { method: 'POST' }, 6000);
   } catch {
     // 即使離線也先切換為未登入狀態
   }
@@ -341,6 +461,38 @@ export async function logoutGoogleDrive() {
   });
   if (typeof onToastCb === 'function') {
     onToastCb('已登出 Google 雲端硬碟（本機旅遊計畫仍完整保留）', 'info');
+  }
+}
+
+async function checkDriveStatusAndSync(authOutcome = '') {
+  updateState({ status: 'checking', lastError: '' });
+  try {
+    const { res, data } = await fetchDriveJson('/api/drive?action=status', { method: 'GET' }, 5000);
+    if (!res.ok || !data) {
+      updateState({
+        status: typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'error',
+        lastError: '無法取得雲端同步狀態，行程已暫存於本機',
+      });
+      return;
+    }
+
+    updateState({
+      configured: Boolean(data.configured),
+      authenticated: Boolean(data.authenticated),
+      user: data.user || null,
+      driveFolderName: data.driveFolderName || '漫步地圖 TripCanvas',
+      fileName: data.fileName || 'tripcanvas-workspace.json',
+      status: !data.configured ? 'unconfigured' : data.authenticated ? 'syncing' : 'idle',
+    });
+
+    if (data.configured && data.authenticated) {
+      await syncWithGoogleDrive({ isPostLogin: authOutcome === 'connected' });
+    }
+  } catch {
+    updateState({
+      status: 'offline',
+      lastError: '目前離線或連線逾時，已使用本機雙重備份',
+    });
   }
 }
 
@@ -360,7 +512,15 @@ export async function initDriveSync({ onWorkspaceUpdated, onToast } = {}) {
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden' && syncState.authenticated && syncState.hasPendingChanges) {
-          void pushWorkspaceOnce({ silent: true, keepalive: true });
+          void pushWorkspaceOnce({ silent: true, keepalive: true, isPageHide: false });
+        } else if (
+          document.visibilityState === 'visible' &&
+          syncState.authenticated &&
+          !syncInFlight &&
+          Date.now() - lastCompletedSyncMs > VISIBLE_RESYNC_COOLDOWN_MS
+        ) {
+          // 切回分頁時自動檢查雲端是否有他裝置的新修改並無損合併
+          void syncWithGoogleDrive({ isManual: false });
         }
       });
     }
@@ -368,11 +528,13 @@ export async function initDriveSync({ onWorkspaceUpdated, onToast } = {}) {
     if (typeof window !== 'undefined') {
       window.addEventListener('pagehide', () => {
         if (syncState.authenticated && syncState.hasPendingChanges) {
-          void pushWorkspaceOnce({ silent: true, keepalive: true });
+          void pushWorkspaceOnce({ silent: true, keepalive: true, isPageHide: true });
         }
       });
       window.addEventListener('online', () => {
-        if (
+        if (!syncState.authenticated && (syncState.status === 'offline' || syncState.status === 'error')) {
+          void checkDriveStatusAndSync();
+        } else if (
           syncState.authenticated &&
           (syncState.hasPendingChanges || syncState.status === 'offline' || syncState.status === 'error')
         ) {
@@ -391,38 +553,11 @@ export async function initDriveSync({ onWorkspaceUpdated, onToast } = {}) {
     } else if (authOutcome === 'state_error') {
       onToastCb('Google 登入驗證逾時，請再按一次登入', 'error');
     } else if (authOutcome === 'not_configured') {
-      onToastCb('網站尚未設定 Google OAuth 環境變數，目前暫存於本機雙重備份', 'info');
+      onToastCb('雲端同步功能目前未啟用，行程已自動儲存在本機瀏覽器', 'info');
     } else if (authOutcome === 'token_error' || authOutcome === 'error') {
-      onToastCb('Google 登入失敗，請確認 OAuth 設定後再試一次', 'error');
+      onToastCb('Google 登入驗證失敗，請再試一次', 'error');
     }
   }
 
-  updateState({ status: 'checking', lastError: '' });
-
-  try {
-    const { res, data } = await fetchDriveJson('/api/drive?action=status', { method: 'GET' });
-    if (!res.ok || !data) {
-      updateState({ configured: false, authenticated: false, status: 'unconfigured' });
-      return;
-    }
-
-    updateState({
-      configured: Boolean(data.configured),
-      authenticated: Boolean(data.authenticated),
-      user: data.user || null,
-      driveFolderName: data.driveFolderName || '漫步地圖 TripCanvas',
-      fileName: data.fileName || 'tripcanvas-workspace.json',
-      status: !data.configured ? 'unconfigured' : data.authenticated ? 'syncing' : 'idle',
-    });
-
-    if (data.configured && data.authenticated) {
-      await syncWithGoogleDrive({ isPostLogin: authOutcome === 'connected' });
-    }
-  } catch {
-    updateState({
-      configured: false,
-      authenticated: false,
-      status: 'unconfigured',
-    });
-  }
+  await checkDriveStatusAndSync(authOutcome);
 }

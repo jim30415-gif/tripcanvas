@@ -1,6 +1,7 @@
 import { decodePolyline, encodePolyline, stitchEncodedPolylines } from '../src/services/polyline.js';
 import { convertMoneyToTwd, getTwdRatesSummary } from './currency.js';
 import { isJapanTrip, queryNavitimeTransit } from './navitime.js';
+import { fetchJsonWithTimeout, parseOptionalFiniteNumber } from './security.js';
 
 const GOOGLE_ROUTES_ENDPOINT = 'https://routes.googleapis.com/directions/v2:computeRoutes';
 
@@ -10,8 +11,6 @@ const LAND_FIELD_MASK = [
   'routes.polyline.encodedPolyline',
   'routes.legs.distanceMeters',
   'routes.legs.duration',
-  'routes.legs.steps.distanceMeters',
-  'routes.legs.steps.staticDuration',
   'routes.legs.steps.polyline.encodedPolyline',
 ].join(',');
 
@@ -61,11 +60,13 @@ function calcDistanceKm(lat1, lng1, lat2, lng2) {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
+  const a = Math.min(
+    1,
     Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLng / 2) ** 2;
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLng / 2) ** 2
+  );
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
@@ -420,25 +421,25 @@ function mapGoogleError(httpStatus, data) {
   const detailsText = JSON.stringify(data?.error?.details || '');
 
   if (detailsText.includes('API_KEY_HTTP_REFERRER_BLOCKED') || msg.toLowerCase().includes('referer')) {
+    console.error('[routesHandler] Google API Referer blocked:', msg);
     return {
       statusCode: 502,
       body: {
         status: 'api_error',
         error: 'GOOGLE_API_REFERER_BLOCKED',
-        message:
-          'Google API 金鑰設定了網站（HTTP Referer）限制，無法由伺服器代理呼叫。請在 Google Cloud Console 移除金鑰的網域限制，僅保留「API 限制：Routes API」與每日配額上限。',
+        message: '路線服務授權設定受限，已自動改用備援方案。',
       },
     };
   }
 
   if (httpStatus === 403 || statusStr === 'PERMISSION_DENIED') {
+    console.error('[routesHandler] Google Routes 403:', msg);
     return {
       statusCode: 502,
       body: {
         status: 'api_error',
         error: 'GOOGLE_API_FORBIDDEN',
-        message: 'Google Routes API 權限遭拒，請確認專案已啟用 Routes API 與帳單，且金鑰允許存取 Routes API。',
-        detail: msg,
+        message: '路線查詢服務暫時無法驗證，請稍後重試或改用手動紀錄。',
       },
     };
   }
@@ -449,28 +450,30 @@ function mapGoogleError(httpStatus, data) {
       body: {
         status: 'api_error',
         error: 'GOOGLE_QUOTA_EXCEEDED',
-        message: '已達 Google Routes API 配額上限，請稍後再試。',
+        message: '路線查詢已達短時配額上限，請稍後再試。',
       },
     };
   }
 
   if (detailsText.includes('API_KEY_INVALID') || msg.toLowerCase().includes('api key not valid')) {
+    console.error('[routesHandler] Google API key invalid');
     return {
       statusCode: 502,
       body: {
         status: 'api_error',
         error: 'GOOGLE_API_KEY_INVALID',
-        message: 'GOOGLE_MAPS_API_KEY 無效，請檢查 .env.local 中的金鑰內容。',
+        message: '路線服務驗證異常，已自動改用備援方案。',
       },
     };
   }
 
+  console.error('[routesHandler] Google Routes error:', httpStatus, msg);
   return {
     statusCode: 502,
     body: {
       status: 'network_error',
       error: 'GOOGLE_API_ERROR',
-      message: msg || 'Google Routes API 回傳異常',
+      message: '路線查詢服務暫時回傳異常，請稍後再試。',
     },
   };
 }
@@ -538,6 +541,38 @@ export async function handleComputeRoutes(body, env = process.env) {
     };
   }
 
+  // 在計費前先攔截過近（< 5 公尺）或過遠（> 3000 公里）的不合理座標組，避免白耗 API 配額
+  const straightKm = calcDistanceKm(
+    Number(origin.lat),
+    Number(origin.lng),
+    Number(destination.lat),
+    Number(destination.lng)
+  );
+  if (straightKm < 0.005) {
+    return {
+      statusCode: 200,
+      body: {
+        status: 'unsupported',
+        provider: 'google',
+        mode,
+        routes: [],
+        message: '起點與終點位置幾乎重疊，無需規劃路線。',
+      },
+    };
+  }
+  if (straightKm > 3000) {
+    return {
+      statusCode: 200,
+      body: {
+        status: 'unsupported',
+        provider: 'google',
+        mode,
+        routes: [],
+        message: '起終點距離超過陸路／大眾運輸查詢範圍，建議改用手動紀錄航班或交通。',
+      },
+    };
+  }
+
   // 日本大眾運輸專屬分流：Google 開發者 API 因日本鐵路授權限制不提供日本大眾運輸，
   // 自動改由日本 NAVITIME (RapidAPI) 查詢；若尚未設定金鑰則回傳明確的日本指引與備援入口。
   if (mode === 'transit' && isJapanTrip(origin, destination)) {
@@ -560,7 +595,7 @@ export async function handleComputeRoutes(body, env = process.env) {
         navitimeConfigured: false,
         routes: [],
         message:
-          'Google 開發者 API 因日本鐵路授權限制，不支援自動抓取日本大眾運輸。可於 Vercel 免費設定 NAVITIME（RapidAPI 每月 500 次免費硬上限）啟用日本電車自動查詢，或一鍵開啟 Google Maps 查詢並手動填寫日圓自動換台幣。',
+          '日本鐵路／地鐵目前未啟用自動班次查詢，可先一鍵開啟 Google Maps 查看轉乘，再手動填寫日圓自動換算台幣。',
       },
     };
   }
@@ -571,7 +606,7 @@ export async function handleComputeRoutes(body, env = process.env) {
       body: {
         status: 'api_unconfigured',
         error: 'API_KEY_NOT_CONFIGURED',
-        message: '尚未設定 GOOGLE_MAPS_API_KEY 環境變數，已自動改用備援方案。',
+        message: '路線服務尚未啟用，已自動改用備援方案。',
       },
     };
   }
@@ -794,7 +829,7 @@ const LOW_PRIORITY_GOOGLE_POI_TYPES = new Set([
 ]);
 
 function computeReverseRadiusMeters(zoom) {
-  const z = Number(zoom);
+  const z = parseOptionalFiniteNumber(zoom);
   if (!Number.isFinite(z)) return 60;
   if (z >= 19) return 30;
   if (z >= 18) return 45;
@@ -804,7 +839,7 @@ function computeReverseRadiusMeters(zoom) {
 }
 
 function computeSnapThresholdMeters(zoom) {
-  const z = Number(zoom);
+  const z = parseOptionalFiniteNumber(zoom);
   if (!Number.isFinite(z)) return 40;
   if (z >= 19) return 22;
   if (z >= 18) return 32;
@@ -818,9 +853,10 @@ function calcDistanceMeters(lat1, lng1, lat2, lng2) {
   const toRad = (deg) => (deg * Math.PI) / 180;
   const dLat = toRad(lat2 - lat1);
   const dLng = toRad(lng2 - lng1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  const a = Math.min(
+    1,
+    Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
+  );
   return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
@@ -1010,8 +1046,8 @@ export function pickBestPlaceFromGoogle(
 }
 
 export async function handleReverseGeocode(lat, lng, env = process.env, zoom = null) {
-  const numLat = Number(lat);
-  const numLng = Number(lng);
+  const numLat = parseOptionalFiniteNumber(lat);
+  const numLng = parseOptionalFiniteNumber(lng);
   if (!isValidCoord({ lat: numLat, lng: numLng })) {
     return { statusCode: 400, body: { status: 'invalid', name: null } };
   }
@@ -1029,33 +1065,34 @@ export async function handleReverseGeocode(lat, lng, env = process.env, zoom = n
 
   // 1. 優先以 Google Places API (New) 的 POPULARITY 顯著度排序搭配緊緻縮放半徑，優先抓出畫面上看得到的底圖大地標／主要店家
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 3500);
-    const res = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask':
-          'places.id,places.displayName,places.primaryType,places.types,places.location,places.businessStatus',
-      },
-      body: JSON.stringify({
-        maxResultCount: 15,
-        rankPreference: 'POPULARITY',
-        languageCode: 'zh-TW',
-        excludedTypes: GOOGLE_NEARBY_EXCLUDED_TYPES,
-        locationRestriction: {
-          circle: {
-            center: { latitude: numLat, longitude: numLng },
-            radius,
-          },
+    const { res, data } = await fetchJsonWithTimeout(
+      fetch,
+      'https://places.googleapis.com/v1/places:searchNearby',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': apiKey,
+          'X-Goog-FieldMask':
+            'places.id,places.displayName,places.primaryType,places.types,places.location,places.businessStatus',
         },
-      }),
-      signal: ctrl.signal,
-    });
-    clearTimeout(timer);
-    if (res.ok) {
-      placesData = await res.json();
+        body: JSON.stringify({
+          maxResultCount: 15,
+          rankPreference: 'POPULARITY',
+          languageCode: 'zh-TW',
+          excludedTypes: GOOGLE_NEARBY_EXCLUDED_TYPES,
+          locationRestriction: {
+            circle: {
+              center: { latitude: numLat, longitude: numLng },
+              radius,
+            },
+          },
+        }),
+      },
+      2200
+    );
+    if (res.ok && data) {
+      placesData = data;
     } else if (res.status === 403 || res.status === 401) {
       placesApiDisabled = true;
     }
@@ -1068,32 +1105,26 @@ export async function handleReverseGeocode(lat, lng, env = process.env, zoom = n
     return { statusCode: 200, body: { status: 'ok', ...fromPlaces } };
   }
 
-  // 1b. 若 Places API (New) 未啟用，自動嘗試相容舊版 Google Places Nearby Search（以顯著度優先）
-  if (placesApiDisabled || !placesData) {
+  // 1b. 僅於 Places API (New) 未啟用時才降級至 Legacy Google Places Nearby Search（避免重複計費）
+  if (placesApiDisabled) {
     try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 3200);
       const legacyUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${numLat},${numLng}&radius=${radius}&language=zh-TW&key=${encodeURIComponent(apiKey)}`;
-      const res = await fetch(legacyUrl, { signal: ctrl.signal });
-      clearTimeout(timer);
-      if (res.ok) {
-        const legacyJson = await res.json();
-        if (legacyJson?.status === 'OK' && Array.isArray(legacyJson.results)) {
-          const nearbyOnly = legacyJson.results.filter((r) => {
-            const rLat = r?.geometry?.location?.lat;
-            const rLng = r?.geometry?.location?.lng;
-            return (
-              Number.isFinite(rLat) &&
-              Number.isFinite(rLng) &&
-              calcDistanceMeters(numLat, numLng, rLat, rLng) <= radius
-            );
-          });
-          const fromLegacy = pickBestPlaceFromGoogle({ results: nearbyOnly }, null, origin, zoom, {
-            rankedByPopularity: true,
-          });
-          if (fromLegacy) {
-            return { statusCode: 200, body: { status: 'ok', ...fromLegacy } };
-          }
+      const { res, data: legacyJson } = await fetchJsonWithTimeout(fetch, legacyUrl, {}, 1600);
+      if (res.ok && legacyJson?.status === 'OK' && Array.isArray(legacyJson.results)) {
+        const nearbyOnly = legacyJson.results.filter((r) => {
+          const rLat = r?.geometry?.location?.lat;
+          const rLng = r?.geometry?.location?.lng;
+          return (
+            Number.isFinite(rLat) &&
+            Number.isFinite(rLng) &&
+            calcDistanceMeters(numLat, numLng, rLat, rLng) <= radius
+          );
+        });
+        const fromLegacy = pickBestPlaceFromGoogle({ results: nearbyOnly }, null, origin, zoom, {
+          rankedByPopularity: true,
+        });
+        if (fromLegacy) {
+          return { statusCode: 200, body: { status: 'ok', ...fromLegacy } };
         }
       }
     } catch {
@@ -1101,15 +1132,12 @@ export async function handleReverseGeocode(lat, lng, env = process.env, zoom = n
     }
   }
 
-  // 2. 次順位：Google Geocoding API（POI 優先，其次取路名）
+  // 2. 次順位：Google Geocoding API（POI 優先，其次取路名；與步驟 1 合計逾時 <= 3.8s，不超過前端 4.2s 取消門檻）
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 3500);
     const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${numLat},${numLng}&language=zh-TW&key=${encodeURIComponent(apiKey)}`;
-    const res = await fetch(url, { signal: ctrl.signal });
-    clearTimeout(timer);
-    if (res.ok) {
-      geocodeData = await res.json();
+    const { res, data } = await fetchJsonWithTimeout(fetch, url, {}, 1600);
+    if (res.ok && data) {
+      geocodeData = data;
     }
   } catch {
     // ignore
@@ -1117,7 +1145,11 @@ export async function handleReverseGeocode(lat, lng, env = process.env, zoom = n
 
   const picked = pickBestPlaceFromGoogle(null, geocodeData, origin, zoom);
   if (picked) {
-    return { statusCode: 200, body: { status: 'ok', ...picked } };
+    const firstCountry = (geocodeData?.results || [])
+      .flatMap((r) => r?.address_components || [])
+      .find((c) => (c?.types || []).includes('country'));
+    const countryCode = String(firstCountry?.short_name || '').trim().toUpperCase();
+    return { statusCode: 200, body: { status: 'ok', ...picked, ...(countryCode ? { countryCode } : {}) } };
   }
 
   return {
@@ -1134,7 +1166,7 @@ export async function handleReverseGeocode(lat, lng, env = process.env, zoom = n
  */
 export async function handlePlaceDetails(placeId, env = process.env) {
   const cleanId = String(placeId || '').trim();
-  if (!cleanId || !/^[A-Za-z0-9_\-]+$/.test(cleanId)) {
+  if (!cleanId || cleanId.length > 256 || !/^[A-Za-z0-9_\-]+$/.test(cleanId)) {
     return { statusCode: 400, body: { status: 'invalid', name: null } };
   }
 
@@ -1147,21 +1179,21 @@ export async function handlePlaceDetails(placeId, env = process.env) {
 
   // 1. Places API (New) Place Details（Pro SKU：每月 5,000 次免費）
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 3500);
     const url = `https://places.googleapis.com/v1/places/${encodeURIComponent(cleanId)}?languageCode=zh-TW`;
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask':
-          'id,displayName,location,shortFormattedAddress,formattedAddress,primaryTypeDisplayName,addressComponents',
+    const { res, data: p } = await fetchJsonWithTimeout(
+      fetch,
+      url,
+      {
+        method: 'GET',
+        headers: {
+          'X-Goog-Api-Key': apiKey,
+          'X-Goog-FieldMask':
+            'id,displayName,location,shortFormattedAddress,formattedAddress,primaryTypeDisplayName,addressComponents',
+        },
       },
-      signal: ctrl.signal,
-    });
-    clearTimeout(timer);
-    if (res.ok) {
-      const p = await res.json();
+      3200
+    );
+    if (res.ok && p) {
       const name = p?.displayName?.text?.trim() || '';
       const pLat = p?.location?.latitude;
       const pLng = p?.location?.longitude;
@@ -1187,20 +1219,16 @@ export async function handlePlaceDetails(placeId, env = process.env) {
       placesApiDisabled = true;
     }
   } catch {
-    // fallback below
+    // 逾時或網路異常
   }
 
-  // 2. 相容備援：Legacy Place Details
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 3200);
-    const legacyUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(cleanId)}&fields=place_id,name,geometry,formatted_address,address_components&language=zh-TW&key=${encodeURIComponent(apiKey)}`;
-    const res = await fetch(legacyUrl, { signal: ctrl.signal });
-    clearTimeout(timer);
-    if (res.ok) {
-      const data = await res.json();
+  // 2. 僅於 Places API (New) 未啟用時才降級至 Legacy Place Details（避免 400/404 無效 placeId 重複計費）
+  if (placesApiDisabled) {
+    try {
+      const legacyUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(cleanId)}&fields=place_id,name,geometry,formatted_address,address_components&language=zh-TW&key=${encodeURIComponent(apiKey)}`;
+      const { res, data } = await fetchJsonWithTimeout(fetch, legacyUrl, {}, 2800);
       const r = data?.result;
-      if (data?.status === 'OK' && r?.name) {
+      if (res.ok && data?.status === 'OK' && r?.name) {
         const countryComp = (r.address_components || []).find((c) => (c.types || []).includes('country'));
         const rLat = r?.geometry?.location?.lat;
         const rLng = r?.geometry?.location?.lng;
@@ -1219,9 +1247,9 @@ export async function handlePlaceDetails(placeId, env = process.env) {
           },
         };
       }
+    } catch {
+      // ignore
     }
-  } catch {
-    // ignore
   }
 
   return {
@@ -1237,8 +1265,8 @@ export async function handlePlaceDetails(placeId, env = process.env) {
  * 透過 Google Places API (New) 執行即時關鍵字地點搜尋（原生支援繁中↔日文漢字通配與國家／座標加權）
  */
 export async function handleSearchPlaces(params = {}, env = process.env) {
-  const query = String(params?.q || '').trim();
-  if (!query) {
+  const query = String(params?.q || '').trim().slice(0, 120);
+  if (!query || query.length < 2) {
     return { statusCode: 200, body: { status: 'ok', results: [] } };
   }
 
@@ -1247,8 +1275,8 @@ export async function handleSearchPlaces(params = {}, env = process.env) {
     return { statusCode: 200, body: { status: 'unconfigured', results: [] } };
   }
 
-  const lat = Number(params?.lat);
-  const lng = Number(params?.lng);
+  const lat = parseOptionalFiniteNumber(params?.lat);
+  const lng = parseOptionalFiniteNumber(params?.lng);
   const regionCode = String(params?.country || '')
     .trim()
     .toUpperCase()
@@ -1272,27 +1300,27 @@ export async function handleSearchPlaces(params = {}, env = process.env) {
   }
 
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 3800);
-    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask':
-          'places.id,places.displayName,places.formattedAddress,places.shortFormattedAddress,places.location,places.addressComponents,places.primaryTypeDisplayName',
+    const { res, data } = await fetchJsonWithTimeout(
+      fetch,
+      'https://places.googleapis.com/v1/places:searchText',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': apiKey,
+          'X-Goog-FieldMask':
+            'places.id,places.displayName,places.formattedAddress,places.shortFormattedAddress,places.location,places.addressComponents,places.primaryTypeDisplayName',
+        },
+        body: JSON.stringify(payload),
       },
-      body: JSON.stringify(payload),
-      signal: ctrl.signal,
-    });
-    clearTimeout(timer);
+      3500
+    );
 
     if (!res.ok) {
       const status = res.status === 401 || res.status === 403 ? 'places_api_disabled' : 'error';
       return { statusCode: 200, body: { status, results: [] } };
     }
 
-    const data = await res.json();
     const places = Array.isArray(data?.places) ? data.places : [];
     const results = places
       .map((p) => {

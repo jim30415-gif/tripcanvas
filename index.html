@@ -6,6 +6,22 @@
   <!-- 確保地圖圖磚於各類瀏覽器或沙盒環境下正常載入 -->
   <meta name="referrer" content="no-referrer-when-downgrade" />
   <title>漫步地圖 TripCanvas · 自由行旅遊規劃網站</title>
+  <meta
+    name="description"
+    content="漫步地圖 TripCanvas — 專為獨旅與自由行打造的互動式旅遊地圖與行程規劃工具，支援多天數圖層、貼路交通與大眾運輸轉乘、多幣別開銷統計與 Google 雲端硬碟個人同步。"
+  />
+  <meta name="theme-color" content="#FBF8F3" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="漫步地圖" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="漫步地圖 TripCanvas · 自由行旅遊規劃網站" />
+  <meta
+    property="og:description"
+    content="視覺化地圖行程規劃、貼路交通與日本／全球大眾運輸轉乘、多幣別開銷比例分析與 Google 雲端硬碟個人同步。"
+  />
+  <meta property="og:locale" content="zh_TW" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
 
   <!-- 淺咖啡漸層底＋白色單手拉大型傾斜行李箱 Favicon -->
   <link
@@ -82,10 +98,11 @@
             type="search"
             enterkeyhint="search"
             autocomplete="off"
+            aria-label="搜尋地點"
             placeholder="輸入地點即時搜尋"
             class="w-full bg-transparent text-sm text-owl-text placeholder-owl-muted focus:outline-none py-0.5 select-text min-w-0"
           />
-          <button id="btn-clear-search" type="button" title="清除關鍵字" class="hidden ml-1 w-6 h-6 rounded-full hover:bg-owl-border/70 text-owl-muted hover:text-owl-text flex items-center justify-center shrink-0 transition">
+          <button id="btn-clear-search" type="button" title="清除關鍵字" aria-label="清除搜尋關鍵字" class="hidden ml-1 w-6 h-6 rounded-full hover:bg-owl-border/70 text-owl-muted hover:text-owl-text flex items-center justify-center shrink-0 transition">
             <i data-lucide="x" class="w-3.5 h-3.5"></i>
           </button>
           <button type="submit" class="ml-1 md:ml-2 px-2.5 py-1 md:px-3.5 md:py-1.5 rounded-lg bg-owl-primary hover:bg-owl-primaryHover text-white text-xs sm:text-sm font-bold transition shrink-0 whitespace-nowrap">
@@ -94,7 +111,7 @@
         </form>
 
         <!-- 搜尋結果下拉清單（手機版貼齊頂部列滿寬，平板／電腦對齊搜尋欄，z-index: 2100） -->
-        <div id="map-search-results" class="search-dropdown hidden top-full left-2.5 right-2.5 md:left-0 md:right-0 mt-1.5 md:mt-2 bg-owl-card border border-owl-border rounded-2xl shadow-dropdown overflow-hidden max-h-[60dvh] overflow-y-auto custom-scroll"></div>
+        <div id="map-search-results" role="listbox" aria-label="地點搜尋結果" class="search-dropdown hidden top-full left-2.5 right-2.5 md:left-0 md:right-0 mt-1.5 md:mt-2 bg-owl-card border border-owl-border rounded-2xl shadow-dropdown overflow-hidden max-h-[60dvh] overflow-y-auto custom-scroll"></div>
       </div>
 
       <!-- 右側（平板／電腦顯示）：Google 雲端同步狀態 ＋ JSON 匯出 / 匯入（手機端收納於漢堡抽屜內） -->
@@ -107,10 +124,10 @@
           <i data-lucide="download" class="w-4 h-4"></i>
           <span>匯出</span>
         </button>
-        <label title="匯入行程 JSON（將建立為新計畫）" class="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold text-owl-subtext hover:text-owl-primaryDeep hover:bg-owl-softBg border border-owl-border bg-owl-card transition cursor-pointer">
+        <label title="匯入行程 JSON（將建立為新計畫）" class="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold text-owl-subtext hover:text-owl-primaryDeep hover:bg-owl-softBg border border-owl-border bg-owl-card transition cursor-pointer focus-within:ring-2 focus-within:ring-owl-primary/40">
           <i data-lucide="upload" class="w-4 h-4"></i>
           <span>匯入</span>
-          <input id="input-import-json" type="file" accept="application/json,.json" class="hidden" />
+          <input id="input-import-json" type="file" accept="application/json,.json" class="sr-only" />
         </label>
       </div>
     </header>
@@ -119,9 +136,9 @@
     <main id="app-main" class="app-main flex-1 flex min-h-0 overflow-hidden bg-owl-canvas">
 
       <!-- ==================== 左側欄：目前天數標點順序與交通設定（電腦／手機均為圓角半透明浮動區塊） ==================== -->
-      <aside id="panel-left" class="hidden lg:flex fixed left-3 bottom-[calc(78px+env(safe-area-inset-bottom))] z-[1550] w-[calc(100vw-24px)] max-w-[360px] max-h-[54dvh] rounded-3xl border border-owl-border/90 bg-owl-panel/60 backdrop-blur-md shadow-2xl overflow-hidden flex-col shrink-0 min-h-0">
+      <aside id="panel-left" class="hidden lg:flex fixed left-3 bottom-[calc(78px+env(safe-area-inset-bottom))] z-[1550] w-[calc(100vw-24px)] max-w-[360px] max-h-[54dvh] rounded-3xl border border-owl-border/90 bg-owl-panel/60 backdrop-blur-md shadow-2xl overflow-visible flex-col shrink-0 min-h-0">
         <!-- 當前天數標題（附小倒三角快速切換天數） -->
-        <div id="panel-left-header" class="relative px-4 py-3 border-b border-owl-border/75 bg-owl-selectedBg/75 shrink-0">
+        <div id="panel-left-header" class="relative px-4 py-3 border-b border-owl-border/75 bg-owl-selectedBg/75 rounded-t-[23px] shrink-0">
           <div class="flex items-center justify-between gap-2">
             <button
               id="btn-left-day-switcher"
@@ -163,7 +180,7 @@
         </div>
 
         <!-- 標點與交通連接器可捲動清單 -->
-        <div id="itinerary-list" class="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y custom-scroll p-3.5 lg:px-3 pb-5 lg:pb-6"></div>
+        <div id="itinerary-list" class="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y custom-scroll rounded-b-[23px] p-3.5 lg:px-3 pb-5 lg:pb-6"></div>
       </aside>
 
       <!-- ==================== 中間主畫面：Google 地圖互動區（isolation: isolate） ==================== -->
@@ -336,12 +353,12 @@
   </div>
 
   <!-- ==================== 左側抽屜：多旅遊計畫管理（z-index: 2800） ==================== -->
-  <div id="drawer-trips" class="hidden fixed inset-0 z-[2800] flex">
+  <div id="drawer-trips" role="dialog" aria-modal="true" aria-labelledby="drawer-trips-title" class="hidden fixed inset-0 z-[2800] flex">
     <div id="drawer-trips-backdrop" class="fixed inset-0 bg-[#2B1F16]/45 backdrop-blur-xs"></div>
     <div class="relative z-10 w-[86vw] max-w-[340px] h-full bg-owl-panel border-r border-owl-border shadow-2xl flex flex-col overflow-hidden">
       <div class="px-4 py-3.5 border-b border-owl-border bg-owl-selectedBg/80 flex items-center justify-between gap-2 shrink-0">
         <div class="min-w-0">
-          <h3 class="text-base font-extrabold text-owl-text flex items-center gap-2">
+          <h3 id="drawer-trips-title" class="text-base font-extrabold text-owl-text flex items-center gap-2">
             <i data-lucide="folder-plus" class="w-4 h-4 text-owl-primary shrink-0"></i>
             <span>我的旅遊計畫</span>
           </h3>
@@ -369,10 +386,10 @@
             <i data-lucide="download" class="w-4 h-4 shrink-0"></i>
             <span>匯出 JSON</span>
           </button>
-          <label class="py-2.5 px-3 rounded-xl bg-owl-card hover:bg-owl-softBg border border-owl-border text-xs font-bold text-owl-text flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95">
+          <label class="py-2.5 px-3 rounded-xl bg-owl-card hover:bg-owl-softBg border border-owl-border text-xs font-bold text-owl-text flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95 focus-within:ring-2 focus-within:ring-owl-primary/40">
             <i data-lucide="upload" class="w-4 h-4 shrink-0"></i>
             <span>匯入 JSON</span>
-            <input id="input-import-json-mobile" type="file" accept="application/json,.json" class="hidden" />
+            <input id="input-import-json-mobile" type="file" accept="application/json,.json" class="sr-only" />
           </label>
         </div>
       </div>
@@ -382,15 +399,15 @@
   </div>
 
   <!-- ==================== 彈窗 1：標點詳細設定視窗（z-index: 3000） ==================== -->
-  <div id="modal-pin-detail" class="hidden fixed inset-0 z-[3000] bg-[#2B1F16]/55 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
+  <div id="modal-pin-detail" role="dialog" aria-modal="true" aria-labelledby="modal-pin-detail-title" class="hidden fixed inset-0 z-[3000] bg-[#2B1F16]/55 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
     <div class="bg-owl-card w-full sm:max-w-xl max-h-[90dvh] rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-owl-border">
       <!-- 標頭 -->
       <div class="px-5 py-4 border-b border-owl-border/80 flex items-center justify-between bg-owl-panel shrink-0">
         <div class="flex items-center gap-2.5 min-w-0">
           <span id="detail-pin-badge" class="w-8 h-8 rounded-full text-white text-sm font-extrabold flex items-center justify-center shrink-0 shadow-sm">1</span>
           <div class="min-w-0">
-            <h3 class="text-lg font-extrabold text-owl-text truncate">標點詳細設定</h3>
-            <p id="detail-pin-coords" class="text-xs text-owl-muted font-mono">25.04780, 121.51700</p>
+            <h3 id="modal-pin-detail-title" class="text-lg font-extrabold text-owl-text truncate">標點詳細設定</h3>
+            <p id="detail-pin-coords" class="text-xs text-owl-muted font-mono select-text">25.04780, 121.51700</p>
           </div>
         </div>
         <button id="btn-close-pin-detail" type="button" aria-label="關閉標點設定" class="w-9 h-9 rounded-full hover:bg-owl-softBg flex items-center justify-center text-owl-subtext transition">
@@ -423,10 +440,10 @@
             </div>
 
             <div class="flex-1 w-full space-y-2">
-              <label class="w-full inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-white hover:bg-owl-softBg border border-owl-border hover:border-owl-accentBorder text-sm font-bold text-owl-text hover:text-owl-primaryDeep cursor-pointer transition">
+              <label class="w-full inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-white hover:bg-owl-softBg border border-owl-border hover:border-owl-accentBorder text-sm font-bold text-owl-text hover:text-owl-primaryDeep cursor-pointer transition focus-within:ring-2 focus-within:ring-owl-primary/40">
                 <i data-lucide="upload-cloud" class="w-4 h-4 text-owl-primary"></i>
                 上傳本機圖片（自動壓縮儲存）
-                <input id="input-pin-image-file" type="file" accept="image/*" class="hidden" />
+                <input id="input-pin-image-file" type="file" accept="image/*" class="sr-only" />
               </label>
 
               <div class="flex gap-1.5">
@@ -536,12 +553,12 @@
   </div>
 
   <!-- ==================== 彈窗 2：點與點之間交通方式設定（貼路實景、大眾運輸分段與交通支出） ==================== -->
-  <div id="modal-transport" class="hidden fixed inset-0 z-[3000] bg-[#2B1F16]/55 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
+  <div id="modal-transport" role="dialog" aria-modal="true" aria-labelledby="modal-transport-title" class="hidden fixed inset-0 z-[3000] bg-[#2B1F16]/55 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
     <div class="bg-owl-card w-full sm:max-w-lg max-h-[90dvh] rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-owl-border">
       <!-- 標頭 -->
       <div class="px-5 py-4 border-b border-owl-border/80 bg-owl-panel flex items-center justify-between shrink-0">
         <div class="min-w-0">
-          <h3 class="text-lg font-extrabold text-owl-text">設定交通方式與路徑</h3>
+          <h3 id="modal-transport-title" class="text-lg font-extrabold text-owl-text">設定交通方式與路徑</h3>
           <div id="transport-route-header" class="text-sm text-owl-subtext mt-0.5 truncate flex items-center gap-1.5"></div>
         </div>
         <button id="btn-close-transport" type="button" aria-label="關閉交通設定" class="w-9 h-9 rounded-full hover:bg-owl-softBg flex items-center justify-center text-owl-subtext transition">
@@ -750,7 +767,7 @@
   </div>
 
   <!-- ==================== 彈窗 3：通用自訂確認 / 輸入視窗（取代 alert / confirm） ==================== -->
-  <div id="modal-dialog" class="hidden fixed inset-0 z-[3100] bg-[#2B1F16]/55 backdrop-blur-xs flex items-center justify-center p-4">
+  <div id="modal-dialog" role="alertdialog" aria-modal="true" aria-labelledby="dialog-title" aria-describedby="dialog-message" class="hidden fixed inset-0 z-[3100] bg-[#2B1F16]/55 backdrop-blur-xs flex items-center justify-center p-4">
     <div class="bg-owl-card w-full max-w-sm rounded-3xl shadow-2xl border border-owl-border p-5 space-y-4">
       <div class="flex items-start gap-3">
         <div id="dialog-icon-wrap" class="w-10 h-10 rounded-2xl bg-owl-softBg text-owl-primaryDeep flex items-center justify-center shrink-0">
@@ -772,7 +789,7 @@
   </div>
 
   <!-- 浮動 Toast 提示區 -->
-  <div id="toast-container" class="fixed bottom-[calc(80px+env(safe-area-inset-bottom))] lg:bottom-20 left-1/2 -translate-x-1/2 z-[3200] flex flex-col items-center gap-2 pointer-events-none"></div>
+  <div id="toast-container" role="status" aria-live="polite" aria-atomic="true" class="fixed bottom-[calc(80px+env(safe-area-inset-bottom))] lg:bottom-20 left-1/2 -translate-x-1/2 z-[3200] flex flex-col items-center gap-2 pointer-events-none"></div>
 
   <script type="module" src="/src/main.js"></script>
 </body>

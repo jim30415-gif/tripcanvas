@@ -58,7 +58,9 @@ test('AES-256-GCM session cookie encryption round-trip and tamper resistance', (
   assert.match(serialized, /HttpOnly/);
   assert.match(serialized, /SameSite=Lax/);
   assert.match(serialized, /Secure/);
-  assert.deepEqual(parseCookies(extractCookiePair(serialized)), { tc_test: 'hello=world' });
+  const parsedCookie = parseCookies(extractCookiePair(serialized));
+  assert.equal(Object.getPrototypeOf(parsedCookie), null);
+  assert.equal(parsedCookie.tc_test, 'hello=world');
 });
 
 test('handleDriveStatus reflects unconfigured vs configured state and dynamic redirect URI', () => {

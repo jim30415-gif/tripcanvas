@@ -1,17 +1,22 @@
-import L from 'leaflet';
-import { escapeHTML, renderImageContent } from '../utils/format.js';
-import { getGoogleProjection, getMap } from './mapInit.js';
+import { escapeHTML, renderImageContent, sanitizeHexColor } from '../utils/format.js';
+import { getGoogleProjection, getLeafletLib, getMap } from './mapInit.js';
 import { createGoogleHtmlOverlay } from './googleEngine.js';
 
 const LONG_PRESS_MOUSE_MS = 280;
 const LONG_PRESS_TOUCH_MS = 420;
 let lastPinDragEndedAt = 0;
+let activeRepositionCount = 0;
 
 export function wasPinRecentlyDragged() {
   return Date.now() - lastPinDragEndedAt < 450;
 }
 
-function buildPinMarkerHtml(pin, idx, color) {
+export function isPinRepositioning() {
+  return activeRepositionCount > 0;
+}
+
+function buildPinMarkerHtml(pin, idx, rawColor) {
+  const color = sanitizeHexColor(rawColor);
   const hasImg = Boolean(pin.image);
   return hasImg
     ? `
@@ -49,7 +54,7 @@ function buildPinMarkerHtml(pin, idx, color) {
  * 跨引擎通用的長按標點拖曳移位互動（電腦滑鼠 280ms／手機觸控 420ms，防圖片原生拖放與地圖誤移）
  */
 function bindPinInteractions(el, adapter, { day, pin, baseZIndex, bindDomClick, onPinClick, onPinMove }) {
-  if (!el) return;
+  if (!el) return null;
 
   let suppressNextClick = false;
 
@@ -68,9 +73,12 @@ function bindPinInteractions(el, adapter, { day, pin, baseZIndex, bindDomClick, 
     el.addEventListener('click', handleTapClick);
   }
 
-  // 阻止瀏覽器原生圖片拖放、文字反白與右鍵選單干擾標點長按移位
+  // 阻止瀏覽器原生圖片拖放、文字反白、雙擊縮放與右鍵選單干擾標點長按移位
   el.addEventListener('contextmenu', (ev) => {
     ev.preventDefault();
+    ev.stopPropagation();
+  });
+  el.addEventListener('dblclick', (ev) => {
     ev.stopPropagation();
   });
   el.addEventListener('dragstart', (ev) => {
@@ -86,7 +94,11 @@ function bindPinInteractions(el, adapter, { day, pin, baseZIndex, bindDomClick, 
   });
 
   if (typeof onPinMove !== 'function') {
-    return { shouldSuppressClick: () => suppressNextClick, clearSuppress: () => (suppressNextClick = false) };
+    return {
+      shouldSuppressClick: () => suppressNextClick,
+      clearSuppress: () => (suppressNextClick = false),
+      destroy: () => {},
+    };
   }
 
   let pressTimer = null;
@@ -114,14 +126,14 @@ function bindPinInteractions(el, adapter, { day, pin, baseZIndex, bindDomClick, 
   };
 
   const detachWindowListeners = () => {
-    window.removeEventListener('pointermove', onPointerMove);
-    window.removeEventListener('pointerup', onPointerUp);
-    window.removeEventListener('pointercancel', onPointerCancel);
+    window.removeEventListener('pointermove', onPointerMove, { capture: true });
+    window.removeEventListener('pointerup', onPointerUp, { capture: true });
+    window.removeEventListener('pointercancel', onPointerCancel, { capture: true });
     window.removeEventListener('blur', onWindowBlur);
     window.removeEventListener('touchmove', blockTouchScroll);
   };
 
-  const finishReposition = (commit) => {
+  const finishReposition = (commit, { skipResetPos = false } = {}) => {
     clearPressTimer();
     detachWindowListeners();
 
@@ -130,6 +142,7 @@ function bindPinInteractions(el, adapter, { day, pin, baseZIndex, bindDomClick, 
       return;
     }
     isRepositioning = false;
+    activeRepositionCount = Math.max(0, activeRepositionCount - 1);
     activePointerId = null;
     lastPinDragEndedAt = Date.now();
     suppressNextClick = true;
@@ -146,7 +159,7 @@ function bindPinInteractions(el, adapter, { day, pin, baseZIndex, bindDomClick, 
     if (commit && movedDuringDrag) {
       const finalLatLng = adapter.getLatLng();
       onPinMove(day.id, pin.id, finalLatLng.lat, finalLatLng.lng);
-    } else if (!commit) {
+    } else if (!commit && !skipResetPos) {
       adapter.setLatLng(pin.lat, pin.lng);
     }
   };
@@ -189,6 +202,8 @@ function bindPinInteractions(el, adapter, { day, pin, baseZIndex, bindDomClick, 
 
   el.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 && e.pointerType === 'mouse') return;
+    // 防多指重複覆寫 activePointerId 導致拖曳與 body 鎖死
+    if (activePointerId !== null || isRepositioning) return;
     if (e.pointerType === 'mouse') {
       e.stopPropagation();
     }
@@ -203,12 +218,18 @@ function bindPinInteractions(el, adapter, { day, pin, baseZIndex, bindDomClick, 
 
     clearPressTimer();
     pressTimer = setTimeout(() => {
+      pressTimer = null;
       mapRect = adapter.getMapRect();
       const cur = adapter.getLatLng();
       const pinPt = adapter.latLngToContainerPoint(cur.lat, cur.lng);
-      if (!mapRect || !pinPt) return;
+      if (!mapRect || !pinPt) {
+        detachWindowListeners();
+        activePointerId = null;
+        return;
+      }
 
       isRepositioning = true;
+      activeRepositionCount++;
       if (navigator.vibrate) navigator.vibrate(35);
 
       dragOffsetX = pinPt.x - (startX - mapRect.left);
@@ -227,9 +248,9 @@ function bindPinInteractions(el, adapter, { day, pin, baseZIndex, bindDomClick, 
       el.querySelector('.pin-drag-hint')?.classList.remove('hidden');
     }, holdDelay);
 
-    window.addEventListener('pointermove', onPointerMove, { passive: false });
-    window.addEventListener('pointerup', onPointerUp);
-    window.addEventListener('pointercancel', onPointerCancel);
+    window.addEventListener('pointermove', onPointerMove, { capture: true, passive: false });
+    window.addEventListener('pointerup', onPointerUp, { capture: true });
+    window.addEventListener('pointercancel', onPointerCancel, { capture: true });
     window.addEventListener('blur', onWindowBlur);
   });
 
@@ -238,13 +259,18 @@ function bindPinInteractions(el, adapter, { day, pin, baseZIndex, bindDomClick, 
     clearSuppress: () => {
       suppressNextClick = false;
     },
+    destroy: () => {
+      finishReposition(false, { skipResetPos: true });
+    },
   };
 }
 
 export function renderDayPinsOnMap(overlayGroup, day, isActive, onPinClick, onPinMove) {
-  const color = day.color;
+  const color = sanitizeHexColor(day.color);
   const map = getMap();
   const isGoogle = Boolean(overlayGroup?.isGoogle);
+  const L = isGoogle ? null : getLeafletLib();
+  if (!isGoogle && !L) return;
 
   day.pins.forEach((pin, idx) => {
     const markerHtml = buildPinMarkerHtml(pin, idx, color);
@@ -264,8 +290,9 @@ export function renderDayPinsOnMap(overlayGroup, day, isActive, onPinClick, onPi
         })
       );
       const el = overlay.getElement();
+      window.google?.maps?.OverlayView?.preventMapHitsFrom?.(el);
 
-      bindPinInteractions(
+      const dragState = bindPinInteractions(
         el,
         {
           getMapRect: () => gMap.getDiv()?.getBoundingClientRect() || null,
@@ -278,6 +305,9 @@ export function renderDayPinsOnMap(overlayGroup, day, isActive, onPinClick, onPi
         },
         { day, pin, baseZIndex, bindDomClick: true, onPinClick, onPinMove }
       );
+      if (typeof overlay.setOnRemove === 'function') {
+        overlay.setOnRemove(() => dragState?.destroy?.());
+      }
       return;
     }
 
@@ -313,6 +343,10 @@ export function renderDayPinsOnMap(overlayGroup, day, isActive, onPinClick, onPi
       },
       { day, pin, baseZIndex, bindDomClick: false, onPinClick, onPinMove }
     );
+
+    marker.on('remove', () => {
+      dragState?.destroy?.();
+    });
 
     marker.on('click', (ev) => {
       L.DomEvent.stopPropagation(ev);

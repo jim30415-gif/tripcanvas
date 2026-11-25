@@ -13,20 +13,20 @@ import {
   formatDistanceMetersZh,
   formatDurationZh,
   formatTWD,
+  pickReadableChipColor,
   refreshIcons,
 } from '../utils/format.js';
-import { showToast } from './dialog.js';
+import { isCustomDialogOpen, showToast } from './dialog.js';
 
 let editingTransportContext = null;
 let onChangeCallback = null;
 
-function pickReadableColor(color, fallback = '#6B513A') {
-  if (!color || !/^#[0-9A-Fa-f]{6}$/.test(color)) return fallback;
-  const r = parseInt(color.slice(1, 3), 16);
-  const g = parseInt(color.slice(3, 5), 16);
-  const b = parseInt(color.slice(5, 7), 16);
-  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return lum > 0.82 ? fallback : color;
+function isDevEnvironment() {
+  try {
+    return Boolean(import.meta.env?.DEV);
+  } catch {
+    return false;
+  }
 }
 
 function toDatetimeLocalValue(isoString) {
@@ -180,8 +180,8 @@ function renderTransitTypeChips() {
   container.innerHTML = TRANSIT_TYPES.map((t) => {
     const active = ctx.selectedTransitType === t.id;
     return `
-      <button type="button" data-ttype="${t.id}" class="btn-pick-ttype px-2.5 py-1.5 rounded-xl text-xs font-bold border transition ${active ? 'bg-owl-primary text-white border-owl-primary' : 'bg-white text-owl-subtext border-owl-border hover:border-owl-accentBorder'}">
-        ${t.emoji} ${t.label}
+      <button type="button" data-ttype="${escapeHTML(t.id)}" class="btn-pick-ttype px-2.5 py-1.5 rounded-xl text-xs font-bold border transition ${active ? 'bg-owl-primary text-white border-owl-primary' : 'bg-white text-owl-subtext border-owl-border hover:border-owl-accentBorder'}">
+        ${escapeHTML(t.emoji)} ${escapeHTML(t.label)}
       </button>
     `;
   }).join('');
@@ -202,8 +202,8 @@ function renderTransitPreferenceChips() {
   container.innerHTML = TRANSIT_PREFERENCES.map((p) => {
     const active = ctx.transitPreference === p.id;
     return `
-      <button type="button" data-tpref="${p.id}" class="btn-pick-tpref px-2.5 py-1.5 rounded-lg text-xs font-bold border transition ${active ? 'bg-owl-primary text-white border-owl-primary' : 'bg-white text-owl-subtext border-owl-border hover:border-owl-accentBorder'}">
-        ${p.label}
+      <button type="button" data-tpref="${escapeHTML(p.id)}" class="btn-pick-tpref px-2.5 py-1.5 rounded-lg text-xs font-bold border transition ${active ? 'bg-owl-primary text-white border-owl-primary' : 'bg-white text-owl-subtext border-owl-border hover:border-owl-accentBorder'}">
+        ${escapeHTML(p.label)}
       </button>
     `;
   }).join('');
@@ -250,6 +250,7 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
   const routesWrap = document.getElementById('transit-routes-wrap');
   const tabsEl = document.getElementById('transit-route-tabs');
   const timelineEl = document.getElementById('transit-timeline');
+  const modalRoot = document.getElementById('modal-transport');
   if (!ctx || !statusEl || !routesWrap) return;
 
   const res = ctx.transitResult;
@@ -257,7 +258,7 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
     routesWrap.classList.add('hidden');
     const loadingText = ctx.isJapan
       ? '正在查詢日本大眾運輸分段路線與日圓票價...'
-      : '正在透過 Google Routes API 查詢實際大眾運輸分段與班次...';
+      : '正在查詢實際大眾運輸分段與班次...';
     statusEl.innerHTML = `
       <div class="flex items-center gap-2 text-owl-subtext font-semibold py-2 text-sm">
         <span class="w-4 h-4 rounded-full border-2 border-owl-primary border-t-transparent animate-spin shrink-0"></span>
@@ -271,14 +272,20 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
   if (res.status === 'japan_transit_requires_navitime') {
     routesWrap.classList.add('hidden');
     const gmapsUrl = buildGoogleMapsDirUrl(ctx.pinA, ctx.pinB, 'transit');
+    const devHint = isDevEnvironment()
+      ? `<details class="rounded-lg bg-owl-softBg/70 border border-owl-border/80 px-2.5 py-2 text-xs text-owl-subtext">
+           <summary class="font-bold text-owl-primaryDeep cursor-pointer select-none">開發者設定提示</summary>
+           <p class="mt-1 leading-relaxed">於環境變數設定 <code class="px-1 rounded bg-white text-owl-primaryDeep font-mono">RAPIDAPI_NAVITIME_KEY</code> 即可啟用日本電車自動分段查詢。</p>
+         </details>`
+      : '';
     statusEl.innerHTML = `
       <div class="rounded-xl bg-owl-card border border-owl-accentBorder/80 p-3.5 space-y-2.5 text-sm">
         <div class="flex items-start gap-2 text-owl-text">
           <span class="text-base leading-none shrink-0 mt-0.5">🇯🇵</span>
           <div class="leading-relaxed">
-            <div class="font-extrabold text-owl-text">日本大眾運輸需啟用 NAVITIME 引擎</div>
+            <div class="font-extrabold text-owl-text">日本大眾運輸目前提供快速查車與手動記錄</div>
             <p class="text-xs text-owl-subtext mt-0.5">
-              Google 開發者 API 因日本鐵路業者授權限制，不提供日本大眾運輸路線（步行／開車／騎車皆正常）。你可直接點下方查詢日本路線並手動填寫日圓自動換台幣，或免費開啟 NAVITIME 自動抓取電車！
+              日本境內的步行、開車與騎車路線均會自動貼合道路；電車與地鐵建議透過下方連結對照班次，並切換手動記錄填寫日圓自動換台幣。
             </p>
           </div>
         </div>
@@ -286,25 +293,17 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
           <button type="button" id="btn-jp-switch-manual" class="px-3 py-1.5 rounded-lg bg-owl-primary hover:bg-owl-primaryHover text-white text-xs font-bold transition">
             改用手動記錄（可填日圓換台幣）
           </button>
-          <a href="${gmapsUrl}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-owl-darkTop hover:bg-owl-darkBottom text-owl-cream text-xs font-bold transition">
+          <a href="${escapeHTML(gmapsUrl)}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-owl-darkTop hover:bg-owl-darkBottom text-owl-cream text-xs font-bold transition">
             Google Maps 查車 ↗
           </a>
-          <a href="${NAVITIME_JP_WEB_URL}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#EBF2EC] hover:bg-[#DCE9DE] border border-[#C7DCCB] text-[#3E5C45] text-xs font-bold transition">
+          <a href="${escapeHTML(NAVITIME_JP_WEB_URL)}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#EBF2EC] hover:bg-[#DCE9DE] border border-[#C7DCCB] text-[#3E5C45] text-xs font-bold transition">
             NAVITIME 繁中 ↗
           </a>
         </div>
-        <details class="rounded-lg bg-owl-softBg/70 border border-owl-border/80 px-2.5 py-2 text-xs text-owl-subtext">
-          <summary class="font-bold text-owl-primaryDeep cursor-pointer select-none">
-            如何 2 分鐘免費啟用日本電車自動查詢？（每月 500 次硬上限不扣款）
-          </summary>
-          <ol class="list-decimal pl-4 mt-1.5 space-y-1 leading-relaxed">
-            <li>前往 RapidAPI 訂閱 <strong>NAVITIME Route(totalnavi)</strong> 的 <strong>Basic（$0／月，Hard Limit 硬上限）</strong>方案。</li>
-            <li>複製 <code class="px-1 rounded bg-white text-owl-primaryDeep font-mono">X-RapidAPI-Key</code>，到 Vercel 專案 <strong>Settings → Environment Variables</strong> 新增 <code class="px-1 rounded bg-white text-owl-primaryDeep font-mono">RAPIDAPI_NAVITIME_KEY</code> 並 Redeploy 即可自動生效！</li>
-          </ol>
-        </details>
+        ${devHint}
       </div>
     `;
-    refreshIcons();
+    refreshIcons(statusEl);
     renderTransportCostHint();
     document.getElementById('btn-jp-switch-manual')?.addEventListener('click', () => {
       ctx.transitSubTab = 'manual';
@@ -316,14 +315,17 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
 
   if (res.status === 'api_unconfigured') {
     routesWrap.classList.add('hidden');
+    const devNote = isDevEnvironment()
+      ? '（開發環境請確認 .env.local 中的 GOOGLE_MAPS_API_KEY 設定）'
+      : '';
     statusEl.innerHTML = `
       <div class="rounded-xl bg-owl-card border border-owl-border p-3.5 space-y-2 text-sm">
         <div class="flex items-start gap-2 text-owl-text">
           <i data-lucide="key-round" class="w-4 h-4 text-owl-primary shrink-0 mt-0.5"></i>
           <div class="leading-relaxed">
-            <div class="font-extrabold">尚未設定 Google Routes API 金鑰</div>
+            <div class="font-extrabold">自動班次查詢目前未啟用</div>
             <p class="text-xs text-owl-subtext mt-0.5">
-              於專案根目錄建立 <code class="px-1 py-0.5 rounded bg-owl-softBg text-owl-primaryDeep font-mono">.env.local</code> 並填入 <code class="px-1 py-0.5 rounded bg-owl-softBg text-owl-primaryDeep font-mono">GOOGLE_MAPS_API_KEY</code> 後重啟即可自動查詢「步行 → 大眾運輸實際路線與班次 → 步行」。
+              您可先改用「手動填寫紀錄」記下路線與票價，或點下方連結於 Google Maps 查詢完整時刻表。${escapeHTML(devNote)}
             </p>
           </div>
         </div>
@@ -337,7 +339,7 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
         </div>
       </div>
     `;
-    refreshIcons();
+    refreshIcons(statusEl);
     renderTransportCostHint();
     document.getElementById('btn-switch-to-manual-inline')?.addEventListener('click', () => {
       ctx.transitSubTab = 'manual';
@@ -360,7 +362,7 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
         </div>
       </div>
     `;
-    refreshIcons();
+    refreshIcons(statusEl);
     renderTransportCostHint();
     return;
   }
@@ -376,7 +378,7 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
         </div>
       </div>
     `;
-    refreshIcons();
+    refreshIcons(statusEl);
     renderTransportCostHint();
     return;
   }
@@ -386,6 +388,8 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
   ctx.selectedRouteIndex = Math.min(ctx.selectedRouteIndex || 0, routes.length - 1);
   const selected = routes[ctx.selectedRouteIndex];
   const isNavitime = (selected.provider || res.provider) === 'navitime';
+  const distKmNum = Number(selected.distanceKm);
+  const distSummary = Number.isFinite(distKmNum) && distKmNum > 0 ? ` · ${distKmNum.toFixed(1)} km` : '';
 
   statusEl.innerHTML = `
     <div class="space-y-1">
@@ -395,7 +399,7 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
           <span>${isNavitime ? '已取得日本 NAVITIME 分段路線' : '已取得 Google 分段路線與班次'}</span>
         </div>
         <span class="text-xs font-extrabold text-owl-primaryDeep tabular-nums-strict">
-          總計 ${escapeHTML(formatDurationZh(selected.durationMin))}${selected.distanceKm ? ` · ${selected.distanceKm.toFixed(1)} km` : ''}
+          總計 ${escapeHTML(formatDurationZh(selected.durationMin))}${escapeHTML(distSummary)}
         </span>
       </div>
       ${isNavitime ? '<div class="text-xs text-owl-muted">涵蓋日本 JR／新幹線／地鐵／私鐵與步行（平均車程估算）；若需搭地方公車可點下方 Google Maps 對照。</div>' : ''}
@@ -409,7 +413,9 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
     tabsEl.innerHTML = routes
       .map((r, idx) => {
         const active = idx === ctx.selectedRouteIndex;
-        const transferLabel = r.transferCount > 0 ? `轉乘 ${r.transferCount} 次` : '免轉乘';
+        const transfers = Number(r.transferCount) || 0;
+        const walkMin = Number(r.totalWalkMin) || 0;
+        const transferLabel = transfers > 0 ? `轉乘 ${transfers} 次` : '免轉乘';
         const fareLabel = r.fare?.amountTwd ? ` · ${formatTWD(r.fare.amountTwd)}` : '';
         return `
           <button type="button" data-route-idx="${idx}" class="btn-pick-transit-route flex-1 min-w-[125px] px-3 py-2 rounded-xl border text-left transition ${active ? 'border-owl-primary bg-owl-card shadow-2xs ring-1 ring-owl-primary/25' : 'border-owl-cardBorder bg-owl-panel/70 hover:bg-owl-card'}">
@@ -417,7 +423,7 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
               方案 ${idx + 1} · ${escapeHTML(formatDurationZh(r.durationMin))}${escapeHTML(fareLabel)}
             </div>
             <div class="text-xs text-owl-subtext truncate">
-              步行 ${r.totalWalkMin || 0} 分 · ${transferLabel}
+              步行 ${escapeHTML(String(walkMin))} 分 · ${escapeHTML(transferLabel)}
             </div>
           </button>
         `;
@@ -456,7 +462,7 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
         `;
       }
 
-      const lineBg = pickReadableColor(seg.lineColor, '#6B513A');
+      const lineBg = pickReadableChipColor(seg.lineColor, '#6B513A');
       const depName = seg.departureStop?.name || '上車站';
       const arrName = seg.arrivalStop?.name || '下車站';
       const depTime = seg.departureStop?.timeText || '';
@@ -470,7 +476,7 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
       return `
         <div class="relative pl-7 ${isLast ? '' : 'pb-3'}">
           ${isLast ? '' : `<div class="absolute left-[11px] top-6 bottom-0 w-0.5" style="background:${lineBg};"></div>`}
-          <span class="absolute left-0 top-0.5 w-6 h-6 rounded-full text-white flex items-center justify-center text-xs shadow-2xs" style="background:${lineBg};">${seg.vehicleEmoji || '🚆'}</span>
+          <span class="absolute left-0 top-0.5 w-6 h-6 rounded-full text-white flex items-center justify-center text-xs shadow-2xs" style="background:${lineBg};">${escapeHTML(seg.vehicleEmoji || '🚆')}</span>
           <div class="rounded-xl bg-white border border-owl-cardBorder px-3 py-2.5 space-y-1.5" style="border-left: 3.5px solid ${lineBg};">
             <div class="flex items-center justify-between gap-2">
               <div class="flex items-center gap-1.5 min-w-0">
@@ -498,7 +504,7 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
     })
     .join('');
 
-  refreshIcons();
+  refreshIcons(modalRoot);
   renderTransportCostHint({ autoFillFare });
 }
 
@@ -509,7 +515,13 @@ async function runModalTransitQuery(forceRefresh = false) {
   const token = ++ctx.queryToken;
   const depMode = document.getElementById('select-transit-time-mode')?.value || 'now';
   const depInput = document.getElementById('input-transit-departure')?.value || '';
-  const departureTime = depMode === 'custom' && depInput ? new Date(depInput).toISOString() : '';
+  let departureTime = '';
+  if (depMode === 'custom' && depInput) {
+    const parsed = new Date(depInput);
+    if (!Number.isNaN(parsed.getTime())) {
+      departureTime = parsed.toISOString();
+    }
+  }
 
   ctx.departureTime = departureTime;
   ctx.transitResult = { status: 'pending', routes: [] };
@@ -547,7 +559,7 @@ async function runModalLandQuery(forceRefresh = false) {
   statusEl.innerHTML = `
     <div class="flex items-center gap-2 text-owl-subtext font-semibold py-1">
       <span class="w-4 h-4 rounded-full border-2 border-owl-primary border-t-transparent animate-spin shrink-0"></span>
-      <span>正在查詢「${modeMeta.label}」高精度實際道路路線...</span>
+      <span>正在查詢「${escapeHTML(modeMeta.label)}」高精度實際道路路線...</span>
     </div>
   `;
 
@@ -563,7 +575,7 @@ async function runModalLandQuery(forceRefresh = false) {
 
   if (res.status === 'ok') {
     const providerTag =
-      res.provider === 'google' ? 'Google Routes 高精度路網' : 'FOSSGIS OpenStreetMap 路網';
+      res.provider === 'google' ? 'Google Routes 高精度路網' : 'OpenStreetMap 道路路網';
     const noteText = res.fallbackNote ? ` · ${res.fallbackNote}` : '';
     statusEl.innerHTML = `
       <div class="flex items-center gap-2 text-[#4F6F57] font-bold">
@@ -571,7 +583,10 @@ async function runModalLandQuery(forceRefresh = false) {
         <span>已取得實際貼路路線（${escapeHTML(providerTag)}${escapeHTML(noteText)}）</span>
       </div>
     `;
-    document.getElementById('land-metric-distance').textContent = `${Number(res.distanceKm).toFixed(1)} 公里`;
+    const distNum = Number(res.distanceKm);
+    document.getElementById('land-metric-distance').textContent = Number.isFinite(distNum)
+      ? `${distNum.toFixed(1)} 公里`
+      : '—';
     document.getElementById('land-metric-duration').textContent = formatDurationZh(res.durationMin);
     metricsEl.classList.remove('hidden');
     retryBtn.classList.add('hidden');
@@ -581,7 +596,7 @@ async function runModalLandQuery(forceRefresh = false) {
         <i data-lucide="alert-triangle" class="w-4 h-4 text-[#A65D57] shrink-0 mt-0.5"></i>
         <div class="leading-relaxed">
           <div class="font-extrabold">不支援此陸路路線（可能跨海或無道路可達）</div>
-          <div class="text-xs text-[#7D6E62] mt-0.5">此兩點之間無法以${modeMeta.label}行駛，建議改選「大眾運輸」或以 Google Maps 查詢跨區交通方式。</div>
+          <div class="text-xs text-[#7D6E62] mt-0.5">此兩點之間無法以${escapeHTML(modeMeta.label)}行駛，建議改選「大眾運輸」或以 Google Maps 查詢跨區交通方式。</div>
         </div>
       </div>
     `;
@@ -600,7 +615,7 @@ async function runModalLandQuery(forceRefresh = false) {
     metricsEl.classList.add('hidden');
     retryBtn.classList.remove('hidden');
   }
-  refreshIcons();
+  refreshIcons(statusEl);
 }
 
 function renderTransportModalControls() {
@@ -612,9 +627,9 @@ function renderTransportModalControls() {
     .map((m) => {
       const active = ctx.selectedMode === m.id;
       return `
-        <button type="button" data-mode="${m.id}" class="btn-pick-mode flex flex-col items-center justify-center py-2.5 px-1 rounded-2xl border-2 transition ${active ? 'border-owl-primary bg-owl-softBg text-owl-primaryDeep shadow-xs' : 'border-owl-cardBorder bg-white text-owl-subtext hover:border-owl-accentBorder'}">
-          <span class="text-2xl leading-none">${m.emoji}</span>
-          <span class="text-xs font-bold mt-1.5">${m.label}</span>
+        <button type="button" data-mode="${escapeHTML(m.id)}" class="btn-pick-mode flex flex-col items-center justify-center py-2.5 px-1 rounded-2xl border-2 transition ${active ? 'border-owl-primary bg-owl-softBg text-owl-primaryDeep shadow-xs' : 'border-owl-cardBorder bg-white text-owl-subtext hover:border-owl-accentBorder'}">
+          <span class="text-2xl leading-none">${escapeHTML(m.emoji)}</span>
+          <span class="text-xs font-bold mt-1.5">${escapeHTML(m.label)}</span>
         </button>
       `;
     })
@@ -673,7 +688,7 @@ function renderTransportModalControls() {
     gmapsLandBtn.href = buildGoogleMapsDirUrl(ctx.pinA, ctx.pinB, ctx.selectedMode);
     renderTransportCostHint();
   }
-  refreshIcons();
+  refreshIcons(document.getElementById('modal-transport'));
 }
 
 export function openTransportModal(dayId, pinIndex) {
@@ -692,9 +707,11 @@ export function openTransportModal(dayId, pinIndex) {
   editingTransportContext = {
     dayId,
     pinIndex,
+    pinAId: pinA.id,
     pinA,
     pinB,
     isJapan: inJapan,
+    isSaving: false,
     selectedMode: existing?.mode || 'car',
     selectedTransitType: existing?.mode === 'transit' ? existing.transitType || '' : '',
     transitSubTab: 'auto',
@@ -727,6 +744,12 @@ export function openTransportModal(dayId, pinIndex) {
     queryToken: 0,
   };
 
+  const saveBtn = document.getElementById('btn-save-transport');
+  if (saveBtn) {
+    saveBtn.disabled = false;
+    saveBtn.textContent = '套用設定';
+  }
+
   document.getElementById('transport-route-header').innerHTML = `
     <span class="font-bold text-owl-text truncate max-w-[140px]">${escapeHTML(pinA.name)}</span>
     <span>→</span>
@@ -752,7 +775,7 @@ export function openTransportModal(dayId, pinIndex) {
   }
 
   ensureFxRatesLoaded().then(() => {
-    if (editingTransportContext?.pinA?.id === pinA.id) {
+    if (editingTransportContext?.pinAId === pinA.id) {
       renderTransportCostHint();
     }
   });
@@ -778,8 +801,9 @@ export function openTransportModal(dayId, pinIndex) {
     existing?.mode === 'transit' && Number(existing.duration) > 0 ? existing.duration : '';
 
   renderTransportModalControls();
-  document.getElementById('modal-transport').classList.remove('hidden');
-  refreshIcons();
+  const modalEl = document.getElementById('modal-transport');
+  modalEl.classList.remove('hidden');
+  refreshIcons(modalEl);
 
   if (editingTransportContext.selectedMode === 'transit') {
     if (!existingHasSegmented) {
@@ -792,15 +816,20 @@ export function openTransportModal(dayId, pinIndex) {
 
 export function closeTransportModal() {
   document.getElementById('modal-transport').classList.add('hidden');
+  const saveBtn = document.getElementById('btn-save-transport');
+  if (saveBtn) {
+    saveBtn.disabled = false;
+    saveBtn.textContent = '套用設定';
+  }
   editingTransportContext = null;
 }
 
 async function saveTransportSetting() {
-  if (!editingTransportContext) return;
+  if (!editingTransportContext || editingTransportContext.isSaving) return;
   const ctx = editingTransportContext;
   const state = getState();
   const day = state.days.find((d) => d.id === ctx.dayId);
-  const pinA = day?.pins[ctx.pinIndex];
+  const pinA = day?.pins.find((p) => p.id === ctx.pinAId) || day?.pins[ctx.pinIndex];
   if (!pinA) return;
 
   const resolvedCost = resolveTransportInputCost();
@@ -843,7 +872,8 @@ async function saveTransportSetting() {
     const line = document.getElementById('input-transit-line').value.trim();
     const schedule = document.getElementById('input-transit-schedule').value.trim();
     const rawDur = document.getElementById('input-transit-duration').value.trim();
-    const duration = rawDur ? Math.max(1, Math.round(Number(rawDur))) : null;
+    const parsedDur = Number(rawDur);
+    const duration = rawDur && Number.isFinite(parsedDur) && parsedDur > 0 ? Math.max(1, Math.round(parsedDur)) : null;
 
     pinA.transportToNext = {
       mode: 'transit',
@@ -874,16 +904,37 @@ async function saveTransportSetting() {
   }
 
   // 2. 陸路交通模式（汽車 / 機車 / 自行車 / 步行）
-  let res = ctx.landResult;
-  if (!res || res.status === 'pending') {
-    res = await computeSegmentRoute({
-      mode: ctx.selectedMode,
-      pinA: ctx.pinA,
-      pinB: ctx.pinB,
-    });
+  const saveBtn = document.getElementById('btn-save-transport');
+  ctx.isSaving = true;
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = '套用中…';
   }
 
-  pinA.transportToNext = {
+  let res = ctx.landResult;
+  try {
+    if (!res || res.status === 'pending') {
+      res = await computeSegmentRoute({
+        mode: ctx.selectedMode,
+        pinA: ctx.pinA,
+        pinB: ctx.pinB,
+      });
+    }
+  } finally {
+    ctx.isSaving = false;
+    if (saveBtn && editingTransportContext === ctx) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = '套用設定';
+    }
+  }
+
+  // 等待路線期間若視窗已關閉或切換至其他路段，放棄寫入避免錯寫
+  if (!editingTransportContext || editingTransportContext !== ctx) return;
+  const latestDay = getState().days.find((d) => d.id === ctx.dayId);
+  const latestPinA = latestDay?.pins.find((p) => p.id === ctx.pinAId);
+  if (!latestPinA) return;
+
+  latestPinA.transportToNext = {
     mode: ctx.selectedMode,
     status: res.status,
     provider: res.provider || 'osrm',
@@ -919,7 +970,7 @@ export function bindTransportModalEvents({ onStateChanged }) {
     if (e.target === modalEl) closeTransportModal();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && editingTransportContext) closeTransportModal();
+    if (e.key === 'Escape' && editingTransportContext && !isCustomDialogOpen()) closeTransportModal();
   });
 
   document.getElementById('btn-close-transport').addEventListener('click', closeTransportModal);
@@ -975,8 +1026,11 @@ export function bindTransportModalEvents({ onStateChanged }) {
     if (!editingTransportContext) return;
     const state = getState();
     const day = state.days.find((d) => d.id === editingTransportContext.dayId);
-    if (day?.pins[editingTransportContext.pinIndex]) {
-      day.pins[editingTransportContext.pinIndex].transportToNext = null;
+    const targetPin =
+      day?.pins.find((p) => p.id === editingTransportContext.pinAId) ||
+      day?.pins[editingTransportContext.pinIndex];
+    if (targetPin) {
+      targetPin.transportToNext = null;
       saveState((msg) => showToast(msg, 'error'));
       closeTransportModal();
       if (typeof onChangeCallback === 'function') onChangeCallback();

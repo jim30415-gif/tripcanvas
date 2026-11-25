@@ -354,7 +354,8 @@ test('handleComputeRoutes 參數規範驗證（walk 不帶 routingPreference、s
     );
     assert.equal(refErr.statusCode, 502);
     assert.equal(refErr.body.error, 'GOOGLE_API_REFERER_BLOCKED');
-    assert.ok(refErr.body.message.includes('網域限制'));
+    assert.ok(refErr.body.message.includes('授權設定受限'));
+    assert.ok(!refErr.body.message.includes('Google Cloud Console'));
   } finally {
     globalThis.fetch = originalFetch;
   }

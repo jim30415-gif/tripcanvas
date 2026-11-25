@@ -50,6 +50,9 @@
       padding-left: 20px;
       margin: 6px 0 12px;
     }
+    a {
+      color: #6B4F37;
+    }
     code {
       background: #EFE4D4;
       color: #6B4F37;
@@ -98,18 +101,30 @@
         <li>本服務遵守 Google API 服務使用者資料政策（Google API Services User Data Policy），包含限制使用規範（Limited Use requirements），絕不將您的資料販售、轉交第三方或用於廣告與 AI 模型訓練。</li>
       </ul>
 
-      <h2>3. 資料刪除與權限撤銷</h2>
+      <h2>3. 第三方地圖、路線與匯率服務揭露</h2>
+      <p>為提供互動式地圖、地標搜尋、真實道路／大眾運輸路徑與多幣別換算功能，當您操作地圖搜尋、標點或規劃路線時，本服務僅會傳送該次操作所需的<strong>地點關鍵字、經緯度座標或出發時間</strong>至下列第三方服務（不會夾帶您的 Google 帳號資訊、行程筆記或支出資料）：</p>
+      <ul>
+        <li><strong>Google Maps Platform</strong>（Maps JavaScript API、Routes API、Places API、Geocoding API）：提供底圖渲染、地標搜尋、反向地理編碼與全球路徑規劃。</li>
+        <li><strong>NAVITIME（透過 RapidAPI）</strong>：於查詢日本境內大眾運輸分段路線與日圓票價時使用。</li>
+        <li><strong>OpenStreetMap 生態服務</strong>（Nominatim、Overpass API、Photon、FOSSGIS OSRM、CartoDB 瓦片）：作為開放地圖圖磚、地標辨識與陸路路線之備援資料來源。</li>
+        <li><strong>匯率服務</strong>（Frankfurter / ExchangeRate-API）：僅於背景查詢公開即時參考匯率，以新台幣即時換算外幣支出。</li>
+      </ul>
+
+      <h2>4. 資料刪除與權限撤銷</h2>
       <p>您完全擁有並掌控自己的旅遊行程資料：</p>
       <ul>
         <li>您可隨時於本服務左上角選單點選「登出」，立即清除本機登入 Cookie。</li>
         <li>您可隨時前往 <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer">Google 帳戶第三方存取權管理</a> 撤銷「漫步地圖 TripCanvas」的授權，並直接從您的 Google 雲端硬碟刪除「漫步地圖 TripCanvas」資料夾。</li>
       </ul>
 
+      <h2>5. 聯絡方式</h2>
+      <p>若您對本隱私權政策或資料安全有任何疑問，歡迎透過專案頁面回報或聯絡我們：<a href="https://github.com/jim30415-gif/tripcanvas/issues" target="_blank" rel="noopener noreferrer">GitHub Issues（TripCanvas）</a>。</p>
+
       <hr />
 
       <h2>Privacy Policy Summary (English)</h2>
       <p>
-        TripCanvas stores travel itineraries strictly in your browser storage and—when you opt in to Google Drive Sync—in a dedicated file created by TripCanvas inside your own Google Drive using the non-sensitive <code>drive.file</code> scope. TripCanvas does not maintain a central user database, cannot access any other files in your Google Drive, and never sells, shares, or uses your Google user data for advertising or AI training. You may disconnect at any time inside the app or revoke access via your Google Account security settings.
+        TripCanvas stores travel itineraries strictly in your browser storage and—when you opt in to Google Drive Sync—in a dedicated file created by TripCanvas inside your own Google Drive using the non-sensitive <code>drive.file</code> scope. TripCanvas does not maintain a central user database, cannot access any other files in your Google Drive, and never sells, shares, or uses your Google user data for advertising or AI training. Map rendering, place search, routing, and currency conversion rely on third-party providers (Google Maps Platform, RapidAPI NAVITIME for Japan transit, OpenStreetMap Nominatim/Overpass/Photon/FOSSGIS OSRM, and public exchange-rate APIs), receiving only the query or coordinates needed for each request without account identifiers. You may disconnect at any time inside the app or revoke access via your Google Account security settings.
       </p>
 
       <a class="back-btn" href="/">← 返回漫步地圖 TripCanvas</a>

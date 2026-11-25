@@ -3,13 +3,22 @@
  * 前後端（Node Proxy 與瀏覽器）共用此純函式模組。
  */
 
+const DECODE_CACHE_MAX = 200;
+const decodeCache = new Map();
+
 /**
- * 將 Google Encoded Polyline 字串解碼為 [[lat, lng], ...] 座標陣列
+ * 將 Google Encoded Polyline 字串解碼為 [[lat, lng], ...] 座標陣列（附有界 LRU 快取與畸形輸入防護）
  * @param {string} encoded
  * @returns {Array<[number, number]>}
  */
 export function decodePolyline(encoded) {
   if (!encoded || typeof encoded !== 'string') return [];
+  if (decodeCache.has(encoded)) {
+    const cached = decodeCache.get(encoded);
+    decodeCache.delete(encoded);
+    decodeCache.set(encoded, cached);
+    return cached.map((pt) => [pt[0], pt[1]]);
+  }
 
   const coords = [];
   let index = 0;
@@ -22,8 +31,9 @@ export function decodePolyline(encoded) {
     let result = 0;
     let byte;
     do {
-      if (index >= len) return coords;
+      if (index >= len || shift >= 32) return coords;
       byte = encoded.charCodeAt(index++) - 63;
+      if (byte < 0) return coords;
       result |= (byte & 0x1f) << shift;
       shift += 5;
     } while (byte >= 0x20);
@@ -33,18 +43,28 @@ export function decodePolyline(encoded) {
     shift = 0;
     result = 0;
     do {
-      if (index >= len) return coords;
+      if (index >= len || shift >= 32) return coords;
       byte = encoded.charCodeAt(index++) - 63;
+      if (byte < 0) return coords;
       result |= (byte & 0x1f) << shift;
       shift += 5;
     } while (byte >= 0x20);
     const dLng = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
     lng += dLng;
 
-    coords.push([lat / 1e5, lng / 1e5]);
+    const ptLat = lat / 1e5;
+    const ptLng = lng / 1e5;
+    if (Number.isFinite(ptLat) && Number.isFinite(ptLng) && Math.abs(ptLat) <= 90 && Math.abs(ptLng) <= 180) {
+      coords.push([ptLat, ptLng]);
+    }
   }
 
-  return coords;
+  if (decodeCache.size >= DECODE_CACHE_MAX) {
+    const oldest = decodeCache.keys().next().value;
+    if (oldest !== undefined) decodeCache.delete(oldest);
+  }
+  decodeCache.set(encoded, coords);
+  return coords.map((pt) => [pt[0], pt[1]]);
 }
 
 function encodeSignedNumber(num) {
@@ -76,8 +96,13 @@ export function encodePolyline(coords) {
   for (let i = 0; i < coords.length; i++) {
     const pt = coords[i];
     if (!Array.isArray(pt) || pt.length < 2) continue;
-    const lat = Math.round(pt[0] * 1e5);
-    const lng = Math.round(pt[1] * 1e5);
+    const rawLat = Number(pt[0]);
+    const rawLng = Number(pt[1]);
+    if (!Number.isFinite(rawLat) || !Number.isFinite(rawLng) || Math.abs(rawLat) > 90 || Math.abs(rawLng) > 180) {
+      continue;
+    }
+    const lat = Math.round(rawLat * 1e5);
+    const lng = Math.round(rawLng * 1e5);
     result += encodeSignedNumber(lat - prevLat);
     result += encodeSignedNumber(lng - prevLng);
     prevLat = lat;
@@ -112,7 +137,7 @@ export function stitchEncodedPolylines(encodedList) {
 }
 
 /**
- * 依據累計距離取得折線的真實幾何中點，讓路徑資訊膠囊貼準路線中央
+ * 依據累計距離取得折線的真實幾何中點（經度依 cos(midLat) 校正），讓路徑資訊膠囊貼準路線中央
  * @param {Array<[number, number]>} coords
  * @returns {[number, number] | null}
  */
@@ -124,7 +149,8 @@ export function getPolylineMidpoint(coords) {
   let total = 0;
   for (let i = 1; i < coords.length; i++) {
     const dLat = coords[i][0] - coords[i - 1][0];
-    const dLng = coords[i][1] - coords[i - 1][1];
+    const midLatRad = (((coords[i][0] + coords[i - 1][0]) / 2) * Math.PI) / 180;
+    const dLng = (coords[i][1] - coords[i - 1][1]) * Math.cos(midLatRad);
     total += Math.hypot(dLat, dLng);
     cumDist.push(total);
   }

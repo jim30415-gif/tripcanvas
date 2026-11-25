@@ -1,11 +1,104 @@
 import { escapeHTML } from '../utils/format.js';
+import { getGoogleRoutesStatus } from '../services/googleRoutes.js';
 
 let sdkPromise = null;
 let authFailed = false;
 let authFailureCallback = null;
+let gmAuthFailureHooked = false;
+let originalGmAuthFailure = null;
+let activeAuthFailureReject = null;
+
+const projectionClassCache = new WeakMap();
+const htmlOverlayClassCache = new WeakMap();
+
+function getProjectionOverlayClass(gmaps) {
+  let Cls = projectionClassCache.get(gmaps);
+  if (!Cls) {
+    Cls = class ProjectionOverlay extends gmaps.OverlayView {
+      onAdd() {}
+      draw() {}
+      onRemove() {}
+    };
+    projectionClassCache.set(gmaps, Cls);
+  }
+  return Cls;
+}
+
+function getHtmlOverlayClass(gmaps) {
+  let Cls = htmlOverlayClassCache.get(gmaps);
+  if (!Cls) {
+    Cls = class HtmlOverlay extends gmaps.OverlayView {
+      constructor(initLat, initLng, el, pane, onRemoveCb = null) {
+        super();
+        this._lat = initLat;
+        this._lng = initLng;
+        this._el = el;
+        this._pane = pane || 'overlayMouseTarget';
+        this._onRemoveCb = typeof onRemoveCb === 'function' ? onRemoveCb : null;
+      }
+
+      onAdd() {
+        const panes = this.getPanes();
+        const targetPane = panes?.[this._pane] || panes?.overlayMouseTarget;
+        if (targetPane && !this._el.parentNode) {
+          targetPane.appendChild(this._el);
+        }
+      }
+
+      draw() {
+        const proj = this.getProjection();
+        if (!proj) return;
+        const pt = proj.fromLatLngToDivPixel(new gmaps.LatLng(this._lat, this._lng));
+        if (!pt) return;
+        this._el.style.left = `${pt.x}px`;
+        this._el.style.top = `${pt.y}px`;
+      }
+
+      onRemove() {
+        if (typeof this._onRemoveCb === 'function') {
+          const cb = this._onRemoveCb;
+          this._onRemoveCb = null;
+          try {
+            cb();
+          } catch {
+            // ignore cleanup errors
+          }
+        }
+        if (this._el.parentNode) {
+          this._el.parentNode.removeChild(this._el);
+        }
+      }
+
+      setOnRemove(cb) {
+        this._onRemoveCb = typeof cb === 'function' ? cb : null;
+      }
+
+      setPosition(nextLat, nextLng) {
+        this._lat = nextLat;
+        this._lng = nextLng;
+        this.draw();
+      }
+
+      getLatLng() {
+        return { lat: this._lat, lng: this._lng };
+      }
+
+      setZIndex(nextZ) {
+        this._el.style.zIndex = String(nextZ);
+      }
+
+      getElement() {
+        return this._el;
+      }
+    };
+    htmlOverlayClassCache.set(gmaps, Cls);
+  }
+  return Cls;
+}
 
 /**
  * 檢查是否設定了瀏覽器專用 Google Maps JS API 金鑰（不接觸伺服器專屬 GOOGLE_MAPS_API_KEY）
+ * 與 googleRoutes.js 共用同一份 /api/routes 狀態快取，避免啟動時重複打兩次 API。
  */
 export async function resolveGoogleMapsJsKey() {
   try {
@@ -16,13 +109,8 @@ export async function resolveGoogleMapsJsKey() {
   }
 
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 1600);
-    const res = await fetch('/api/routes', { signal: ctrl.signal });
-    clearTimeout(timer);
-    if (!res.ok) return '';
-    const data = await res.json();
-    return typeof data?.mapsJsKey === 'string' ? data.mapsJsKey.trim() : '';
+    const status = await getGoogleRoutesStatus();
+    return typeof status?.mapsJsKey === 'string' ? status.mapsJsKey.trim() : '';
   } catch {
     return '';
   }
@@ -30,7 +118,8 @@ export async function resolveGoogleMapsJsKey() {
 
 /**
  * 動態載入官方 Google Maps JavaScript SDK（language=zh-TW, region=TW）
- * 若金鑰無效、網域被擋或離線逾時則 reject，由 mapInit 自動無縫降級回 Leaflet
+ * Places 函式庫改為按需 importLibrary('places') 載入，不於啟動時預載。
+ * 若金鑰無效、網域被擋或離線逾時則 reject，由 mapInit 自動無縫降級回 Leaflet。
  */
 export function loadGoogleMapsSdk(apiKey, onAuthError = null) {
   if (typeof onAuthError === 'function') {
@@ -51,25 +140,60 @@ export function loadGoogleMapsSdk(apiKey, onAuthError = null) {
 
   if (sdkPromise) return sdkPromise;
 
-  sdkPromise = new Promise((resolve, reject) => {
-    const prevAuthFailure = window.gm_authFailure;
+  if (!gmAuthFailureHooked) {
+    gmAuthFailureHooked = true;
+    originalGmAuthFailure = typeof window.gm_authFailure === 'function' ? window.gm_authFailure : null;
     window.gm_authFailure = () => {
       authFailed = true;
-      if (typeof prevAuthFailure === 'function') {
+      sdkPromise = null;
+      if (typeof originalGmAuthFailure === 'function') {
         try {
-          prevAuthFailure();
+          originalGmAuthFailure();
         } catch {
           // ignore
         }
       }
+      if (typeof activeAuthFailureReject === 'function') {
+        const rejectPending = activeAuthFailureReject;
+        activeAuthFailureReject = null;
+        rejectPending(new Error('GOOGLE_MAPS_AUTH_FAILURE'));
+      }
       if (typeof authFailureCallback === 'function') {
         authFailureCallback();
       }
-      reject(new Error('GOOGLE_MAPS_AUTH_FAILURE'));
     };
+  }
 
+  sdkPromise = new Promise((resolve, reject) => {
     const callbackName = '__tripcanvasGoogleMapsReady';
     let settled = false;
+    let scriptEl = null;
+
+    const cleanupLoader = (removeScript) => {
+      clearTimeout(timeoutId);
+      try {
+        delete window[callbackName];
+      } catch {
+        window[callbackName] = undefined;
+      }
+      if (removeScript && scriptEl && scriptEl.parentNode) {
+        scriptEl.parentNode.removeChild(scriptEl);
+      }
+    };
+
+    const fail = (err, removeScript = true) => {
+      if (settled) return;
+      settled = true;
+      activeAuthFailureReject = null;
+      cleanupLoader(removeScript);
+      sdkPromise = null;
+      reject(err);
+    };
+
+    activeAuthFailureReject = (err) => {
+      fail(err, true);
+    };
+
     const finishOk = async () => {
       if (settled) return;
       try {
@@ -77,47 +201,36 @@ export function loadGoogleMapsSdk(apiKey, onAuthError = null) {
           await window.google.maps.importLibrary('maps');
         }
         if (window.google?.maps?.Map && window.google?.maps?.OverlayView) {
+          if (settled) return;
           settled = true;
-          clearTimeout(timeoutId);
+          activeAuthFailureReject = null;
+          cleanupLoader(false);
           resolve(window.google.maps);
         }
       } catch (err) {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timeoutId);
-          reject(err);
-        }
+        fail(err, true);
       }
     };
 
     const timeoutId = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        sdkPromise = null;
-        reject(new Error('GOOGLE_MAPS_SDK_TIMEOUT'));
-      }
+      fail(new Error('GOOGLE_MAPS_SDK_TIMEOUT'), true);
     }, 6500);
 
     window[callbackName] = () => {
       void finishOk();
     };
 
-    const script = document.createElement('script');
-    script.async = true;
-    script.defer = true;
-    script.src =
+    scriptEl = document.createElement('script');
+    scriptEl.async = true;
+    scriptEl.defer = true;
+    scriptEl.src =
       `https://maps.googleapis.com/maps/api/js` +
       `?key=${encodeURIComponent(apiKey)}` +
-      `&language=zh-TW&region=TW&libraries=places&v=weekly&callback=${callbackName}`;
-    script.onerror = () => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timeoutId);
-        sdkPromise = null;
-        reject(new Error('GOOGLE_MAPS_SDK_LOAD_ERROR'));
-      }
+      `&language=zh-TW&region=TW&v=weekly&callback=${callbackName}`;
+    scriptEl.onerror = () => {
+      fail(new Error('GOOGLE_MAPS_SDK_LOAD_ERROR'), true);
     };
-    document.head.appendChild(script);
+    document.head.appendChild(scriptEl);
   });
 
   return sdkPromise;
@@ -129,11 +242,7 @@ export function loadGoogleMapsSdk(apiKey, onAuthError = null) {
  */
 export function createGoogleProjectionHelper(googleMap) {
   const gmaps = window.google.maps;
-  class ProjectionOverlay extends gmaps.OverlayView {
-    onAdd() {}
-    draw() {}
-    onRemove() {}
-  }
+  const ProjectionOverlay = getProjectionOverlayClass(gmaps);
   const helper = new ProjectionOverlay();
   helper.setMap(googleMap);
 
@@ -187,9 +296,10 @@ export function createGoogleProjectionHelper(googleMap) {
  */
 export function createGoogleHtmlOverlay(
   googleMap,
-  { lat, lng, html, className = '', zIndex = 100, pane = 'overlayMouseTarget' }
+  { lat, lng, html, className = '', zIndex = 100, pane = 'overlayMouseTarget', onRemove = null }
 ) {
   const gmaps = window.google.maps;
+  const HtmlOverlay = getHtmlOverlayClass(gmaps);
 
   const div = document.createElement('div');
   div.className = className;
@@ -199,57 +309,7 @@ export function createGoogleHtmlOverlay(
   div.style.zIndex = String(zIndex);
   div.innerHTML = html;
 
-  class HtmlOverlay extends gmaps.OverlayView {
-    constructor(initLat, initLng) {
-      super();
-      this._lat = initLat;
-      this._lng = initLng;
-      this._el = div;
-    }
-
-    onAdd() {
-      const panes = this.getPanes();
-      const targetPane = panes?.[pane] || panes?.overlayMouseTarget;
-      if (targetPane && !this._el.parentNode) {
-        targetPane.appendChild(this._el);
-      }
-    }
-
-    draw() {
-      const proj = this.getProjection();
-      if (!proj) return;
-      const pt = proj.fromLatLngToDivPixel(new gmaps.LatLng(this._lat, this._lng));
-      if (!pt) return;
-      this._el.style.left = `${pt.x}px`;
-      this._el.style.top = `${pt.y}px`;
-    }
-
-    onRemove() {
-      if (this._el.parentNode) {
-        this._el.parentNode.removeChild(this._el);
-      }
-    }
-
-    setPosition(nextLat, nextLng) {
-      this._lat = nextLat;
-      this._lng = nextLng;
-      this.draw();
-    }
-
-    getLatLng() {
-      return { lat: this._lat, lng: this._lng };
-    }
-
-    setZIndex(nextZ) {
-      this._el.style.zIndex = String(nextZ);
-    }
-
-    getElement() {
-      return this._el;
-    }
-  }
-
-  const overlay = new HtmlOverlay(lat, lng);
+  const overlay = new HtmlOverlay(lat, lng, div, pane, onRemove);
   overlay.setMap(googleMap);
   return overlay;
 }
@@ -267,8 +327,14 @@ export function createGoogleOverlayGroup(googleMap) {
       return item;
     },
     clearLayers() {
+      const clearListeners = window.google?.maps?.event?.clearInstanceListeners;
       while (items.length > 0) {
         const item = items.pop();
+        try {
+          if (typeof clearListeners === 'function') clearListeners(item);
+        } catch {
+          // ignore
+        }
         try {
           if (typeof item.setMap === 'function') item.setMap(null);
           else if (typeof item.close === 'function') item.close();
@@ -348,6 +414,7 @@ export function mountBasemapPoiCard(
   });
 
   const el = overlay.getElement();
+  window.google?.maps?.OverlayView?.preventMapHitsFrom?.(el);
   // 防止卡片上的點擊與滾動冒泡至 Google Map 底層
   ['click', 'mousedown', 'mouseup', 'pointerdown', 'pointerup', 'touchstart', 'touchend', 'dblclick'].forEach(
     (evtName) => {

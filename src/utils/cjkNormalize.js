@@ -19,10 +19,11 @@ const ZH_TO_JP_PHRASES = [
   ['心齋橋', '心斎橋'],
   ['淺草寺', '浅草寺'],
   ['表參道', '表参道'],
-  ['台場', 'お台場'],
-  ['臺場', 'お台場'],
+  ['拉面', 'ラーメン'],
+  ['乌冬面', 'うどん'],
   ['車站', '駅'],
   ['機場', '空港'],
+  ['地下鐵', '地下鉄'],
   ['地鐵', '地下鉄'],
   ['鐵道', '鉄道'],
   ['拉麵', 'ラーメン'],
@@ -155,7 +156,6 @@ const TRAD_TO_JP_SHINJITAI = {
   隱: '隠',
   雜: '雑',
   靜: '静',
-  響: '響',
   顯: '顕',
   餘: '余',
   驛: '駅',
@@ -177,24 +177,10 @@ const TRAD_TO_JP_SHINJITAI = {
   麥: '麦',
   齒: '歯',
   溫: '温',
-  島: '島',
   嶋: '島',
-  館: '館',
-  橋: '橋',
-  場: '場',
-  東: '東',
-  車: '車',
-  門: '門',
-  園: '園',
-  華: '華',
-  馬: '馬',
-  鳥: '鳥',
-  魚: '魚',
-  鳳: '鳳',
-  鳴: '鳴',
 };
 
-// 簡體中文／日本新字體 → 統一繁體中文（用於反向轉換與跨語系相似度比對）
+// 簡體中文／日本新字體 → 統一繁體中文（去重無重複鍵，避免「面」誤轉「麵」破壞對面／西面／海面等地名）
 const VARIANT_TO_TRAD = {
   // 日本新字體 → 繁中
   沢: '澤',
@@ -366,23 +352,15 @@ const VARIANT_TO_TRAD = {
   斋: '齋',
   丰: '豐',
   满: '滿',
-  湾: '灣',
   县: '縣',
-  区: '區',
   驿: '站',
   轻: '輕',
-  岛: '島',
   风: '風',
-  景: '景',
   观: '觀',
   艺: '藝',
   术: '術',
-  博: '博',
-  物: '物',
   书: '書',
-  店: '店',
   饭: '飯',
-  面: '麵',
   鱼: '魚',
   鸟: '鳥',
   马: '馬',
@@ -391,26 +369,16 @@ const VARIANT_TO_TRAD = {
   云: '雲',
   电: '電',
   线: '線',
-  号: '號',
-  条: '條',
   边: '邊',
-  旧: '舊',
-  当: '當',
-  会: '會',
-  点: '點',
   总: '總',
   发: '發',
   经: '經',
   药: '藥',
   盐: '鹽',
-  宝: '寶',
-  寿: '壽',
   气: '氣',
   实: '實',
-  体: '體',
   图: '圖',
   厅: '廳',
-  学: '學',
   关: '關',
 };
 
@@ -430,6 +398,8 @@ export function toJapaneseShinjitai(raw = '') {
   if (!trimmed) return '';
   // 先統一簡體 → 繁體，再轉日文詞彙與新字體（確保「金泽」也能通「金沢」）
   let text = mapChars(trimmed, VARIANT_TO_TRAD);
+  // 避免已帶「お」的「お台場」重複變成「おお台場」
+  text = text.replace(/(?<!お)[台臺]場/g, 'お台場');
   for (const [zh, jp] of ZH_TO_JP_PHRASES) {
     if (text.includes(zh)) {
       text = text.split(zh).join(jp);
@@ -444,7 +414,13 @@ export function toJapaneseShinjitai(raw = '') {
 export function toTraditionalChinese(raw = '') {
   const trimmed = String(raw || '').trim();
   if (!trimmed) return '';
-  let text = trimmed.replace(/国際空港/g, '國際機場').replace(/空港/g, '機場').replace(/地下鉄/g, '地鐵').replace(/駅/g, '車站');
+  const text = trimmed
+    .replace(/国際空港/g, '國際機場')
+    .replace(/空港/g, '機場')
+    .replace(/地下鉄/g, '地鐵')
+    .replace(/拉面/g, '拉麵')
+    .replace(/乌冬面/g, '烏龍麵')
+    .replace(/駅/g, '車站');
   return mapChars(text, VARIANT_TO_TRAD);
 }
 
@@ -462,6 +438,7 @@ export function canonicalizePlaceName(raw = '') {
     .replace(/車站/g, '站')
     .replace(/车站/g, '站')
     .replace(/駅/g, '站')
+    .replace(/地下鐵|地下鉄/g, '地鐵')
     .replace(/國際機場/g, '機場')
     .replace(/国際空港/g, '機場')
     .replace(/空港/g, '機場');

@@ -6,6 +6,7 @@
 
 const FX_API_URL = 'https://open.er-api.com/v6/latest/TWD';
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+const FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
 
 /* 參考匯率表：1 單位外幣約等於多少新台幣 (TWD)，作為離線或逾時保底 */
 export const FALLBACK_TWD_PER_UNIT = {
@@ -39,11 +40,16 @@ export const FALLBACK_TWD_PER_UNIT = {
 
 let cachedRatesFromTwd = null;
 let cacheExpiresAt = 0;
+let cacheUpdatedAtIso = null;
+let failureCooldownUntil = 0;
 let inFlightFxPromise = null;
 
 async function fetchLiveRatesFromTwd() {
   const now = Date.now();
   if (cachedRatesFromTwd && now < cacheExpiresAt) {
+    return cachedRatesFromTwd;
+  }
+  if (now < failureCooldownUntil) {
     return cachedRatesFromTwd;
   }
   if (inFlightFxPromise) return inFlightFxPromise;
@@ -53,16 +59,23 @@ async function fetchLiveRatesFromTwd() {
     const timer = setTimeout(() => controller.abort(), 3500);
     try {
       const res = await fetch(FX_API_URL, { signal: controller.signal });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        failureCooldownUntil = Date.now() + FAILURE_COOLDOWN_MS;
+        return cachedRatesFromTwd;
+      }
       const data = await res.json();
       if (data?.result === 'success' && data?.rates && typeof data.rates === 'object') {
         cachedRatesFromTwd = data.rates;
         cacheExpiresAt = Date.now() + CACHE_TTL_MS;
+        cacheUpdatedAtIso = new Date().toISOString();
+        failureCooldownUntil = 0;
         return cachedRatesFromTwd;
       }
-      return null;
+      failureCooldownUntil = Date.now() + FAILURE_COOLDOWN_MS;
+      return cachedRatesFromTwd;
     } catch {
-      return null;
+      failureCooldownUntil = Date.now() + FAILURE_COOLDOWN_MS;
+      return cachedRatesFromTwd;
     } finally {
       clearTimeout(timer);
       inFlightFxPromise = null;
@@ -158,7 +171,7 @@ export async function getTwdRatesSummary() {
     base: 'TWD',
     source,
     twdPerUnit,
-    updatedAt: new Date().toISOString(),
+    updatedAt: source === 'live' && cacheUpdatedAtIso ? cacheUpdatedAtIso : new Date().toISOString(),
   };
 }
 

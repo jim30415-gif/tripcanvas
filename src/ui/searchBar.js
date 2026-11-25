@@ -3,11 +3,11 @@ import { getActiveDay } from '../state/selectors.js';
 import { searchPlaces } from '../services/geocoder.js';
 import { escapeHTML, refreshIcons } from '../utils/format.js';
 import { getCountryDisplayMeta, inferTripCountryProfile } from '../utils/geo.js';
-import { flyToPoint, showSearchHighlightMarker } from '../map/mapInit.js';
+import { clearSearchHighlightMarker, flyToPoint, showSearchHighlightMarker } from '../map/mapInit.js';
 import { setMobileTab } from './mobileNav.js';
-import { showToast } from './dialog.js';
+import { isCustomDialogOpen, showToast } from './dialog.js';
 
-const TYPEAHEAD_DEBOUNCE_MS = 260;
+const TYPEAHEAD_DEBOUNCE_MS = 460;
 
 export function closeSearchResults() {
   document.getElementById('map-search-results')?.classList.add('hidden');
@@ -43,6 +43,8 @@ function renderResultRowHTML(item, idx, isSelected) {
   return `
     <div
       data-result-idx="${idx}"
+      role="option"
+      aria-selected="${isSelected ? 'true' : 'false'}"
       class="search-result-row px-3.5 py-2.5 border-b border-owl-cardBorder last:border-b-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2 transition cursor-pointer ${
         isSelected ? 'bg-owl-selectedBg' : 'hover:bg-owl-selectedBg/75'
       }"
@@ -83,8 +85,9 @@ export function bindSearchBarEvents({ onAddPinAtCoordinate }) {
   let requestSeq = 0;
   let isComposing = false;
   let currentList = [];
+  let visualOrderIndices = [];
   let currentMeta = { convertedHint: '', tripCountries: [], query: '' };
-  let highlightedIdx = -1;
+  let highlightedPos = -1;
 
   const cancelPending = () => {
     if (debounceTimer) {
@@ -125,8 +128,24 @@ export function bindSearchBarEvents({ onAddPinAtCoordinate }) {
     setTimeout(() => flyToPoint(lat, lng, 15), 80);
   };
 
+  const updateHighlightInPlace = () => {
+    const activeDataIdx = highlightedPos >= 0 ? visualOrderIndices[highlightedPos] : -1;
+    resultsEl.querySelectorAll('.search-result-row').forEach((row) => {
+      const idx = Number(row.dataset.resultIdx);
+      const isSelected = idx === activeDataIdx;
+      row.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+      row.classList.toggle('bg-owl-selectedBg', isSelected);
+      row.classList.toggle('hover:bg-owl-selectedBg/75', !isSelected);
+      if (isSelected) {
+        row.scrollIntoView({ block: 'nearest' });
+      }
+    });
+  };
+
   const renderDropdown = () => {
     if (!currentList.length) {
+      visualOrderIndices = [];
+      highlightedPos = -1;
       const hintLine = currentMeta.convertedHint
         ? `（已同步通配「${escapeHTML(currentMeta.convertedHint)}」）`
         : '';
@@ -170,29 +189,32 @@ export function bindSearchBarEvents({ onAddPinAtCoordinate }) {
       .filter(({ item }) => !item.inTripCountry);
 
     const hasBothGroups = inCountryItems.length > 0 && otherCountryItems.length > 0;
+    const activeDataIdx = highlightedPos >= 0 ? visualOrderIndices[highlightedPos] : -1;
     let bodyHtml = '';
 
     if (hasBothGroups) {
+      visualOrderIndices = [...inCountryItems.map((x) => x.idx), ...otherCountryItems.map((x) => x.idx)];
       const tripLabel = primaryMeta?.nameZh ? `${primaryMeta.flag} 本計畫區域（${primaryMeta.nameZh}）` : '本計畫區域相符景點';
       bodyHtml += `
         <div class="px-3.5 py-1.5 bg-[#F4EFE6] border-b border-owl-border/60 text-xs font-extrabold text-owl-primaryDeep flex items-center justify-between">
           <span>${escapeHTML(tripLabel)}</span>
           <span class="text-[11px] font-semibold text-owl-muted">${inCountryItems.length} 筆</span>
         </div>
-        ${inCountryItems.map(({ item, idx }) => renderResultRowHTML(item, idx, idx === highlightedIdx)).join('')}
+        ${inCountryItems.map(({ item, idx }) => renderResultRowHTML(item, idx, idx === activeDataIdx)).join('')}
         <div class="px-3.5 py-1.5 bg-owl-canvas/85 border-y border-owl-border/60 text-xs font-bold text-owl-subtext flex items-center justify-between">
           <span>🌐 其他國家同名或相近地點</span>
           <span class="text-[11px] font-semibold text-owl-muted">${otherCountryItems.length} 筆</span>
         </div>
-        ${otherCountryItems.map(({ item, idx }) => renderResultRowHTML(item, idx, idx === highlightedIdx)).join('')}
+        ${otherCountryItems.map(({ item, idx }) => renderResultRowHTML(item, idx, idx === activeDataIdx)).join('')}
       `;
     } else {
-      bodyHtml = currentList.map((item, idx) => renderResultRowHTML(item, idx, idx === highlightedIdx)).join('');
+      visualOrderIndices = currentList.map((_, idx) => idx);
+      bodyHtml = currentList.map((item, idx) => renderResultRowHTML(item, idx, idx === activeDataIdx)).join('');
     }
 
     resultsEl.innerHTML = headerBar + bodyHtml;
     resultsEl.classList.remove('hidden');
-    refreshIcons();
+    refreshIcons(resultsEl);
 
     document.getElementById('btn-close-search-dropdown')?.addEventListener('click', closeSearchResults);
 
@@ -216,6 +238,7 @@ export function bindSearchBarEvents({ onAddPinAtCoordinate }) {
     if (!q) {
       cancelPending();
       currentList = [];
+      visualOrderIndices = [];
       closeSearchResults();
       return;
     }
@@ -227,10 +250,10 @@ export function bindSearchBarEvents({ onAddPinAtCoordinate }) {
 
     const tripProfile = inferTripCountryProfile(getState());
 
-    // 若清單目前未展開（或手動按搜尋），顯示輕量載入狀態；打字更新時若已有舊結果則在頂端加載不閃爍
+    // 若清單目前未展開（或手動按搜尋），顯示輕量載入狀態；打字更新時若已有舊結果則在背景刷新不閃爍
     if (!isLive || resultsEl.classList.contains('hidden')) {
       resultsEl.innerHTML = `
-        <div class="p-4 text-sm font-semibold text-owl-subtext flex items-center justify-center gap-2">
+        <div class="search-loading-state p-4 text-sm font-semibold text-owl-subtext flex items-center justify-center gap-2">
           <span class="w-4 h-4 rounded-full border-2 border-owl-primary border-t-transparent animate-spin"></span>
           <span>搜尋「${escapeHTML(q)}」中...</span>
         </div>
@@ -243,16 +266,17 @@ export function bindSearchBarEvents({ onAddPinAtCoordinate }) {
         tripCountries: tripProfile.countryCodes,
         focusCenter: tripProfile.focusCenter,
         signal: ctrl.signal,
+        isLive,
       });
 
       if (seq !== requestSeq) return;
       currentList = results;
       currentMeta = { convertedHint, tripCountries, query: q };
-      highlightedIdx = -1;
+      highlightedPos = -1;
       renderDropdown();
     } catch (err) {
       if (err?.name === 'AbortError' || seq !== requestSeq) return;
-      if (!isLive) {
+      if (!isLive || resultsEl.querySelector('.search-loading-state')) {
         resultsEl.innerHTML = `<div class="p-4 text-sm text-[#A65D57] text-center">搜尋服務暫時無法連線，您可直接右鍵或長按地圖任意位置新增標點</div>`;
         resultsEl.classList.remove('hidden');
       }
@@ -273,6 +297,7 @@ export function bindSearchBarEvents({ onAddPinAtCoordinate }) {
       }
       if (q.length === 0) {
         currentList = [];
+        visualOrderIndices = [];
         closeSearchResults();
       }
       return;
@@ -310,20 +335,21 @@ export function bindSearchBarEvents({ onAddPinAtCoordinate }) {
 
   searchInput.addEventListener('keydown', (e) => {
     if (isComposing) return;
-    const isOpen = !resultsEl.classList.contains('hidden') && currentList.length > 0;
+    const isOpen = !resultsEl.classList.contains('hidden') && visualOrderIndices.length > 0;
     if (e.key === 'ArrowDown' && isOpen) {
       e.preventDefault();
-      highlightedIdx = (highlightedIdx + 1) % currentList.length;
-      renderDropdown();
-      resultsEl.querySelector(`[data-result-idx="${highlightedIdx}"]`)?.scrollIntoView({ block: 'nearest' });
+      highlightedPos = (highlightedPos + 1) % visualOrderIndices.length;
+      updateHighlightInPlace();
     } else if (e.key === 'ArrowUp' && isOpen) {
       e.preventDefault();
-      highlightedIdx = highlightedIdx <= 0 ? currentList.length - 1 : highlightedIdx - 1;
-      renderDropdown();
-      resultsEl.querySelector(`[data-result-idx="${highlightedIdx}"]`)?.scrollIntoView({ block: 'nearest' });
-    } else if (e.key === 'Enter' && isOpen && highlightedIdx >= 0 && currentList[highlightedIdx]) {
-      e.preventDefault();
-      locateItem(currentList[highlightedIdx]);
+      highlightedPos = highlightedPos <= 0 ? visualOrderIndices.length - 1 : highlightedPos - 1;
+      updateHighlightInPlace();
+    } else if (e.key === 'Enter' && isOpen && highlightedPos >= 0) {
+      const targetIdx = visualOrderIndices[highlightedPos];
+      if (currentList[targetIdx]) {
+        e.preventDefault();
+        locateItem(currentList[targetIdx]);
+      }
     }
   });
 
@@ -331,8 +357,10 @@ export function bindSearchBarEvents({ onAddPinAtCoordinate }) {
     cancelPending();
     searchInput.value = '';
     currentList = [];
+    visualOrderIndices = [];
     currentMeta = { convertedHint: '', tripCountries: [], query: '' };
-    highlightedIdx = -1;
+    highlightedPos = -1;
+    clearSearchHighlightMarker();
     syncSearchClearButton();
     closeSearchResults();
     searchInput.focus();
@@ -344,7 +372,7 @@ export function bindSearchBarEvents({ onAddPinAtCoordinate }) {
     }
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeSearchResults();
+    if (e.key === 'Escape' && !isCustomDialogOpen()) closeSearchResults();
   });
 
   form.addEventListener('submit', (e) => {

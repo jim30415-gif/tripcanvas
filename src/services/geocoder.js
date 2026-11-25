@@ -69,8 +69,11 @@ const CATEGORY_ZH_LABELS = {
 
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const SEARCH_CACHE_MAX = 60;
+const PLACE_DETAILS_CACHE_MAX = 80;
 const searchCache = new Map();
+const placeDetailsCache = new Map();
 let backendSearchAvailable = null; // null=未知, true=可用, false=未設定金鑰或未啟用 Places API
+let backendReverseAvailable = null;
 
 function getCachedSearch(key) {
   const entry = searchCache.get(key);
@@ -88,6 +91,23 @@ function setCachedSearch(key, value) {
     if (oldestKey !== undefined) searchCache.delete(oldestKey);
   }
   searchCache.set(key, { at: Date.now(), value });
+}
+
+function getCachedPlaceDetails(placeId) {
+  if (!placeDetailsCache.has(placeId)) return null;
+  const val = placeDetailsCache.get(placeId);
+  placeDetailsCache.delete(placeId);
+  placeDetailsCache.set(placeId, val);
+  return { ...val };
+}
+
+function setCachedPlaceDetails(placeId, value) {
+  if (!placeId || !value) return;
+  if (placeDetailsCache.size >= PLACE_DETAILS_CACHE_MAX) {
+    const oldestKey = placeDetailsCache.keys().next().value;
+    if (oldestKey !== undefined) placeDetailsCache.delete(oldestKey);
+  }
+  placeDetailsCache.set(placeId, { ...value });
 }
 
 function createTimedSignal(externalSignal, timeoutMs) {
@@ -322,12 +342,18 @@ export function rankAndDeduplicateSearchResults(
 
   prepared.sort((a, b) => b._score - a._score);
 
-  // 2. 依近距離（<= 100m）與標準化地名去重
+  // 2. 依近距離與標準化地名去重（避免 50m 內不同名稱的相鄰店家／咖啡廳被誤刪）
   const deduped = [];
   for (const item of prepared) {
     const existing = deduped.find((kept) => {
+      if (kept.placeId && item.placeId && kept.placeId === item.placeId) return true;
       const distKm = calcDistanceKm(kept.lat, kept.lon, item.lat, item.lon);
-      if (distKm <= 0.05) return true;
+      const sameName =
+        Boolean(kept._nameCanon && item._nameCanon) &&
+        (kept._nameCanon === item._nameCanon ||
+          kept._nameCanon.includes(item._nameCanon) ||
+          item._nameCanon.includes(kept._nameCanon));
+      if (distKm <= 0.05 && sameName) return true;
       if (distKm <= 0.14 && kept._nameCanon && item._nameCanon && kept._nameCanon === item._nameCanon) {
         return true;
       }
@@ -364,14 +390,14 @@ async function queryBackendGoogleSearch(query, { primaryCountry, focusCenter, si
   try {
     const qs = new URLSearchParams({ search: '1', q: query });
     if (primaryCountry) qs.set('country', primaryCountry);
-    if (focusCenter) {
+    if (focusCenter && Number.isFinite(focusCenter.lat) && Number.isFinite(focusCenter.lng)) {
       qs.set('lat', String(focusCenter.lat));
       qs.set('lng', String(focusCenter.lng));
     }
     const res = await fetch(`/api/routes?${qs.toString()}`, { signal: timed.signal });
     if (!res.ok) return [];
     const data = await res.json();
-    if (data?.status === 'unconfigured') {
+    if (data?.status === 'unconfigured' || data?.status === 'places_api_disabled') {
       backendSearchAvailable = false;
       return [];
     }
@@ -444,8 +470,13 @@ async function queryPhotonSearch(query, { focusCenter = null, limit = 6, signal 
 
 /**
  * 即時智慧地點搜尋：並行查詢多來源 ＋ 繁簡日漢字通配 ＋ 依本計畫國家優先排序
+ * - 即時輸入（isLive）優先使用 Google Places ＋ Photon，避免向 Nominatim 發動多併發請求觸發 429 封鎖；
+ *   僅於前兩者結果不足或使用者明確按下「搜尋／Enter」時，才補充最多 1–2 筆 Nominatim 查詢。
  */
-export async function searchPlaces(query, { tripCountries = [], focusCenter = null, signal = null } = {}) {
+export async function searchPlaces(
+  query,
+  { tripCountries = [], focusCenter = null, signal = null, isLive = false } = {}
+) {
   const cleanQuery = String(query || '').trim();
   const normalizedCountries = (Array.isArray(tripCountries) ? tripCountries : [])
     .map((c) => String(c || '').trim().toUpperCase())
@@ -456,56 +487,26 @@ export async function searchPlaces(query, { tripCountries = [], focusCenter = nu
   }
 
   const { primary, variants, convertedHint } = buildSearchQueryVariants(cleanQuery, normalizedCountries);
-  const cacheKey = `${cleanQuery.toLowerCase()}|${normalizedCountries.join(',')}`;
+  const focusKey =
+    focusCenter && Number.isFinite(focusCenter.lat) && Number.isFinite(focusCenter.lng)
+      ? `${Number(focusCenter.lat).toFixed(1)},${Number(focusCenter.lng).toFixed(1)}`
+      : '';
+  const cacheKey = `${cleanQuery.toLowerCase()}|${normalizedCountries.join(',')}|${focusKey}|${isLive ? 'L' : 'S'}`;
   const cached = getCachedSearch(cacheKey);
   if (cached) {
     return cached;
   }
 
   const primaryCountry = normalizedCountries[0] || '';
-  const tasks = [];
-
-  // 1. 後端 Google Places 搜尋（若已設定金鑰）
-  tasks.push(queryBackendGoogleSearch(cleanQuery, { primaryCountry, focusCenter, signal }));
-
-  // 2. 若本計畫已有標點國家，優先針對該國家（含日文新字體轉換變體）做精準檢索
-  if (normalizedCountries.length > 0) {
-    tasks.push(
-      queryNominatimSearch(primary, {
-        countryCodes: normalizedCountries,
-        limit: 6,
-        signal,
-      })
-    );
-    if (variants[1] && variants[1] !== primary) {
-      tasks.push(
-        queryNominatimSearch(variants[1], {
-          countryCodes: normalizedCountries,
-          limit: 5,
-          signal,
-        })
-      );
-    }
-    // 同時檢索全球其他國家同名地點（排序在後作為次要選項）
-    tasks.push(queryNominatimSearch(cleanQuery, { limit: 6, signal }));
-    if (convertedHint && convertedHint !== cleanQuery) {
-      tasks.push(queryNominatimSearch(convertedHint, { limit: 5, signal }));
-    }
-  } else {
-    // 尚未標點的空白計畫：對原字與跨語系轉換變體做全球搜尋
-    tasks.push(queryNominatimSearch(variants[0], { limit: 6, signal }));
-    if (variants[1]) {
-      tasks.push(queryNominatimSearch(variants[1], { limit: 6, signal }));
-    }
-  }
-
-  // 3. Photon 快速自動完成引擎（對即時輸入友善，不限速）
-  tasks.push(queryPhotonSearch(primary, { focusCenter, limit: 6, signal }));
+  const fastTasks = [
+    queryBackendGoogleSearch(cleanQuery, { primaryCountry, focusCenter, signal }),
+    queryPhotonSearch(primary, { focusCenter, limit: 6, signal }),
+  ];
   if (convertedHint && convertedHint !== primary) {
-    tasks.push(queryPhotonSearch(convertedHint, { focusCenter, limit: 5, signal }));
+    fastTasks.push(queryPhotonSearch(convertedHint, { focusCenter, limit: 5, signal }));
   }
 
-  const settled = await Promise.allSettled(tasks);
+  const fastSettled = await Promise.allSettled(fastTasks);
   if (signal?.aborted) {
     const abortErr = new Error('Search aborted');
     abortErr.name = 'AbortError';
@@ -513,17 +514,50 @@ export async function searchPlaces(query, { tripCountries = [], focusCenter = nu
   }
 
   const merged = [];
-  for (const res of settled) {
+  for (const res of fastSettled) {
     if (res.status === 'fulfilled' && Array.isArray(res.value)) {
       merged.push(...res.value);
     }
   }
 
-  // 若結果為日文新字體且與繁體使用者查詢不同，補充顯示繁體對照（例如 altName）
+  // Nominatim 限流嚴格：即時輸入只在 Google+Photon 幾乎沒結果時補查 1 筆；明確送出搜尋時最多補查 1–2 筆
+  if (!isLive || merged.length < 3) {
+    const nomTasks = [];
+    if (normalizedCountries.length > 0) {
+      nomTasks.push(
+        queryNominatimSearch(primary, {
+          countryCodes: normalizedCountries,
+          limit: 6,
+          signal,
+        })
+      );
+      if (!isLive) {
+        nomTasks.push(queryNominatimSearch(cleanQuery, { limit: 5, signal }));
+      }
+    } else {
+      nomTasks.push(queryNominatimSearch(variants[0], { limit: 6, signal }));
+      if (!isLive && variants[1]) {
+        nomTasks.push(queryNominatimSearch(variants[1], { limit: 5, signal }));
+      }
+    }
+    const nomSettled = await Promise.allSettled(nomTasks);
+    if (signal?.aborted) {
+      const abortErr = new Error('Search aborted');
+      abortErr.name = 'AbortError';
+      throw abortErr;
+    }
+    for (const res of nomSettled) {
+      if (res.status === 'fulfilled' && Array.isArray(res.value)) {
+        merged.push(...res.value);
+      }
+    }
+  }
+
+  // 若結果為日文新字體且與繁體寫法不同，補充顯示繁體對照（例如 altName：金沢駅 → 金澤車站）
   const enriched = merged.map((item) => {
     if (!item.altName && item.countryCode === 'JP') {
       const tradName = toTraditionalChinese(item.name);
-      if (tradName && tradName !== item.name && canonicalizePlaceName(tradName) !== canonicalizePlaceName(item.name)) {
+      if (tradName && tradName !== item.name) {
         return { ...item, altName: tradName };
       }
     }
@@ -606,19 +640,21 @@ export function pickPlaceNameFromNominatim(data) {
     (category === 'tourism' && JUNK_TOURISM_VALUES.has(typeVal)) ||
     (category === 'railway' && JUNK_RAILWAY_VALUES.has(typeVal));
 
-  // 1. 若 Nominatim 直接命中地標／建物／車站／商家，優先取 namedetails 內的繁中／日文名稱
-  const localizedFromDetails = pickLocalizedTagName(data.namedetails);
-  const rawName = (localizedFromDetails || data.name || '').trim();
-  if (rawName && !isJunkCategory && !GENERIC_PLACEHOLDER_NAMES.has(rawName)) {
-    const roadStr = (addr.road || '').trim();
-    if (!roadStr || rawName !== roadStr) {
-      return rawName;
+  // 1. 若 Nominatim 直接命中有效 POI 地標，優先取 namedetails 內的繁中／日文名稱
+  if (!isJunkCategory) {
+    const localizedFromDetails = pickLocalizedTagName(data.namedetails);
+    const rawName = (localizedFromDetails || data.name || '').trim();
+    if (rawName && !GENERIC_PLACEHOLDER_NAMES.has(rawName)) {
+      const roadStr = (addr.road || '').trim();
+      if (!roadStr || rawName !== roadStr) {
+        return rawName;
+      }
     }
-  }
 
-  for (const key of NOMINATIM_POI_KEYS) {
-    const val = (addr[key] || '').trim();
-    if (val && !GENERIC_PLACEHOLDER_NAMES.has(val)) return val;
+    for (const key of NOMINATIM_POI_KEYS) {
+      const val = (addr[key] || '').trim();
+      if (val && !GENERIC_PLACEHOLDER_NAMES.has(val)) return val;
+    }
   }
 
   // 2. 次順位：明確路名
@@ -726,16 +762,6 @@ function computeOsmReverseRadiusMeters(zoom) {
   if (z >= 17) return 80;
   if (z >= 16) return 110;
   return 140;
-}
-
-function computeClientSnapThresholdMeters(zoom) {
-  const z = Number(zoom);
-  if (!Number.isFinite(z)) return 55;
-  if (z >= 19) return 32;
-  if (z >= 18) return 45;
-  if (z >= 17) return 65;
-  if (z >= 16) return 95;
-  return 130;
 }
 
 function isJunkOsmElement(tags = {}, name = '') {
@@ -861,29 +887,34 @@ export function pickBestPoisFromPhoton(data, lat, lng, maxDistKm = 0.095) {
   return ranked.slice(0, 5);
 }
 
-async function queryBackendGoogleReverse(lat, lng, zoom) {
+async function queryBackendGoogleReverse(lat, lng, zoom, signal) {
+  if (backendReverseAvailable === false) return null;
+  const timed = createTimedSignal(signal, 4200);
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 4200);
     const qs = new URLSearchParams({
       reverse: '1',
       lat: String(lat),
       lng: String(lng),
     });
-    if (Number.isFinite(Number(zoom))) {
+    if (zoom != null && zoom !== '' && Number.isFinite(Number(zoom))) {
       qs.set('zoom', String(Math.round(Number(zoom))));
     }
-    const res = await fetch(`/api/routes?${qs.toString()}`, { signal: ctrl.signal });
-    clearTimeout(timer);
+    const res = await fetch(`/api/routes?${qs.toString()}`, { signal: timed.signal });
     if (!res.ok) return null;
     const data = await res.json();
+    if (data?.status === 'unconfigured' || data?.status === 'places_api_disabled') {
+      backendReverseAvailable = false;
+      return null;
+    }
     if (data?.status === 'ok' && data?.name) {
+      backendReverseAvailable = true;
       const result = {
         name: String(data.name).trim(),
         placeId: data.placeId || '',
         source: data.source || 'google',
         snapped: data.snapped === true,
         candidates: Array.isArray(data.candidates) ? data.candidates : [],
+        countryCode: typeof data.countryCode === 'string' ? data.countryCode : '',
       };
       if (Number.isFinite(Number(data.lat)) && Number.isFinite(Number(data.lng))) {
         result.lat = Number(data.lat);
@@ -897,28 +928,29 @@ async function queryBackendGoogleReverse(lat, lng, zoom) {
     return null;
   } catch {
     return null;
+  } finally {
+    timed.cleanup();
   }
 }
 
-async function queryPhotonReverse(lat, lng, radiusMeters) {
+async function queryPhotonReverse(lat, lng, radiusMeters, signal) {
+  const timed = createTimedSignal(signal, 3200);
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 3200);
     const radiusKm = Math.max(0.045, Math.min(0.14, radiusMeters / 1000));
     const url = `https://photon.komoot.io/reverse?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}&limit=18&radius=${radiusKm.toFixed(3)}`;
-    const res = await fetch(url, { signal: ctrl.signal });
-    clearTimeout(timer);
+    const res = await fetch(url, { signal: timed.signal });
     if (!res.ok) return [];
     const data = await res.json();
     return pickBestPoisFromPhoton(data, lat, lng, radiusKm + 0.025);
   } catch {
     return [];
+  } finally {
+    timed.cleanup();
   }
 }
 
-async function fetchOverpassPoisFromEndpoint(endpoint, lat, lng, radiusMeters) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 3000);
+async function fetchOverpassPoisFromEndpoint(endpoint, lat, lng, radiusMeters, signal) {
+  const timed = createTimedSignal(signal, 3000);
   try {
     const inCjkRegion = isCjkRegionCoord(lat, lng);
     const query = `[out:json][timeout:3];nwr(around:${radiusMeters},${lat},${lng})["name"][!"highway"][!"boundary"][!"place"];out center 18;`;
@@ -926,10 +958,9 @@ async function fetchOverpassPoisFromEndpoint(endpoint, lat, lng, radiusMeters) {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
       body: `data=${encodeURIComponent(query)}`,
-      signal: ctrl.signal,
+      signal: timed.signal,
     });
-    clearTimeout(timer);
-    if (!res.ok) return [];
+    if (!res.ok) return { ok: false, items: [] };
     const data = await res.json();
     const elements = Array.isArray(data?.elements) ? data.elements : [];
     const ranked = [];
@@ -960,65 +991,73 @@ async function fetchOverpassPoisFromEndpoint(endpoint, lat, lng, radiusMeters) {
       });
     }
     ranked.sort((a, b) => b.score - a.score);
-    return ranked.slice(0, 5);
+    return { ok: true, items: ranked.slice(0, 5) };
   } catch {
-    return [];
+    return { ok: false, items: [] };
   } finally {
-    clearTimeout(timer);
+    timed.cleanup();
   }
 }
 
-async function queryNearbyOsmPois(lat, lng, radiusMeters) {
+async function queryNearbyOsmPois(lat, lng, radiusMeters, signal) {
   const primary = await fetchOverpassPoisFromEndpoint(
     'https://overpass-api.de/api/interpreter',
     lat,
     lng,
-    radiusMeters
+    radiusMeters,
+    signal
   );
-  if (primary.length > 0) return primary;
-  // 主節點逾時或無結果時自動改查備援鏡像
-  return fetchOverpassPoisFromEndpoint(
+  // 主節點成功回傳 200（即使空結果）即直接回傳，不再浪費 +3 秒等備用鏡像
+  if (primary.ok) return primary.items;
+  if (signal?.aborted) return [];
+  const backup = await fetchOverpassPoisFromEndpoint(
     'https://overpass.kumi.systems/api/interpreter',
     lat,
     lng,
-    radiusMeters
+    radiusMeters,
+    signal
   );
+  return backup.items;
 }
 
-async function queryNominatimReverse(lat, lng) {
+async function queryNominatimReverse(lat, lng, signal) {
+  const timed = createTimedSignal(signal, 4500);
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 4500);
     const res = await fetch(
       `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&accept-language=zh-TW,zh-Hant,zh,ja&zoom=18&addressdetails=1&namedetails=1`,
-      { signal: ctrl.signal }
+      { signal: timed.signal }
     );
-    clearTimeout(timer);
-    if (!res.ok) return null;
+    if (!res.ok) return { name: null, countryCode: '' };
     const data = await res.json();
-    return pickPlaceNameFromNominatim(data);
+    const countryCode = String(data?.address?.country_code || '').trim().toUpperCase();
+    return { name: pickPlaceNameFromNominatim(data), countryCode };
   } catch {
-    return null;
+    return { name: null, countryCode: '' };
+  } finally {
+    timed.cleanup();
   }
 }
 
-export async function reverseGeocode(lat, lng, { zoom = 17 } = {}) {
-  // 1. 優先查詢後端 Google Maps 標點（依縮放動態半徑 40–150m 抓 POI 與精確吸附座標，其次路名）
-  const googleHit = await queryBackendGoogleReverse(lat, lng, zoom);
+export async function reverseGeocode(lat, lng, { zoom = 17, signal = null } = {}) {
+  // 1. 優先查詢後端 Google Maps 標點（依縮放動態半徑抓 POI 與精確吸附座標，其次路名）
+  const googleHit = await queryBackendGoogleReverse(lat, lng, zoom, signal);
+  if (signal?.aborted) return null;
   if (googleHit?.name && googleHit.source === 'google_poi') {
     return googleHit;
   }
 
-  // 2. 若未命中 Google POI，三軌並行比對：Photon Reverse（商場／地標）＋ Overpass（繁中／日文優先、排除微設施）＋ Nominatim zoom=18
+  // 2. 若未命中 Google POI，三軌並行比對：Photon Reverse ＋ Overpass ＋ Nominatim zoom=18
   const osmRadius = computeOsmReverseRadiusMeters(zoom);
-  const snapThreshold = computeClientSnapThresholdMeters(zoom);
-  const [photonPois, osmPois, nominatimName] = await Promise.all([
-    queryPhotonReverse(lat, lng, osmRadius),
-    queryNearbyOsmPois(lat, lng, osmRadius),
-    queryNominatimReverse(lat, lng),
+  const [photonPois, osmPois, nominatimRes] = await Promise.all([
+    queryPhotonReverse(lat, lng, osmRadius, signal),
+    queryNearbyOsmPois(lat, lng, osmRadius, signal),
+    queryNominatimReverse(lat, lng, signal),
   ]);
+  if (signal?.aborted) return null;
 
-  // 合併並依 POI 品質＋語系＋距離排序，同時保留座標供自動吸附與一鍵切換
+  const nominatimName = nominatimRes?.name || null;
+  const countryCode = googleHit?.countryCode || nominatimRes?.countryCode || '';
+
   const combinedPois = [...osmPois, ...photonPois];
   combinedPois.sort((a, b) => b.score - a.score);
   const dedupedPois = [];
@@ -1044,8 +1083,8 @@ export async function reverseGeocode(lat, lng, { zoom = 17 } = {}) {
       name: top.name,
       placeId: top.placeId,
       source: 'osm_poi',
-      // 免費開源圖資與 Google 底圖圖示位置可能不同步，故不自動亂吸座標（僅保留座標供詳情頁手動切換候選時使用）
       snapped: false,
+      countryCode,
       candidates: dedupedPois.length > 1 ? dedupedPois : [],
     };
     if (hasCoords) {
@@ -1056,33 +1095,34 @@ export async function reverseGeocode(lat, lng, { zoom = 17 } = {}) {
     return out;
   }
   if (googleHit?.name) {
-    return googleHit;
+    return { ...googleHit, countryCode: googleHit.countryCode || countryCode };
   }
   if (nominatimName) {
-    return { name: nominatimName, placeId: '', source: 'nominatim', snapped: false, candidates: [] };
+    return { name: nominatimName, placeId: '', source: 'nominatim', snapped: false, countryCode, candidates: [] };
   }
   return null;
 }
 
 /**
  * 透過 Google Maps 原生點擊底圖圖示取得的 placeId，精準取得該圖示對應的繁中名稱與座標
- * 優先走後端代理 /api/routes?place=1，若未啟用則自動嘗試瀏覽器端 Google Maps Places Library
+ * 優先讀取同工作階段 LRU 快取（避免重複點擊同一底圖圖示重複計費），未命中再走後端代理與瀏覽器備援。
  */
-export async function fetchPlaceDetailsById(placeId) {
+export async function fetchPlaceDetailsById(placeId, { signal = null } = {}) {
   const cleanId = String(placeId || '').trim();
   if (!cleanId) return null;
 
+  const cached = getCachedPlaceDetails(cleanId);
+  if (cached) return cached;
+
   // 1. 優先走同源伺服器代理（避免瀏覽器金鑰權限不足）
+  const timed = createTimedSignal(signal, 3800);
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 3800);
     const qs = new URLSearchParams({ place: '1', placeId: cleanId });
-    const res = await fetch(`/api/routes?${qs.toString()}`, { signal: ctrl.signal });
-    clearTimeout(timer);
+    const res = await fetch(`/api/routes?${qs.toString()}`, { signal: timed.signal });
     if (res.ok) {
       const data = await res.json();
       if (data?.status === 'ok' && data?.name) {
-        return {
+        const result = {
           placeId: data.placeId || cleanId,
           name: String(data.name).trim(),
           lat: Number.isFinite(Number(data.lat)) ? Number(data.lat) : null,
@@ -1092,38 +1132,59 @@ export async function fetchPlaceDetailsById(placeId) {
           countryCode: data.countryCode || '',
           source: 'google_place_id',
         };
+        setCachedPlaceDetails(cleanId, result);
+        return result;
       }
     }
   } catch {
+    if (signal?.aborted) return null;
     // fallback to client SDK below
+  } finally {
+    timed.cleanup();
   }
 
-  // 2. 瀏覽器端 Google Maps Places Library 備援（若使用者僅在瀏覽器金鑰啟用 Places API）
+  if (signal?.aborted) return null;
+
+  // 2. 瀏覽器端 Google Maps Places Library 備援（附 3.8 秒逾時保護）
   try {
     const g = typeof window !== 'undefined' ? window.google : null;
     if (g?.maps?.importLibrary) {
-      const placesLib = await g.maps.importLibrary('places');
-      if (placesLib?.Place) {
+      const fetchClientPlace = async () => {
+        const placesLib = await g.maps.importLibrary('places');
+        if (!placesLib?.Place) return null;
         const place = new placesLib.Place({ id: cleanId, requestedLanguage: 'zh-TW' });
         await place.fetchFields({
           fields: ['id', 'displayName', 'location', 'formattedAddress', 'primaryTypeDisplayName'],
         });
         const name = String(place.displayName || '').trim();
-        if (name) {
-          const loc = place.location;
-          const pLat = typeof loc?.lat === 'function' ? loc.lat() : Number(loc?.lat);
-          const pLng = typeof loc?.lng === 'function' ? loc.lng() : Number(loc?.lng);
-          return {
-            placeId: place.id || cleanId,
-            name,
-            lat: Number.isFinite(pLat) ? Number(pLat.toFixed(6)) : null,
-            lng: Number.isFinite(pLng) ? Number(pLng.toFixed(6)) : null,
-            address: place.formattedAddress || '',
-            categoryLabel: place.primaryTypeDisplayName || '',
-            countryCode: '',
-            source: 'google_place_id',
-          };
+        if (!name) return null;
+        const loc = place.location;
+        const pLat = typeof loc?.lat === 'function' ? loc.lat() : Number(loc?.lat);
+        const pLng = typeof loc?.lng === 'function' ? loc.lng() : Number(loc?.lng);
+        return {
+          placeId: place.id || cleanId,
+          name,
+          lat: Number.isFinite(pLat) ? Number(pLat.toFixed(6)) : null,
+          lng: Number.isFinite(pLng) ? Number(pLng.toFixed(6)) : null,
+          address: place.formattedAddress || '',
+          categoryLabel: place.primaryTypeDisplayName || '',
+          countryCode: '',
+          source: 'google_place_id',
+        };
+      };
+
+      let timeoutId = null;
+      const timeoutPromise = new Promise((resolve) => {
+        timeoutId = setTimeout(() => resolve(null), 3800);
+      });
+      try {
+        const result = await Promise.race([fetchClientPlace(), timeoutPromise]);
+        if (result && !signal?.aborted) {
+          setCachedPlaceDetails(cleanId, result);
+          return result;
         }
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
       }
     }
   } catch {

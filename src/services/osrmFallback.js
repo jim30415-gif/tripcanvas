@@ -5,13 +5,14 @@ import { encodePolyline } from './polyline.js';
 /**
  * 免費陸路備援引擎：使用正確依交通方式分流的 FOSSGIS OSRM 實例
  * （routed-car / routed-bike / routed-foot），並以低並發排隊避免觸發限流。
- * 修正舊版單打 router.project-osrm.org 導致步行/自行車退化為車道或逾時橫越街區的問題。
  */
 
 const MAX_CONCURRENCY = 2;
 const MIN_GAP_MS = 160;
 let activeCount = 0;
 let lastStartTime = 0;
+let drainTimer = null;
+let scooterExcludeSupported = true;
 const queue = [];
 
 function enqueueRequest(fn) {
@@ -26,7 +27,12 @@ function drainQueue() {
 
   const waitMs = Math.max(0, MIN_GAP_MS - (Date.now() - lastStartTime));
   if (waitMs > 0) {
-    setTimeout(drainQueue, waitMs);
+    if (!drainTimer) {
+      drainTimer = setTimeout(() => {
+        drainTimer = null;
+        drainQueue();
+      }, waitMs);
+    }
     return;
   }
 
@@ -44,7 +50,6 @@ function drainQueue() {
 }
 
 function extractRoadCoordsFromOSRM(route) {
-  // 優先拼接 steps 幾何確保最高轉角精準度；若無 steps 則使用 overview=full 完整幾何
   const steps = route?.legs?.[0]?.steps;
   if (Array.isArray(steps) && steps.length > 0) {
     const merged = [];
@@ -75,7 +80,6 @@ function validateOSRMResponse(data, coords, pinA, pinB) {
 
   const straightKm = calcDistanceKm(pinA.lat, pinA.lng, pinB.lat, pinB.lng);
 
-  // 驗證 1：檢查 waypoints 吸附距離是否超過 5 公里（跨海常被強行吸附到岸邊）
   if (Array.isArray(data.waypoints) && data.waypoints.length >= 2) {
     const wpA = data.waypoints[0];
     const wpB = data.waypoints[data.waypoints.length - 1];
@@ -90,7 +94,6 @@ function validateOSRMResponse(data, coords, pinA, pinB) {
     }
   }
 
-  // 驗證 2：起終點幾何與實際標點距離不可超過 5 公里
   const startErrKm = calcDistanceKm(pinA.lat, pinA.lng, coords[0][0], coords[0][1]);
   const endErrKm = calcDistanceKm(
     pinB.lat,
@@ -100,7 +103,6 @@ function validateOSRMResponse(data, coords, pinA, pinB) {
   );
   if (startErrKm > 5 || endErrKm > 5) return false;
 
-  // 驗證 3：非零跨度卻回傳幾乎零距離，或單步出現超過 120km 的異常直線跳躍
   if (straightKm > 0.3 && (!route.distance || route.distance < 10)) return false;
   for (let i = 1; i < coords.length; i++) {
     const stepKm = calcDistanceKm(coords[i - 1][0], coords[i - 1][1], coords[i][0], coords[i][1]);
@@ -134,36 +136,55 @@ export async function queryFossgisOSRM(mode, pinA, pinB) {
 
     const candidateUrls = [];
     if (mode === 'scooter') {
-      // 機車優先避開高速公路，若該實例不支援 exclude=motorway 再退回一般道路
-      candidateUrls.push(
-        `https://routing.openstreetmap.de/${modeMeta.fossgisService}/route/v1/driving/${coordStr}?${baseParams}&exclude=motorway`
-      );
-      candidateUrls.push(
-        `https://routing.openstreetmap.de/${modeMeta.fossgisService}/route/v1/driving/${coordStr}?${baseParams}`
-      );
+      if (scooterExcludeSupported) {
+        candidateUrls.push({
+          url: `https://routing.openstreetmap.de/${modeMeta.fossgisService}/route/v1/driving/${coordStr}?${baseParams}&exclude=motorway`,
+          host: 'routing.openstreetmap.de',
+          hasExclude: true,
+        });
+      }
+      candidateUrls.push({
+        url: `https://routing.openstreetmap.de/${modeMeta.fossgisService}/route/v1/driving/${coordStr}?${baseParams}`,
+        host: 'routing.openstreetmap.de',
+        hasExclude: false,
+      });
     } else {
-      candidateUrls.push(
-        `https://routing.openstreetmap.de/${modeMeta.fossgisService}/route/v1/driving/${coordStr}?${baseParams}`
-      );
+      candidateUrls.push({
+        url: `https://routing.openstreetmap.de/${modeMeta.fossgisService}/route/v1/driving/${coordStr}?${baseParams}`,
+        host: 'routing.openstreetmap.de',
+        hasExclude: false,
+      });
     }
 
-    // 汽車可額外加入 router.project-osrm.org 作為最後備援
     if (mode === 'car') {
-      candidateUrls.push(`https://router.project-osrm.org/route/v1/driving/${coordStr}?${baseParams}`);
+      candidateUrls.push({
+        url: `https://router.project-osrm.org/route/v1/driving/${coordStr}?${baseParams}`,
+        host: 'router.project-osrm.org',
+        hasExclude: false,
+      });
     }
 
     let lastStatus = 'network_error';
+    const rateLimitedHosts = new Set();
 
-    for (const url of candidateUrls) {
+    for (const cand of candidateUrls) {
+      if (rateLimitedHosts.has(cand.host)) continue;
       try {
-        const res = await fetchOSRMUrl(url);
+        const res = await fetchOSRMUrl(cand.url);
+
+        if (res.status === 429) {
+          rateLimitedHosts.add(cand.host);
+          lastStatus = 'network_error';
+          continue;
+        }
 
         if (res.status === 400) {
-          // 若是 exclude=motorway 不支援（InvalidValue），改試下一個候選 URL
-          if (res.data?.code === 'InvalidValue' || res.data?.code === 'InvalidOptions') {
+          if (cand.hasExclude && (res.data?.code === 'InvalidValue' || res.data?.code === 'InvalidOptions')) {
+            scooterExcludeSupported = false;
             continue;
           }
           if (res.data?.code === 'NoRoute' || res.data?.code === 'NoSegment') {
+            if (cand.hasExclude) continue;
             return {
               status: 'unsupported',
               provider: 'osrm',
@@ -182,6 +203,7 @@ export async function queryFossgisOSRM(mode, pinA, pinB) {
         }
 
         if (res.data.code !== 'Ok' || !Array.isArray(res.data.routes) || res.data.routes.length === 0) {
+          if (cand.hasExclude) continue;
           return {
             status: 'unsupported',
             provider: 'osrm',

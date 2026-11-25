@@ -11,7 +11,7 @@ export function getActiveDay(state) {
 }
 
 export function calcPinExpense(pin) {
-  return (pin.subSpots || []).reduce((sum, s) => sum + (Number(s.cost) || 0), 0);
+  return (pin.subSpots || []).reduce((sum, s) => sum + Math.max(0, Math.round(Number(s.cost) || 0)), 0);
 }
 
 export function calcTransportExpense(pin) {
@@ -28,16 +28,12 @@ export function calcDayExpense(day) {
   }, 0);
 }
 
-export function calcTripTotalExpense(tripData) {
-  return (tripData?.days || []).reduce((sum, d) => sum + calcDayExpense(d), 0);
-}
-
 export function calcTripPinCount(tripData) {
   return (tripData?.days || []).reduce((sum, d) => sum + (d.pins || []).length, 0);
 }
 
 /**
- * 計算整趟旅程的總支出、顯示中圖層小計、各分類開銷比例（交通／食物／購物／其他）與各天數開銷比例
+ * 計算整趟旅程的總支出、顯示中圖層小計、各分類開銷比例（交通／食物／住宿／購物／其他）與各天數開銷比例
  */
 export function calcExpenseBreakdown(state) {
   const catTotals = {};
@@ -179,6 +175,18 @@ export function getTransportDisplayInfo(t) {
         leftSub: '正在查詢分段路線與班次...',
         badge: '查詢中',
         mapPill: '🚆 查詢大眾運輸中...',
+        cost,
+      };
+    }
+
+    if (t.status === 'network_error') {
+      return {
+        kind: 'network_error',
+        emoji: '⚠️',
+        leftTitle: '無法連線取得大眾運輸班次',
+        leftSub: '點此重新查詢、改手動紀錄或查 Google Maps',
+        badge: '連線失敗',
+        mapPill: '⚠️ 無法取得班次',
         cost,
       };
     }

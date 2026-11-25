@@ -9,7 +9,7 @@ import {
 } from '../state/store.js';
 import { calcTripPinCount } from '../state/selectors.js';
 import { escapeHTML, refreshIcons } from '../utils/format.js';
-import { openCustomDialog, showToast } from './dialog.js';
+import { isCustomDialogOpen, openCustomDialog, showToast } from './dialog.js';
 
 let onTripSwitchedCallback = null;
 
@@ -39,15 +39,19 @@ export function renderTripsDrawer() {
       const dayCount = trip.data?.days?.length || 0;
       const pinCount = calcTripPinCount(trip.data);
       const updatedStr = formatUpdatedTime(trip.updatedAt);
+      const safeTripId = escapeHTML(trip.id);
 
       return `
         <div
-          class="trip-plan-card rounded-2xl border p-3.5 transition cursor-pointer ${
+          tabindex="0"
+          role="button"
+          aria-label="切換至旅遊計畫 ${escapeHTML(trip.name)}"
+          class="trip-plan-card rounded-2xl border p-3.5 transition cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-owl-primary/40 ${
             isActive
               ? 'border-owl-primary bg-owl-selectedBg ring-2 ring-owl-primary/20 shadow-xs'
               : 'border-owl-cardBorder bg-owl-card hover:border-owl-accentBorder hover:bg-owl-selectedBg/50'
           }"
-          data-trip-id="${trip.id}"
+          data-trip-id="${safeTripId}"
         >
           <div class="flex items-start justify-between gap-2">
             <div class="min-w-0 flex-1">
@@ -72,13 +76,13 @@ export function renderTripsDrawer() {
             </div>
 
             <div class="flex items-center gap-0.5 shrink-0">
-              <button type="button" data-rename-trip-id="${trip.id}" title="重新命名計畫" class="btn-rename-trip w-7 h-7 rounded-lg text-owl-muted hover:text-owl-primaryDeep hover:bg-owl-softBg flex items-center justify-center transition">
+              <button type="button" data-rename-trip-id="${safeTripId}" title="重新命名計畫" aria-label="重新命名 ${escapeHTML(trip.name)}" class="btn-rename-trip w-7 h-7 rounded-lg text-owl-muted hover:text-owl-primaryDeep hover:bg-owl-softBg flex items-center justify-center transition">
                 <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
               </button>
-              <button type="button" data-dup-trip-id="${trip.id}" title="複製此計畫" class="btn-dup-trip w-7 h-7 rounded-lg text-owl-muted hover:text-owl-primaryDeep hover:bg-owl-softBg flex items-center justify-center transition">
+              <button type="button" data-dup-trip-id="${safeTripId}" title="複製此計畫" aria-label="複製 ${escapeHTML(trip.name)}" class="btn-dup-trip w-7 h-7 rounded-lg text-owl-muted hover:text-owl-primaryDeep hover:bg-owl-softBg flex items-center justify-center transition">
                 <i data-lucide="copy" class="w-3.5 h-3.5"></i>
               </button>
-              <button type="button" data-del-trip-id="${trip.id}" title="刪除此計畫" class="btn-del-trip w-7 h-7 rounded-lg text-owl-muted hover:text-[#A65D57] hover:bg-[#F9EDEC] flex items-center justify-center transition">
+              <button type="button" data-del-trip-id="${safeTripId}" title="刪除此計畫" aria-label="刪除 ${escapeHTML(trip.name)}" class="btn-del-trip w-7 h-7 rounded-lg text-owl-muted hover:text-[#A65D57] hover:bg-[#F9EDEC] flex items-center justify-center transition">
                 <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
               </button>
             </div>
@@ -88,20 +92,28 @@ export function renderTripsDrawer() {
     })
     .join('');
 
-  refreshIcons();
+  refreshIcons(listEl);
+
+  const activateTripCard = (tripId) => {
+    if (tripId === getActiveTrip()?.id) {
+      closeTripsDrawer();
+      return;
+    }
+    const switched = switchTrip(tripId);
+    if (switched) {
+      closeTripsDrawer();
+      if (typeof onTripSwitchedCallback === 'function') onTripSwitchedCallback(true);
+      showToast(`已切換至「${switched.name}」`, 'success');
+    }
+  };
 
   listEl.querySelectorAll('.trip-plan-card').forEach((card) => {
-    card.addEventListener('click', () => {
-      const tripId = card.dataset.tripId;
-      if (tripId === getActiveTrip()?.id) {
-        closeTripsDrawer();
-        return;
-      }
-      const switched = switchTrip(tripId);
-      if (switched) {
-        closeTripsDrawer();
-        if (typeof onTripSwitchedCallback === 'function') onTripSwitchedCallback(true);
-        showToast(`已切換至「${switched.name}」`, 'success');
+    card.addEventListener('click', () => activateTripCard(card.dataset.tripId));
+    card.addEventListener('keydown', (e) => {
+      if (e.target !== card) return;
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        activateTripCard(card.dataset.tripId);
       }
     });
   });
@@ -109,7 +121,8 @@ export function renderTripsDrawer() {
   listEl.querySelectorAll('.btn-rename-trip').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      const target = getAllTrips().find((t) => t.id === btn.dataset.renameTripId);
+      const tripId = btn.dataset.renameTripId;
+      const target = getAllTrips().find((t) => t.id === tripId);
       if (!target) return;
       const newName = await openCustomDialog({
         title: '重新命名旅遊計畫',
@@ -119,10 +132,11 @@ export function renderTripsDrawer() {
         confirmText: '儲存名稱',
       });
       if (newName) {
-        renameTrip(target.id, newName);
-        renderTripsDrawer();
-        if (typeof onTripSwitchedCallback === 'function') onTripSwitchedCallback(false);
-        showToast('已更新旅遊計畫名稱', 'success');
+        if (renameTrip(tripId, newName)) {
+          renderTripsDrawer();
+          if (typeof onTripSwitchedCallback === 'function') onTripSwitchedCallback(false);
+          showToast('已更新旅遊計畫名稱', 'success');
+        }
       }
     });
   });
@@ -142,22 +156,24 @@ export function renderTripsDrawer() {
   listEl.querySelectorAll('.btn-del-trip').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
+      const tripId = btn.dataset.delTripId;
       if (getAllTrips().length <= 1) {
         showToast('至少需要保留一個旅遊計畫', 'error');
         return;
       }
-      const target = getAllTrips().find((t) => t.id === btn.dataset.delTripId);
+      const target = getAllTrips().find((t) => t.id === tripId);
       if (!target) return;
+      const targetName = target.name;
       const ok = await openCustomDialog({
         title: '確定刪除此旅遊計畫？',
-        message: `將永久移除「${target.name}」內所有天數、標點與支出紀錄。`,
+        message: `將永久移除「${targetName}」內所有天數、標點與支出紀錄。`,
         confirmText: '確定刪除',
         danger: true,
       });
-      if (ok && deleteTrip(target.id)) {
+      if (ok && deleteTrip(tripId)) {
         renderTripsDrawer();
         if (typeof onTripSwitchedCallback === 'function') onTripSwitchedCallback(true);
-        showToast(`已刪除「${target.name}」`, 'info');
+        showToast(`已刪除「${targetName}」`, 'info');
       }
     });
   });
@@ -165,8 +181,9 @@ export function renderTripsDrawer() {
 
 export function openTripsDrawer() {
   renderTripsDrawer();
-  document.getElementById('drawer-trips')?.classList.remove('hidden');
-  refreshIcons();
+  const drawer = document.getElementById('drawer-trips');
+  drawer?.classList.remove('hidden');
+  refreshIcons(drawer);
 }
 
 export function closeTripsDrawer() {
@@ -197,6 +214,6 @@ export function bindTripsDrawerEvents({ onTripSwitched }) {
   });
 
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeTripsDrawer();
+    if (e.key === 'Escape' && !isCustomDialogOpen()) closeTripsDrawer();
   });
 }

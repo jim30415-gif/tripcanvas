@@ -5,9 +5,17 @@ import {
   subscribeDriveSync,
   syncWithGoogleDrive,
 } from '../services/driveSync.js';
-import { escapeHTML, refreshIcons } from '../utils/format.js';
+import { escapeHTML, refreshIcons, sanitizeExternalUrl } from '../utils/format.js';
 import { openTripsDrawer } from './tripsDrawer.js';
 import { openCustomDialog } from './dialog.js';
+
+function isDevEnvironment() {
+  try {
+    return Boolean(import.meta.env?.DEV);
+  } catch {
+    return false;
+  }
+}
 
 function formatSyncTime(isoStr) {
   if (!isoStr) return '';
@@ -25,13 +33,13 @@ function renderHeaderSyncButton(state) {
   let label = '登入雲端';
   let title = '連結您的 Google 雲端硬碟，重開網頁或換手機都能自動保存行程';
   let classes =
-    'hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-bold border transition active:scale-95 shrink-0 ';
+    'hidden md:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-bold border transition active:scale-95 shrink-0 ';
   let dotClass = 'hidden';
 
   if (!state.configured) {
     icon = 'hard-drive';
     label = '本機備份';
-    title = '目前已開啟本機雙重備份（localStorage + IndexedDB），點擊檢視 Google 雲端同步說明';
+    title = '目前已開啟本機雙重備份（localStorage + IndexedDB），點擊檢視同步與備份說明';
     classes += 'text-owl-subtext hover:text-owl-primaryDeep hover:bg-owl-softBg border-owl-border bg-owl-card';
   } else if (state.status === 'syncing' || state.status === 'checking') {
     icon = 'loader-2';
@@ -84,13 +92,24 @@ function renderHeaderSyncButton(state) {
     <i data-lucide="${icon}" class="w-4 h-4 shrink-0${spinClass}"></i>
     <span class="whitespace-nowrap">${escapeHTML(label)}</span>
   `;
+  refreshIcons(btn);
 }
 
 function renderDrawerDriveCard(state) {
   const container = document.getElementById('trips-drive-sync-card');
   if (!container) return;
 
+  const privacyFooterHtml = `
+    <div class="pt-1 text-[11px] text-owl-muted flex items-center justify-between gap-2">
+      <span>資料僅存於您的裝置與個人雲端</span>
+      <a href="/privacy.html" target="_blank" rel="noopener noreferrer" class="font-bold text-owl-subtext hover:text-owl-primaryDeep underline shrink-0">隱私權政策</a>
+    </div>
+  `;
+
   if (!state.configured) {
+    const devHint = isDevEnvironment()
+      ? '（開發環境請設定 GOOGLE_OAUTH_CLIENT_ID 與 GOOGLE_OAUTH_CLIENT_SECRET）'
+      : '';
     container.innerHTML = `
       <div class="rounded-2xl border border-owl-cardBorder bg-owl-card p-3.5 space-y-2">
         <div class="flex items-center gap-2.5">
@@ -99,14 +118,16 @@ function renderDrawerDriveCard(state) {
           </span>
           <div class="min-w-0">
             <div class="text-sm font-extrabold text-owl-text">本機雙重備份運作中</div>
-            <div class="text-xs text-owl-subtext">localStorage + IndexedDB 自動保存</div>
+            <div class="text-xs text-owl-subtext">瀏覽器自動保存・隨時可匯出 JSON</div>
           </div>
         </div>
         <p class="text-xs text-owl-subtext leading-relaxed">
-          所有計畫已自動存於此瀏覽器。如需跨裝置同步至個人 Google 雲端硬碟，請於 Vercel 設定 <code class="px-1 py-0.5 rounded bg-owl-softBg text-owl-primaryDeep text-[11px]">GOOGLE_OAUTH_CLIENT_ID</code> 與 <code class="px-1 py-0.5 rounded bg-owl-softBg text-owl-primaryDeep text-[11px]">GOOGLE_OAUTH_CLIENT_SECRET</code>。
+          所有旅遊計畫都會即時存於此裝置，亦可透過「匯出／匯入 JSON」自由跨裝置轉移。${escapeHTML(devHint)}
         </p>
+        ${privacyFooterHtml}
       </div>
     `;
+    refreshIcons(container);
     return;
   }
 
@@ -143,8 +164,10 @@ function renderDrawerDriveCard(state) {
           <i data-lucide="log-in" class="w-4 h-4 text-owl-gold"></i>
           <span>${state.status === 'auth_expired' ? '重新連結 Google 雲端硬碟' : '登入 Google 雲端硬碟同步'}</span>
         </button>
+        ${privacyFooterHtml}
       </div>
     `;
+    refreshIcons(container);
     return;
   }
 
@@ -166,8 +189,9 @@ function renderDrawerDriveCard(state) {
     }</span>`;
   }
 
-  const avatarHtml = state.user?.picture
-    ? `<img src="${escapeHTML(state.user.picture)}" alt="" referrerpolicy="no-referrer" class="w-9 h-9 rounded-full border border-owl-border object-cover shrink-0 bg-owl-softBg" />`
+  const safePictureUrl = sanitizeExternalUrl(state.user?.picture, { httpsOnly: true });
+  const avatarHtml = safePictureUrl
+    ? `<img src="${escapeHTML(safePictureUrl)}" alt="" referrerpolicy="no-referrer" class="w-9 h-9 rounded-full border border-owl-border object-cover shrink-0 bg-owl-softBg" />`
     : `<span class="w-9 h-9 rounded-full bg-owl-primary text-white text-sm font-extrabold flex items-center justify-center shrink-0">${escapeHTML(
         initial
       )}</span>`;
@@ -214,14 +238,15 @@ function renderDrawerDriveCard(state) {
           <span>登出</span>
         </button>
       </div>
+      ${privacyFooterHtml}
     </div>
   `;
+  refreshIcons(container);
 }
 
 export function renderDriveSyncUI(state = getDriveSyncState()) {
   renderHeaderSyncButton(state);
   renderDrawerDriveCard(state);
-  refreshIcons();
 }
 
 export function bindDriveSyncUI() {

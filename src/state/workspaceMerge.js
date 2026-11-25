@@ -134,7 +134,11 @@ export function mergeWorkspaces(localWs, cloudWs, { nowMs = Date.now() } = {}) {
 
   const finalTrips = [...localOnlyTrips, ...mergedList];
   if (finalTrips.length === 0) {
-    finalTrips.push(cloudWs.trips[0]);
+    const fallbackTrip = cloudWs.trips[0];
+    finalTrips.push(fallbackTrip);
+    if (fallbackTrip?.id && deletedTripIds[fallbackTrip.id]) {
+      delete deletedTripIds[fallbackTrip.id];
+    }
   }
 
   const localLatest = getWorkspaceLatestTs(localWs);

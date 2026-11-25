@@ -4,11 +4,13 @@ export function calcDistanceKm(lat1, lng1, lat2, lng2) {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
+  const a = Math.min(
+    1,
     Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLng / 2) ** 2;
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLng / 2) ** 2
+  );
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
@@ -139,13 +141,20 @@ export function inferCountryCodeFromCoord(lat, lng) {
   if (la >= 49.8 && la <= 60.9 && lo >= -8.6 && lo <= 1.8) return 'GB';
   if (la >= 45.8 && la <= 47.9 && lo >= 5.9 && lo <= 10.6) return 'CH';
   if (la >= 50.7 && la <= 53.6 && lo >= 3.3 && lo <= 7.25) return 'NL';
+  // 法國東部亞爾薩斯／洛林（史特拉斯堡、科爾馬、南錫）先於德國判定
+  if (la >= 47.4 && la <= 49.1 && lo >= 5.8 && lo <= 7.8) return 'FR';
+  // 德國巴伐利亞南部（慕尼黑、奧格斯堡、烏爾姆）先於奧地利判定
+  if (la >= 47.65 && la <= 49.1 && lo >= 9.6 && lo <= 12.8) return 'DE';
   if (la >= 46.3 && la <= 49.05 && lo >= 9.5 && lo <= 17.2) return 'AT';
   if (la >= 47.2 && la <= 55.1 && lo >= 5.8 && lo <= 15.1) return 'DE';
   if (la >= 36.6 && la <= 47.1 && lo >= 6.6 && lo <= 18.6) return 'IT';
   if (la >= 41.3 && la <= 51.1 && lo >= -5.2 && lo <= 9.6) return 'FR';
   if (la >= 35.9 && la <= 43.8 && lo >= -9.3 && lo <= 4.35) return 'ES';
 
-  if (la >= 24.4 && la <= 49.4 && lo >= -125.0 && lo <= -66.9) return 'US';
+  // 加拿大南部主要都會區（溫哥華／維多利亞、多倫多／渥太華／蒙特婁／魁北克市）先於美國判定
+  if (la >= 48.3 && la <= 50.5 && lo >= -125.0 && lo <= -122.0) return 'CA';
+  if (la >= 43.2 && la <= 47.5 && lo >= -81.8 && lo <= -70.5) return 'CA';
+  if (la >= 24.4 && la <= 49.0 && lo >= -125.0 && lo <= -66.9) return 'US';
   if (la >= 18.9 && la <= 22.3 && lo >= -160.3 && lo <= -154.8) return 'US'; // 夏威夷
   if (la >= 41.7 && la <= 83.1 && lo >= -141.0 && lo <= -52.6) return 'CA';
 

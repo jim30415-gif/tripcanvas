@@ -1,5 +1,6 @@
 import { encodePolyline } from '../src/services/polyline.js';
 import { convertMoneyToTwd } from './currency.js';
+import { parseOptionalFiniteNumber } from './security.js';
 
 const NAVITIME_RAPIDAPI_HOST = 'navitime-route-totalnavi.p.rapidapi.com';
 const NAVITIME_ROUTE_TRANSIT_ENDPOINT = `https://${NAVITIME_RAPIDAPI_HOST}/route_transit`;
@@ -16,11 +17,13 @@ function calcDistanceKm(lat1, lng1, lat2, lng2) {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
+  const a = Math.min(
+    1,
     Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLng / 2) ** 2;
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLng / 2) ** 2
+  );
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
@@ -73,11 +76,16 @@ export function isJapanTrip(origin, destination) {
  * 將任意時間轉換為 NAVITIME API 要求的日本標準時間格式 YYYY-MM-DDThh:mm:ss（無時區後綴）
  */
 export function formatJstDateTime(isoOrEmpty) {
-  let ms = Date.now();
+  const now = Date.now();
+  let ms = now;
   if (isoOrEmpty && typeof isoOrEmpty === 'string') {
     const parsed = new Date(isoOrEmpty);
     if (!Number.isNaN(parsed.getTime())) {
-      ms = parsed.getTime();
+      const minAllowed = now - 30 * 24 * 3600 * 1000;
+      const maxAllowed = now + 180 * 24 * 3600 * 1000;
+      if (parsed.getTime() >= minAllowed && parsed.getTime() <= maxAllowed) {
+        ms = parsed.getTime();
+      }
     }
   }
   // 固定平移至 JST (UTC+9)，避免雲端伺服器 UTC 時區導致時間偏移
@@ -503,10 +511,10 @@ export async function normalizeNavitimeRoute(item, origin, destination) {
   const totalDistanceMeters = Number(summaryMove.distance) || sumDistance;
   const distanceKm = Number((totalDistanceMeters / 1000).toFixed(2));
   const totalWalkMin = walkSegs.reduce((sum, s) => sum + s.durationMin, 0);
-  const transferCount =
-    Number.isFinite(Number(summaryMove.transit_count))
-      ? Math.max(0, Number(summaryMove.transit_count))
-      : Math.max(0, transitSegs.length - 1);
+  const parsedTransitCount = parseOptionalFiniteNumber(summaryMove.transit_count);
+  const transferCount = Number.isFinite(parsedTransitCount)
+    ? Math.max(0, Math.round(parsedTransitCount))
+    : Math.max(0, transitSegs.length - 1);
 
   const firstTransit = transitSegs[0];
   const lastTransit = transitSegs[transitSegs.length - 1];
@@ -583,6 +591,7 @@ export async function queryNavitimeTransit({
 
     if (!res.ok) {
       if (res.status === 401 || res.status === 403) {
+        console.error('[navitime] 401/403:', data?.message || '');
         return {
           statusCode: 502,
           body: {
@@ -590,9 +599,7 @@ export async function queryNavitimeTransit({
             provider: 'navitime',
             region: 'JP',
             error: 'NAVITIME_API_FORBIDDEN',
-            message:
-              'NAVITIME RapidAPI 金鑰無效或尚未訂閱「NAVITIME Route(totalnavi)」Basic 免費方案，請檢查 RapidAPI 訂閱狀態與 Vercel 環境變數 RAPIDAPI_NAVITIME_KEY。',
-            detail: data?.message || '',
+            message: '日本大眾運輸自動查詢暫時無法驗證，可先開啟 Google Maps 查詢並手動填寫日圓自動換算。',
           },
         };
       }
@@ -605,10 +612,11 @@ export async function queryNavitimeTransit({
             region: 'JP',
             error: 'NAVITIME_QUOTA_EXCEEDED',
             message:
-              '本月 NAVITIME RapidAPI 免費 500 次硬上限額度已用畢（不會自動扣款），可先一鍵開啟 Google Maps 查詢並改用手動填寫日圓換算。',
+              '本月日本電車自動查詢額度已達上限，可先一鍵開啟 Google Maps 查詢並改用手動填寫日圓換算。',
           },
         };
       }
+      console.error('[navitime] upstream error:', res.status, data?.message || data?.error?.message || '');
       return {
         statusCode: 502,
         body: {
@@ -616,7 +624,7 @@ export async function queryNavitimeTransit({
           provider: 'navitime',
           region: 'JP',
           error: 'NAVITIME_API_ERROR',
-          message: data?.message || data?.error?.message || '日本 NAVITIME 路線服務暫時回傳異常，請稍後再試或改用手動紀錄。',
+          message: '日本大眾運輸查詢服務暫時異常，請稍後再試或改用手動紀錄。',
         },
       };
     }

@@ -2,6 +2,7 @@ import { SUPPORTED_CURRENCIES } from '../config/constants.js';
 
 const FX_CACHE_KEY = 'tripcanvas_fx_rates_twd_v1';
 const FX_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const ZERO_DECIMAL_CURRENCIES = new Set(['TWD', 'JPY', 'KRW', 'VND', 'IDR']);
 
 /* 離線保底參考匯率（1 單位外幣 ≈ TWD），與伺服器端 server/currency.js 保持一致 */
 const FALLBACK_TWD_PER_UNIT = {
@@ -38,6 +39,7 @@ function loadCachedRates() {
             twdPerUnit: { ...FALLBACK_TWD_PER_UNIT, ...parsed.twdPerUnit },
             source: parsed.source || 'fallback',
             loadedFromServer: true,
+            expiresAt: parsed.expiresAt,
           };
         }
       }
@@ -49,6 +51,7 @@ function loadCachedRates() {
     twdPerUnit: { ...FALLBACK_TWD_PER_UNIT },
     source: 'fallback',
     loadedFromServer: false,
+    expiresAt: 0,
   };
 }
 
@@ -56,30 +59,31 @@ function loadCachedRates() {
  * 背景向同源 /api/routes?rates=1 抓取最新即時匯率（不阻斷輸入，離線自動使用參考匯率）
  */
 export async function ensureFxRatesLoaded(forceRefresh = false) {
-  if (!forceRefresh && ratesState.loadedFromServer) {
+  if (!forceRefresh && ratesState.loadedFromServer && Date.now() < (ratesState.expiresAt || 0)) {
     return ratesState;
   }
   if (!forceRefresh && fetchPromise) {
     return fetchPromise;
   }
 
-  fetchPromise = (async () => {
+  const currentTask = (async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3500);
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 3500);
       const res = await fetch('/api/routes?rates=1', {
         method: 'GET',
         headers: { Accept: 'application/json' },
         signal: controller.signal,
       });
-      clearTimeout(timer);
       if (!res.ok) return ratesState;
       const data = await res.json();
       if (data?.twdPerUnit && typeof data.twdPerUnit === 'object') {
+        const expiresAt = Date.now() + FX_CACHE_TTL_MS;
         ratesState = {
           twdPerUnit: { ...FALLBACK_TWD_PER_UNIT, ...data.twdPerUnit },
           source: data.source === 'live' ? 'live' : 'fallback',
           loadedFromServer: true,
+          expiresAt,
         };
         try {
           if (typeof localStorage !== 'undefined') {
@@ -88,7 +92,7 @@ export async function ensureFxRatesLoaded(forceRefresh = false) {
               JSON.stringify({
                 twdPerUnit: ratesState.twdPerUnit,
                 source: ratesState.source,
-                expiresAt: Date.now() + FX_CACHE_TTL_MS,
+                expiresAt,
               })
             );
           }
@@ -99,12 +103,16 @@ export async function ensureFxRatesLoaded(forceRefresh = false) {
     } catch {
       // 保留內建保底匯率
     } finally {
-      fetchPromise = null;
+      clearTimeout(timer);
+      if (fetchPromise === currentTask) {
+        fetchPromise = null;
+      }
     }
     return ratesState;
   })();
 
-  return fetchPromise;
+  fetchPromise = currentTask;
+  return currentTask;
 }
 
 export function getCurrencyMeta(code = 'TWD') {
@@ -115,9 +123,12 @@ export function formatCurrencyAmount(amount, currencyCode = 'TWD') {
   const num = Number(amount);
   if (!Number.isFinite(num) || num <= 0) return '';
   const meta = getCurrencyMeta(currencyCode);
-  const rounded = num >= 100 || meta.code === 'JPY' || meta.code === 'KRW' || meta.code === 'TWD'
+  const rounded = ZERO_DECIMAL_CURRENCIES.has(meta.code)
     ? Math.round(num).toLocaleString('en-US')
-    : Number(num.toFixed(2)).toLocaleString('en-US');
+    : Number(num.toFixed(2)).toLocaleString('en-US', {
+        minimumFractionDigits: Number.isInteger(num) ? 0 : 2,
+        maximumFractionDigits: 2,
+      });
   return `${meta.symbol}${rounded}`;
 }
 
