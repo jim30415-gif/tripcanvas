@@ -212,6 +212,12 @@
           </button>
         </div>
 
+        <!-- Google Maps JS SDK 專用貓頭鷹風格縮放鈕（啟用官方底圖時顯示，自動避讓浮動側欄） -->
+        <div id="google-zoom-controls" class="hidden absolute z-[450] flex flex-col overflow-hidden rounded-2xl bg-owl-panel/95 backdrop-blur-md border border-owl-border shadow-float transition-all duration-200">
+          <button id="btn-gmap-zoom-in" type="button" title="放大地圖" aria-label="放大地圖" class="w-9 h-9 flex items-center justify-center text-owl-text hover:bg-owl-softBg font-extrabold text-lg leading-none border-b border-owl-border/80 transition active:scale-95">+</button>
+          <button id="btn-gmap-zoom-out" type="button" title="縮小地圖" aria-label="縮小地圖" class="w-9 h-9 flex items-center justify-center text-owl-text hover:bg-owl-softBg font-extrabold text-lg leading-none transition active:scale-95">−</button>
+        </div>
+
         <!-- 電腦／平板版（>= lg）：自動置中於兩側浮動工作區中央走廊的圓弧總支出膠囊與展開明細 -->
         <div id="desktop-expense-corridor" class="hidden lg:block absolute bottom-0 left-0 right-0 z-[520] pointer-events-none transition-all duration-200">
           <div

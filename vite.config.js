@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv } from 'vite';
 import {
   handleComputeRoutes,
+  handlePlaceDetails,
   handleRatesRequest,
   handleReverseGeocode,
   handleSearchPlaces,
@@ -133,6 +134,14 @@ function createRoutesApiPlugin(env) {
       res.setHeader('Cache-Control', 'no-store');
 
       if (req.method === 'GET') {
+        const wantsPlace = /[?&](place=1|action=place)\b/.test(fullUrl);
+        if (wantsPlace) {
+          const placeId = parsedUrl.searchParams.get('placeId') || '';
+          const result = await handlePlaceDetails(placeId, env);
+          res.statusCode = result.statusCode;
+          res.end(JSON.stringify(result.body));
+          return;
+        }
         const wantsSearch = /[?&](search=1|action=search)\b/.test(fullUrl);
         if (wantsSearch) {
           const result = await handleSearchPlaces(

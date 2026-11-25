@@ -14,7 +14,7 @@ import {
 import { getActiveDay } from './state/selectors.js';
 import { resolvePendingSegments } from './services/routeManager.js';
 import { initDriveSync } from './services/driveSync.js';
-import { reverseGeocode } from './services/geocoder.js';
+import { fetchPlaceDetailsById, reverseGeocode } from './services/geocoder.js';
 import {
   initMap,
   getMapZoom,
@@ -23,6 +23,8 @@ import {
   fitBoundsToPoints,
   isMapAnimatingZoom,
   onNextMapZoomEnd,
+  showBasemapPoiPopover,
+  hideBasemapPoiPopover,
 } from './map/mapInit.js';
 import { renderDayPinsOnMap, wasPinRecentlyDragged } from './map/pinRenderer.js';
 import { drawRouteSegmentOnMap } from './map/routeRenderer.js';
@@ -588,14 +590,87 @@ async function hydratePersistedWorkspace() {
   }
 }
 
-function boot() {
+let basemapPoiSeq = 0;
+
+async function handleBasemapPoiClick({ placeId, lat, lng }) {
+  if (wasPinRecentlyDragged()) return;
+  if (window.innerWidth < 1024 && hasOpenMobileOverlay()) {
+    closeAllMobileOverlays();
+    return;
+  }
+  closeDesktopExpenseSheet();
+
+  const seq = ++basemapPoiSeq;
+  showBasemapPoiPopover({
+    lat,
+    lng,
+    loading: true,
+    onClose: () => {
+      basemapPoiSeq++;
+    },
+  });
+
+  const place = await fetchPlaceDetailsById(placeId);
+  if (basemapPoiSeq !== seq) return;
+
+  if (place?.name) {
+    const finalLat = Number.isFinite(place.lat) ? place.lat : lat;
+    const finalLng = Number.isFinite(place.lng) ? place.lng : lng;
+    showBasemapPoiPopover({
+      lat: finalLat,
+      lng: finalLng,
+      name: place.name,
+      address: place.address || '',
+      categoryLabel: place.categoryLabel || '',
+      onAdd: () => {
+        hideBasemapPoiPopover();
+        addPinAtCoordinate(finalLat, finalLng, place.name, {
+          placeId: place.placeId || placeId,
+          countryCode: place.countryCode || '',
+        });
+      },
+      onClose: () => {
+        basemapPoiSeq++;
+      },
+    });
+    return;
+  }
+
+  // 若 Places API (New) 尚未啟用，仍提供備援辨識與加入按鈕不卡死
+  const fallback = await reverseGeocode(lat, lng, { zoom: getMapZoom() });
+  if (basemapPoiSeq !== seq) return;
+  const fallbackName = (typeof fallback === 'string' ? fallback : fallback?.name) || 'Google 地圖標點';
+  showBasemapPoiPopover({
+    lat,
+    lng,
+    name: fallbackName,
+    address: '提示：於 Google Cloud 啟用 Places API (New) 即可顯示完全一致的底圖原名',
+    onAdd: () => {
+      hideBasemapPoiPopover();
+      addPinAtCoordinate(lat, lng, fallbackName, { placeId });
+    },
+    onClose: () => {
+      basemapPoiSeq++;
+    },
+  });
+}
+
+async function boot() {
   if (window.innerWidth < 1024) {
     setMobileTab('map');
   }
 
-  initMap({
+  bindGlobalEvents();
+  syncDesktopSidebarCollapseUI();
+  updateMapHeaderUI();
+  renderLeft();
+  renderRight();
+  refreshIcons();
+
+  await initMap({
     onMapClick: () => {
       if (wasPinRecentlyDragged()) return;
+      hideBasemapPoiPopover();
       // 單點地圖空處永不誤加標點：僅優先收合展開中的手機浮動面板或桌機支出明細
       if (window.innerWidth < 1024 && hasOpenMobileOverlay()) {
         closeAllMobileOverlays();
@@ -607,20 +682,30 @@ function boot() {
       // 電腦統一右鍵新增、手機統一長按地圖空處新增
       if (wasPinRecentlyDragged()) return;
       if (window.innerWidth < 1024 && hasOpenMobileOverlay()) return;
+      hideBasemapPoiPopover();
       addPinAtCoordinate(lat, lng);
+    },
+    onBasemapPoiClick: (poi) => {
+      void handleBasemapPoiClick(poi);
+    },
+    onEngineChanged: (_nextEngine, reason) => {
+      renderMapLayers();
+      setTimeout(() => fitMapToVisiblePins(true), 240);
+      if (reason === 'GOOGLE_MAPS_AUTH_FAILURE') {
+        showToast('Google Maps JS 金鑰驗證未通過，已自動切換為備援底圖', 'error');
+      }
     },
   });
 
-  bindGlobalEvents();
-  syncDesktopSidebarCollapseUI();
-  renderAll();
-  setTimeout(() => fitMapToVisiblePins(true), 380);
-  refreshIcons();
+  renderMapLayers();
+  setTimeout(() => fitMapToVisiblePins(true), 280);
   void hydratePersistedWorkspace();
 }
 
 if (document.readyState === 'loading') {
-  window.addEventListener('DOMContentLoaded', boot);
+  window.addEventListener('DOMContentLoaded', () => {
+    void boot();
+  });
 } else {
-  boot();
+  void boot();
 }

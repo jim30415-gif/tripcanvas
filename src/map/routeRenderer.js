@@ -5,6 +5,7 @@ import { getCachedRoute } from '../services/routeManager.js';
 import { decodePolyline, getPolylineMidpoint } from '../services/polyline.js';
 import { calcDistanceKm, generateCurvedPath } from '../utils/geo.js';
 import { escapeHTML, formatDistanceMetersZh, formatDurationZh } from '../utils/format.js';
+import { createGoogleHtmlOverlay } from './googleEngine.js';
 
 /**
  * 判斷 hex 顏色是否過淺（避免白色或極淺黃色在淺底地圖上看不清楚）
@@ -19,19 +20,186 @@ function pickReadableLineColor(lineColor, fallbackColor) {
 }
 
 /**
+ * 跨引擎折線繪製器（同步支援 Google Maps JS Polyline 與 Leaflet Polyline，包含點狀／短虛線樣式）
+ */
+function addPolyline(overlayGroup, coords, opts = {}, { onClick = null, tooltip = '', zIndex = 10 } = {}) {
+  if (!Array.isArray(coords) || coords.length < 2) return null;
+
+  if (overlayGroup?.isGoogle) {
+    const gmaps = window.google?.maps;
+    if (!gmaps) return null;
+    const path = coords.map(([lat, lng]) => ({ lat, lng }));
+    const interactive = opts.interactive !== false;
+    const polyOpts = {
+      path,
+      map: overlayGroup.map,
+      clickable: interactive && Boolean(onClick),
+      zIndex,
+    };
+
+    if (opts.dashArray) {
+      const parts = String(opts.dashArray)
+        .split(/[,\s]+/)
+        .map((n) => Number(n))
+        .filter((n) => Number.isFinite(n) && n > 0);
+      const dashLen = parts[0] || 4;
+      const gapLen = parts[1] || 6;
+      const isDot = dashLen <= 2.5;
+      polyOpts.strokeOpacity = 0;
+      polyOpts.icons = [
+        {
+          icon: isDot
+            ? {
+                path: gmaps.SymbolPath.CIRCLE,
+                scale: Math.max(1.8, (opts.weight || 3) * 0.58),
+                fillColor: opts.color || '#6B513A',
+                fillOpacity: opts.opacity ?? 0.9,
+                strokeOpacity: 0,
+              }
+            : {
+                path: 'M 0,-1 0,1',
+                strokeColor: opts.color || '#816448',
+                strokeOpacity: opts.opacity ?? 0.9,
+                strokeWeight: opts.weight || 3.6,
+                scale: Math.max(2.4, Math.min(5, dashLen * 0.42)),
+              },
+          offset: '0',
+          repeat: `${Math.round(dashLen + gapLen + (isDot ? 3 : 5))}px`,
+        },
+      ];
+    } else {
+      polyOpts.strokeColor = opts.color || '#816448';
+      polyOpts.strokeWeight = opts.weight || 4;
+      polyOpts.strokeOpacity = opts.opacity ?? 0.92;
+    }
+
+    const line = overlayGroup.add(new gmaps.Polyline(polyOpts));
+    if (onClick) {
+      line.addListener('click', (ev) => {
+        if (ev?.stop) ev.stop();
+        onClick(ev);
+      });
+    }
+    return line;
+  }
+
+  // Leaflet 分支
+  const line = L.polyline(coords, opts).addTo(overlayGroup);
+  if (tooltip) {
+    line.bindTooltip(tooltip, {
+      sticky: true,
+      className: 'transit-stop-tooltip',
+      direction: 'top',
+      offset: [0, -6],
+    });
+  }
+  if (onClick) {
+    line.on('click', onClick);
+  }
+  return line;
+}
+
+/**
+ * 跨引擎站點圓點繪製器
+ */
+function addStopDot(overlayGroup, lat, lng, { radius, color, opacity, tooltip, plainTitle, onClick }) {
+  if (overlayGroup?.isGoogle) {
+    const gmaps = window.google?.maps;
+    if (!gmaps) return null;
+    const dot = overlayGroup.add(
+      new gmaps.Marker({
+        position: { lat, lng },
+        map: overlayGroup.map,
+        zIndex: 60,
+        title: plainTitle || '',
+        icon: {
+          path: gmaps.SymbolPath.CIRCLE,
+          scale: radius + 0.6,
+          strokeColor: color,
+          strokeWeight: 2.8,
+          strokeOpacity: opacity,
+          fillColor: '#FFFDF9',
+          fillOpacity: 1,
+        },
+      })
+    );
+    if (onClick) {
+      dot.addListener('click', (ev) => {
+        if (ev?.stop) ev.stop();
+        onClick(ev);
+      });
+    }
+    return dot;
+  }
+
+  const dot = L.circleMarker([lat, lng], {
+    radius,
+    color,
+    weight: 2.8,
+    fillColor: '#FFFDF9',
+    fillOpacity: 1,
+    opacity,
+  }).addTo(overlayGroup);
+  if (tooltip) {
+    dot.bindTooltip(tooltip, { className: 'transit-stop-tooltip', direction: 'top', offset: [0, -6] });
+  }
+  if (onClick) dot.on('click', onClick);
+  return dot;
+}
+
+/**
+ * 跨引擎路線摘要膠囊標記
+ */
+function addRoutePill(overlayGroup, midPt, pillHtml, zIndex, onClick) {
+  if (!midPt) return null;
+
+  if (overlayGroup?.isGoogle) {
+    const overlay = overlayGroup.add(
+      createGoogleHtmlOverlay(overlayGroup.map, {
+        lat: midPt[0],
+        lng: midPt[1],
+        html: pillHtml,
+        className: 'route-label-icon',
+        zIndex,
+        pane: 'overlayMouseTarget',
+      })
+    );
+    const el = overlay.getElement();
+    el.addEventListener('mousedown', (ev) => ev.stopPropagation());
+    el.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      if (typeof onClick === 'function') onClick(ev);
+    });
+    return overlay;
+  }
+
+  const pillMarker = L.marker(midPt, {
+    icon: L.divIcon({ html: pillHtml, className: 'route-label-icon', iconSize: [0, 0], iconAnchor: [0, 0] }),
+    zIndexOffset: zIndex,
+  }).addTo(overlayGroup);
+  if (onClick) pillMarker.on('click', onClick);
+  return pillMarker;
+}
+
+/**
  * 當標點位於公園／廣場內部（距道路吸附點 20m~400m）時，補上輕量接入虛線銜接標點與道路端點，不橫越街區
  */
 function drawPinAccessConnector(overlayGroup, pin, roadEndpoint, isActive) {
   const gapKm = calcDistanceKm(pin.lat, pin.lng, roadEndpoint[0], roadEndpoint[1]);
   if (gapKm > 0.02 && gapKm < 0.45) {
-    L.polyline([[pin.lat, pin.lng], roadEndpoint], {
-      color: '#786454',
-      weight: 2.2,
-      opacity: isActive ? 0.5 : 0.3,
-      dashArray: '2, 5',
-      lineCap: 'round',
-      interactive: false,
-    }).addTo(overlayGroup);
+    addPolyline(
+      overlayGroup,
+      [[pin.lat, pin.lng], roadEndpoint],
+      {
+        color: '#786454',
+        weight: 2.2,
+        opacity: isActive ? 0.5 : 0.3,
+        dashArray: '2, 5',
+        lineCap: 'round',
+        interactive: false,
+      },
+      { zIndex: 8 }
+    );
   }
 }
 
@@ -54,30 +222,38 @@ function drawSegmentedTransitRoute(overlayGroup, day, pinA, pinB, t, info, isAct
       if (coords.length < 2) return;
 
       // 步行段：貼合實際人行道與街巷的暖咖細圓點虛線
-      L.polyline(coords, {
-        color: '#FFFDF9',
-        weight: 6.4,
-        opacity: isActive ? 0.85 : 0.48,
-        lineCap: 'round',
-        lineJoin: 'round',
-        interactive: false,
-      }).addTo(overlayGroup);
-
-      const walkLine = L.polyline(coords, {
-        color: isActive ? '#6B513A' : '#8C7866',
-        weight: 3.4,
-        opacity: isActive ? 0.92 : 0.58,
-        dashArray: '1, 7',
-        lineCap: 'round',
-        lineJoin: 'round',
-      }).addTo(overlayGroup);
+      addPolyline(
+        overlayGroup,
+        coords,
+        {
+          color: '#FFFDF9',
+          weight: 6.4,
+          opacity: isActive ? 0.85 : 0.48,
+          lineCap: 'round',
+          lineJoin: 'round',
+          interactive: false,
+        },
+        { zIndex: 18 }
+      );
 
       const distText = formatDistanceMetersZh(seg.distanceMeters);
-      walkLine.bindTooltip(
-        `🚶 步行約 ${formatDurationZh(seg.durationMin)}${distText ? `（${distText}）` : ''}`,
-        { sticky: true, className: 'transit-stop-tooltip', direction: 'top', offset: [0, -6] }
+      addPolyline(
+        overlayGroup,
+        coords,
+        {
+          color: isActive ? '#6B513A' : '#8C7866',
+          weight: 3.4,
+          opacity: isActive ? 0.92 : 0.58,
+          dashArray: '1, 7',
+          lineCap: 'round',
+          lineJoin: 'round',
+        },
+        {
+          onClick: openEdit,
+          tooltip: `🚶 步行約 ${formatDurationZh(seg.durationMin)}${distText ? `（${distText}）` : ''}`,
+          zIndex: 20,
+        }
       );
-      walkLine.on('click', openEdit);
       return;
     }
 
@@ -99,22 +275,19 @@ function drawSegmentedTransitRoute(overlayGroup, day, pinA, pinB, t, info, isAct
         primaryTransitCoords = transitCoords;
       }
 
-      L.polyline(transitCoords, {
-        color: '#FFFDF9',
-        weight: 8.2,
-        opacity: isActive ? 0.94 : 0.55,
-        lineCap: 'round',
-        lineJoin: 'round',
-        interactive: false,
-      }).addTo(overlayGroup);
-
-      const transitLine = L.polyline(transitCoords, {
-        color: segColor,
-        weight: 4.8,
-        opacity: isActive ? 0.96 : 0.62,
-        lineCap: 'round',
-        lineJoin: 'round',
-      }).addTo(overlayGroup);
+      addPolyline(
+        overlayGroup,
+        transitCoords,
+        {
+          color: '#FFFDF9',
+          weight: 8.2,
+          opacity: isActive ? 0.94 : 0.55,
+          lineCap: 'round',
+          lineJoin: 'round',
+          interactive: false,
+        },
+        { zIndex: 24 }
+      );
 
       const tipParts = [
         `${seg.vehicleEmoji || '🚆'} ${seg.displayLine || '大眾運輸'}`,
@@ -122,13 +295,19 @@ function drawSegmentedTransitRoute(overlayGroup, day, pinA, pinB, t, info, isAct
         seg.stopCount ? `${seg.stopCount} 站` : '',
         formatDurationZh(seg.durationMin),
       ].filter(Boolean);
-      transitLine.bindTooltip(tipParts.join(' · '), {
-        sticky: true,
-        className: 'transit-stop-tooltip',
-        direction: 'top',
-        offset: [0, -6],
-      });
-      transitLine.on('click', openEdit);
+
+      addPolyline(
+        overlayGroup,
+        transitCoords,
+        {
+          color: segColor,
+          weight: 4.8,
+          opacity: isActive ? 0.96 : 0.62,
+          lineCap: 'round',
+          lineJoin: 'round',
+        },
+        { onClick: openEdit, tooltip: tipParts.join(' · '), zIndex: 26 }
+      );
     }
 
     // 繪製上下車站點小圓點標記
@@ -138,21 +317,16 @@ function drawSegmentedTransitRoute(overlayGroup, day, pinA, pinB, t, info, isAct
     ];
     stops.forEach(({ role, stop }) => {
       if (!stop || stop.lat == null || stop.lng == null) return;
-      const dot = L.circleMarker([stop.lat, stop.lng], {
+      const timeSuffix = stop.timeText ? ` (${stop.timeText})` : '';
+      const plainTitle = `${seg.vehicleEmoji || '🚆'} ${role}：${stop.name || '站點'}${timeSuffix}`;
+      addStopDot(overlayGroup, stop.lat, stop.lng, {
         radius: isActive ? 5.2 : 4.2,
         color: segColor,
-        weight: 2.8,
-        fillColor: '#FFFDF9',
-        fillOpacity: 1,
         opacity: isActive ? 1 : 0.72,
-      }).addTo(overlayGroup);
-
-      const timeSuffix = stop.timeText ? ` (${stop.timeText})` : '';
-      dot.bindTooltip(
-        `${seg.vehicleEmoji || '🚆'} ${role}：${escapeHTML(stop.name || '站點')}${escapeHTML(timeSuffix)}`,
-        { className: 'transit-stop-tooltip', direction: 'top', offset: [0, -6] }
-      );
-      dot.on('click', openEdit);
+        tooltip: `${seg.vehicleEmoji || '🚆'} ${role}：${escapeHTML(stop.name || '站點')}${escapeHTML(timeSuffix)}`,
+        plainTitle,
+        onClick: openEdit,
+      });
     });
   });
 
@@ -163,7 +337,14 @@ function drawSegmentedTransitRoute(overlayGroup, day, pinA, pinB, t, info, isAct
   }
 
   // 在主乘車段（或整段路線）的幾何中點放置大眾運輸分段摘要膠囊
-  const anchorCoords = primaryTransitCoords || (allPoints.length >= 2 ? allPoints : [[pinA.lat, pinA.lng], [pinB.lat, pinB.lng]]);
+  const anchorCoords =
+    primaryTransitCoords ||
+    (allPoints.length >= 2
+      ? allPoints
+      : [
+          [pinA.lat, pinA.lng],
+          [pinB.lat, pinB.lng],
+        ]);
   const midPt = getPolylineMidpoint(anchorCoords);
   if (!midPt) return;
 
@@ -185,12 +366,7 @@ function drawSegmentedTransitRoute(overlayGroup, day, pinA, pinB, t, info, isAct
     </div>
   `;
 
-  const pillMarker = L.marker(midPt, {
-    icon: L.divIcon({ html: pillHtml, className: 'route-label-icon', iconSize: [0, 0], iconAnchor: [0, 0] }),
-    zIndexOffset: isActive ? 430 : 95,
-  }).addTo(overlayGroup);
-
-  pillMarker.on('click', openEdit);
+  addRoutePill(overlayGroup, midPt, pillHtml, isActive ? 430 : 95, openEdit);
 }
 
 /**
@@ -205,7 +381,9 @@ export function drawRouteSegmentOnMap(overlayGroup, day, pinA, pinB, pinIdx, isA
   const modeMeta = TRANSPORT_MODES[t.mode] || TRANSPORT_MODES.car;
   const info = getTransportDisplayInfo(t);
   const openEdit = (ev) => {
-    L.DomEvent.stopPropagation(ev);
+    if (!overlayGroup?.isGoogle && ev) {
+      L.DomEvent.stopPropagation(ev);
+    }
     if (typeof onOpenTransportModal === 'function') {
       onOpenTransportModal(day.id, pinIdx);
     }
@@ -220,13 +398,18 @@ export function drawRouteSegmentOnMap(overlayGroup, day, pinA, pinB, pinIdx, isA
   // B. 不支援陸路／無班次／無法連線：誠實淡灰細虛線＋灰色提示膠囊
   if (info.kind === 'unsupported' || info.kind === 'network_error') {
     const dashCoords = generateCurvedPath(pinA.lat, pinA.lng, pinB.lat, pinB.lng);
-    const faintLine = L.polyline(dashCoords, {
-      color: '#9A8C7F',
-      weight: 2.2,
-      opacity: isActive ? 0.55 : 0.35,
-      dashArray: '4, 7',
-      lineCap: 'round',
-    }).addTo(overlayGroup);
+    addPolyline(
+      overlayGroup,
+      dashCoords,
+      {
+        color: '#9A8C7F',
+        weight: 2.2,
+        opacity: isActive ? 0.55 : 0.35,
+        dashArray: '4, 7',
+        lineCap: 'round',
+      },
+      { onClick: openEdit, zIndex: 12 }
+    );
 
     const midPt = getPolylineMidpoint(dashCoords);
     const pillHtml = `
@@ -234,35 +417,39 @@ export function drawRouteSegmentOnMap(overlayGroup, day, pinA, pinB, pinIdx, isA
         <span>${escapeHTML(info.mapPill)}</span>
       </div>
     `;
-    const pillMarker = L.marker(midPt, {
-      icon: L.divIcon({ html: pillHtml, className: 'route-label-icon', iconSize: [0, 0], iconAnchor: [0, 0] }),
-      zIndexOffset: isActive ? 410 : 80,
-    }).addTo(overlayGroup);
-
-    faintLine.on('click', openEdit);
-    pillMarker.on('click', openEdit);
+    addRoutePill(overlayGroup, midPt, pillHtml, isActive ? 410 : 80, openEdit);
     return;
   }
 
   // C. 手動紀錄大眾運輸（尚未透過 Google Routes 自動查詢）：柔和虛線示意
   if (t.mode === 'transit' && info.kind !== 'pending') {
     const transitCoords = generateCurvedPath(pinA.lat, pinA.lng, pinB.lat, pinB.lng);
-    L.polyline(transitCoords, {
-      color: '#FFFDF9',
-      weight: 6.5,
-      opacity: isActive ? 0.88 : 0.55,
-      dashArray: '6, 8',
-      lineCap: 'round',
-      interactive: false,
-    }).addTo(overlayGroup);
+    addPolyline(
+      overlayGroup,
+      transitCoords,
+      {
+        color: '#FFFDF9',
+        weight: 6.5,
+        opacity: isActive ? 0.88 : 0.55,
+        dashArray: '6, 8',
+        lineCap: 'round',
+        interactive: false,
+      },
+      { zIndex: 14 }
+    );
 
-    const mainLine = L.polyline(transitCoords, {
-      color: day.color,
-      weight: 3.6,
-      opacity: isActive ? 0.88 : 0.55,
-      dashArray: '6, 8',
-      lineCap: 'round',
-    }).addTo(overlayGroup);
+    addPolyline(
+      overlayGroup,
+      transitCoords,
+      {
+        color: day.color,
+        weight: 3.6,
+        opacity: isActive ? 0.88 : 0.55,
+        dashArray: '6, 8',
+        lineCap: 'round',
+      },
+      { onClick: openEdit, zIndex: 16 }
+    );
 
     const midPt = getPolylineMidpoint(transitCoords);
     const isEmpty = info.kind === 'transit-empty';
@@ -272,13 +459,7 @@ export function drawRouteSegmentOnMap(overlayGroup, day, pinA, pinB, pinIdx, isA
         <span>${escapeHTML(info.mapPill)}</span>
       </div>
     `;
-    const pillMarker = L.marker(midPt, {
-      icon: L.divIcon({ html: pillHtml, className: 'route-label-icon', iconSize: [0, 0], iconAnchor: [0, 0] }),
-      zIndexOffset: isActive ? 420 : 90,
-    }).addTo(overlayGroup);
-
-    mainLine.on('click', openEdit);
-    pillMarker.on('click', openEdit);
+    addRoutePill(overlayGroup, midPt, pillHtml, isActive ? 420 : 90, openEdit);
     return;
   }
 
@@ -293,13 +474,18 @@ export function drawRouteSegmentOnMap(overlayGroup, day, pinA, pinB, pinIdx, isA
       [pinA.lat, pinA.lng],
       [pinB.lat, pinB.lng],
     ];
-    const guideLine = L.polyline(guideCoords, {
-      color: '#A08D7C',
-      weight: 2,
-      opacity: isActive ? 0.35 : 0.2,
-      dashArray: '3, 7',
-      lineCap: 'round',
-    }).addTo(overlayGroup);
+    addPolyline(
+      overlayGroup,
+      guideCoords,
+      {
+        color: '#A08D7C',
+        weight: 2,
+        opacity: isActive ? 0.35 : 0.2,
+        dashArray: '3, 7',
+        lineCap: 'round',
+      },
+      { onClick: openEdit, zIndex: 10 }
+    );
 
     const midPt = getPolylineMidpoint(guideCoords);
     const pillHtml = `
@@ -307,34 +493,38 @@ export function drawRouteSegmentOnMap(overlayGroup, day, pinA, pinB, pinIdx, isA
         <span>${escapeHTML(info.mapPill)}</span>
       </div>
     `;
-    const pillMarker = L.marker(midPt, {
-      icon: L.divIcon({ html: pillHtml, className: 'route-label-icon', iconSize: [0, 0], iconAnchor: [0, 0] }),
-      zIndexOffset: isActive ? 415 : 85,
-    }).addTo(overlayGroup);
-
-    guideLine.on('click', openEdit);
-    pillMarker.on('click', openEdit);
+    addRoutePill(overlayGroup, midPt, pillHtml, isActive ? 415 : 85, openEdit);
     return;
   }
 
   // 繪製完全貼合道路的折線（白米色外框光暈＋天數主題色主線）
-  L.polyline(roadCoords, {
-    color: '#FFFDF9',
-    weight: modeMeta.weight + 3.2,
-    opacity: isActive ? 0.92 : 0.58,
-    lineCap: 'round',
-    lineJoin: 'round',
-    interactive: false,
-  }).addTo(overlayGroup);
+  addPolyline(
+    overlayGroup,
+    roadCoords,
+    {
+      color: '#FFFDF9',
+      weight: modeMeta.weight + 3.2,
+      opacity: isActive ? 0.92 : 0.58,
+      lineCap: 'round',
+      lineJoin: 'round',
+      interactive: false,
+    },
+    { zIndex: 18 }
+  );
 
-  const mainLine = L.polyline(roadCoords, {
-    color: day.color,
-    weight: modeMeta.weight,
-    opacity: isActive ? 0.96 : 0.62,
-    dashArray: modeMeta.dashArray,
-    lineCap: 'round',
-    lineJoin: 'round',
-  }).addTo(overlayGroup);
+  addPolyline(
+    overlayGroup,
+    roadCoords,
+    {
+      color: day.color,
+      weight: modeMeta.weight,
+      opacity: isActive ? 0.96 : 0.62,
+      dashArray: modeMeta.dashArray,
+      lineCap: 'round',
+      lineJoin: 'round',
+    },
+    { onClick: openEdit, zIndex: 20 }
+  );
 
   // 若標點位於公園／建築內，補上極輕量短接入點線
   drawPinAccessConnector(overlayGroup, pinA, roadCoords[0], isActive);
@@ -347,11 +537,5 @@ export function drawRouteSegmentOnMap(overlayGroup, day, pinA, pinB, pinIdx, isA
       <span>${escapeHTML(info.mapPill)}</span>
     </div>
   `;
-  const pillMarker = L.marker(midPt, {
-    icon: L.divIcon({ html: pillHtml, className: 'route-label-icon', iconSize: [0, 0], iconAnchor: [0, 0] }),
-    zIndexOffset: isActive ? 420 : 90,
-  }).addTo(overlayGroup);
-
-  mainLine.on('click', openEdit);
-  pillMarker.on('click', openEdit);
+  addRoutePill(overlayGroup, midPt, pillHtml, isActive ? 420 : 90, openEdit);
 }

@@ -11,6 +11,7 @@ import {
   extractBusRouteNumber,
   formatLineDisplayName,
   handleComputeRoutes,
+  handlePlaceDetails,
   handleReverseGeocode,
   handleStatusRequest,
   normalizeLandRoute,
@@ -1307,6 +1308,114 @@ test('地標吸附、繁中／日文防英文搶位、Table A 參數合規與 na
   assert.equal(p.nearbyCandidates.length, 2);
   assert.equal(p.nearbyCandidates[1].lat, 22.63882);
 });
+
+test('Google Maps JS SDK 整合：金鑰隔離、IconMouseEvent placeId 詳情查詢與六合夜市顯著度優先防亂吸', async () => {
+  // 1. 金鑰隔離：僅有伺服器 GOOGLE_MAPS_API_KEY 時絕不可暴露至前端 mapsJsKey
+  const serverOnly = handleStatusRequest({ GOOGLE_MAPS_API_KEY: 'SECRET_SERVER_KEY' });
+  assert.equal(serverOnly.body.configured, true);
+  assert.equal(serverOnly.body.mapsJsConfigured, false);
+  assert.equal(serverOnly.body.mapsJsKey, undefined);
+
+  const withJsKey = handleStatusRequest({
+    GOOGLE_MAPS_API_KEY: 'SECRET_SERVER_KEY',
+    GOOGLE_MAPS_JS_API_KEY: 'PUBLIC_BROWSER_KEY',
+  });
+  assert.equal(withJsKey.body.mapsJsConfigured, true);
+  assert.equal(withJsKey.body.mapsJsKey, 'PUBLIC_BROWSER_KEY');
+
+  // 2. handlePlaceDetails：精準以點擊底圖圖示取得的 placeId 回傳 Google 底圖原名與精確座標
+  const badPlace = await handlePlaceDetails('../evil', { GOOGLE_MAPS_API_KEY: 'test-key' });
+  assert.equal(badPlace.statusCode, 400);
+
+  const originalFetch = globalThis.fetch;
+  let placeDetailUrl = '';
+  let nearbyBody = null;
+  try {
+    globalThis.fetch = async (url, init) => {
+      const sUrl = String(url);
+      if (sUrl.includes('/v1/places/ChIJ_LiuheNightMarket')) {
+        placeDetailUrl = sUrl;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: 'ChIJ_LiuheNightMarket',
+            displayName: { text: '六合國際觀光夜市', languageCode: 'zh-TW' },
+            location: { latitude: 22.63218, longitude: 120.29915 },
+            shortFormattedAddress: '高雄市新興區六合二路',
+            primaryTypeDisplayName: { text: '夜市' },
+            addressComponents: [{ types: ['country'], shortText: 'TW' }],
+          }),
+        };
+      }
+      if (sUrl.includes('places:searchNearby')) {
+        nearbyBody = JSON.parse(init.body);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            places: [
+              // POPULARITY 排名第 0：顯著底圖大地標（距點擊點 16m）
+              {
+                id: 'ChIJ_LiuheNightMarket',
+                displayName: { text: '六合國際觀光夜市' },
+                primaryType: 'night_market',
+                types: ['night_market', 'tourist_attraction'],
+                businessStatus: 'OPERATIONAL',
+                location: { latitude: 22.63234, longitude: 120.29918 },
+              },
+              {
+                id: 'ChIJ_711',
+                displayName: { text: '7-ELEVEN 明莊門市' },
+                primaryType: 'convenience_store',
+                types: ['convenience_store'],
+                businessStatus: 'OPERATIONAL',
+                location: { latitude: 22.63245, longitude: 120.2989 },
+              },
+              {
+                id: 'ChIJ_duck',
+                displayName: { text: '富記鴨湯' },
+                primaryType: 'restaurant',
+                types: ['restaurant'],
+                businessStatus: 'OPERATIONAL',
+                location: { latitude: 22.63205, longitude: 120.2993 },
+              },
+              {
+                id: 'ChIJ_eel_stall',
+                displayName: { text: '鱔魚姊 鱔魚意麵' },
+                primaryType: 'restaurant',
+                types: ['restaurant'],
+                businessStatus: 'OPERATIONAL',
+                // 雖距點擊點僅 3m，但顯著度靠後（畫面上未呈現），不應搶走六合夜市
+                location: { latitude: 22.63222, longitude: 120.29911 },
+              },
+            ],
+          }),
+        };
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    };
+
+    const pdRes = await handlePlaceDetails('ChIJ_LiuheNightMarket', { GOOGLE_MAPS_API_KEY: 'test-key' });
+    assert.equal(pdRes.statusCode, 200);
+    assert.equal(pdRes.body.status, 'ok');
+    assert.equal(pdRes.body.name, '六合國際觀光夜市');
+    assert.equal(pdRes.body.lat, 22.63218);
+    assert.equal(pdRes.body.lng, 120.29915);
+    assert.equal(pdRes.body.countryCode, 'TW');
+    assert.ok(placeDetailUrl.includes('languageCode=zh-TW'));
+
+    // 3. 右鍵／長按反查：使用 POPULARITY 排序，顯著的「六合國際觀光夜市」穩贏隱藏小攤「鱔魚姊 鱔魚意麵」
+    const revRes = await handleReverseGeocode(22.6322, 120.2991, { GOOGLE_MAPS_API_KEY: 'test-key' }, 17);
+    assert.equal(nearbyBody.rankPreference, 'POPULARITY');
+    assert.equal(revRes.body.name, '六合國際觀光夜市');
+    assert.equal(revRes.body.placeId, 'ChIJ_LiuheNightMarket');
+    assert.equal(revRes.body.snapped, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 
 
 

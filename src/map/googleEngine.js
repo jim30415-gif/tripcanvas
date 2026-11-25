@@ -1,0 +1,344 @@
+import { escapeHTML } from '../utils/format.js';
+
+let sdkPromise = null;
+let authFailed = false;
+let authFailureCallback = null;
+
+/**
+ * 檢查是否設定了瀏覽器專用 Google Maps JS API 金鑰（不接觸伺服器專屬 GOOGLE_MAPS_API_KEY）
+ */
+export async function resolveGoogleMapsJsKey() {
+  try {
+    const inlineKey = (import.meta.env?.VITE_GOOGLE_MAPS_API_KEY || '').trim();
+    if (inlineKey) return inlineKey;
+  } catch {
+    // ignore in non-Vite test environments
+  }
+
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 1600);
+    const res = await fetch('/api/routes', { signal: ctrl.signal });
+    clearTimeout(timer);
+    if (!res.ok) return '';
+    const data = await res.json();
+    return typeof data?.mapsJsKey === 'string' ? data.mapsJsKey.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 動態載入官方 Google Maps JavaScript SDK（language=zh-TW, region=TW）
+ * 若金鑰無效、網域被擋或離線逾時則 reject，由 mapInit 自動無縫降級回 Leaflet
+ */
+export function loadGoogleMapsSdk(apiKey, onAuthError = null) {
+  if (typeof onAuthError === 'function') {
+    authFailureCallback = onAuthError;
+  }
+
+  if (typeof window === 'undefined') {
+    return Promise.reject(new Error('NO_WINDOW'));
+  }
+
+  if (window.google?.maps?.Map && window.google?.maps?.OverlayView) {
+    return Promise.resolve(window.google.maps);
+  }
+
+  if (!apiKey || authFailed) {
+    return Promise.reject(new Error('NO_GOOGLE_MAPS_JS_KEY'));
+  }
+
+  if (sdkPromise) return sdkPromise;
+
+  sdkPromise = new Promise((resolve, reject) => {
+    const prevAuthFailure = window.gm_authFailure;
+    window.gm_authFailure = () => {
+      authFailed = true;
+      if (typeof prevAuthFailure === 'function') {
+        try {
+          prevAuthFailure();
+        } catch {
+          // ignore
+        }
+      }
+      if (typeof authFailureCallback === 'function') {
+        authFailureCallback();
+      }
+      reject(new Error('GOOGLE_MAPS_AUTH_FAILURE'));
+    };
+
+    const callbackName = '__tripcanvasGoogleMapsReady';
+    let settled = false;
+    const finishOk = async () => {
+      if (settled) return;
+      try {
+        if (window.google?.maps?.importLibrary && !window.google?.maps?.Map) {
+          await window.google.maps.importLibrary('maps');
+        }
+        if (window.google?.maps?.Map && window.google?.maps?.OverlayView) {
+          settled = true;
+          clearTimeout(timeoutId);
+          resolve(window.google.maps);
+        }
+      } catch (err) {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeoutId);
+          reject(err);
+        }
+      }
+    };
+
+    const timeoutId = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        sdkPromise = null;
+        reject(new Error('GOOGLE_MAPS_SDK_TIMEOUT'));
+      }
+    }, 6500);
+
+    window[callbackName] = () => {
+      void finishOk();
+    };
+
+    const script = document.createElement('script');
+    script.async = true;
+    script.defer = true;
+    script.src =
+      `https://maps.googleapis.com/maps/api/js` +
+      `?key=${encodeURIComponent(apiKey)}` +
+      `&language=zh-TW&region=TW&libraries=places&v=weekly&callback=${callbackName}`;
+    script.onerror = () => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeoutId);
+        sdkPromise = null;
+        reject(new Error('GOOGLE_MAPS_SDK_LOAD_ERROR'));
+      }
+    };
+    document.head.appendChild(script);
+  });
+
+  return sdkPromise;
+}
+
+/**
+ * 輕量級投影橋接器：提供容器像素座標 ↔ 經緯度轉換（供長按加點與拖曳標點使用）
+ */
+export function createGoogleProjectionHelper(googleMap) {
+  const gmaps = window.google.maps;
+  class ProjectionOverlay extends gmaps.OverlayView {
+    onAdd() {}
+    draw() {}
+    onRemove() {}
+  }
+  const helper = new ProjectionOverlay();
+  helper.setMap(googleMap);
+
+  return {
+    containerPointToLatLng(x, y) {
+      const proj = helper.getProjection();
+      if (!proj) return null;
+      const ll = proj.fromContainerPixelToLatLng(new gmaps.Point(x, y));
+      if (!ll) return null;
+      return { lat: ll.lat(), lng: ll.lng() };
+    },
+    latLngToContainerPoint(lat, lng) {
+      const proj = helper.getProjection();
+      if (!proj) return null;
+      const pt = proj.fromLatLngToContainerPixel(new gmaps.LatLng(lat, lng));
+      if (!pt) return null;
+      return { x: pt.x, y: pt.y };
+    },
+    destroy() {
+      helper.setMap(null);
+    },
+  };
+}
+
+/**
+ * 建立自訂 HTML 覆蓋物（無需 Cloud Map ID，完整保留貓頭鷹咖啡館風格標點與路線膠囊）
+ */
+export function createGoogleHtmlOverlay(
+  googleMap,
+  { lat, lng, html, className = '', zIndex = 100, pane = 'overlayMouseTarget' }
+) {
+  const gmaps = window.google.maps;
+
+  const div = document.createElement('div');
+  div.className = className;
+  div.style.position = 'absolute';
+  div.style.left = '0px';
+  div.style.top = '0px';
+  div.style.zIndex = String(zIndex);
+  div.innerHTML = html;
+
+  class HtmlOverlay extends gmaps.OverlayView {
+    constructor(initLat, initLng) {
+      super();
+      this._lat = initLat;
+      this._lng = initLng;
+      this._el = div;
+    }
+
+    onAdd() {
+      const panes = this.getPanes();
+      const targetPane = panes?.[pane] || panes?.overlayMouseTarget;
+      if (targetPane && !this._el.parentNode) {
+        targetPane.appendChild(this._el);
+      }
+    }
+
+    draw() {
+      const proj = this.getProjection();
+      if (!proj) return;
+      const pt = proj.fromLatLngToDivPixel(new gmaps.LatLng(this._lat, this._lng));
+      if (!pt) return;
+      this._el.style.left = `${pt.x}px`;
+      this._el.style.top = `${pt.y}px`;
+    }
+
+    onRemove() {
+      if (this._el.parentNode) {
+        this._el.parentNode.removeChild(this._el);
+      }
+    }
+
+    setPosition(nextLat, nextLng) {
+      this._lat = nextLat;
+      this._lng = nextLng;
+      this.draw();
+    }
+
+    getLatLng() {
+      return { lat: this._lat, lng: this._lng };
+    }
+
+    setZIndex(nextZ) {
+      this._el.style.zIndex = String(nextZ);
+    }
+
+    getElement() {
+      return this._el;
+    }
+  }
+
+  const overlay = new HtmlOverlay(lat, lng);
+  overlay.setMap(googleMap);
+  return overlay;
+}
+
+/**
+ * 統一圖層容器：對齊 Leaflet LayerGroup 的 clearLayers() 介面
+ */
+export function createGoogleOverlayGroup(googleMap) {
+  const items = [];
+  return {
+    isGoogle: true,
+    map: googleMap,
+    add(item) {
+      if (item) items.push(item);
+      return item;
+    },
+    clearLayers() {
+      while (items.length > 0) {
+        const item = items.pop();
+        try {
+          if (typeof item.setMap === 'function') item.setMap(null);
+          else if (typeof item.close === 'function') item.close();
+        } catch {
+          // ignore
+        }
+      }
+    },
+  };
+}
+
+/**
+ * 在 Google 底圖原生地標圖示上方顯示精巧浮動確認卡（「點畫面上看得到的點 → 一鍵加入」）
+ */
+export function mountBasemapPoiCard(
+  googleMap,
+  { lat, lng, loading = false, name = '', address = '', categoryLabel = '', onAdd, onClose }
+) {
+  const cardHtml = `
+    <div
+      class="basemap-poi-card pointer-events-auto select-none"
+      style="transform: translate(-50%, calc(-100% - 14px));"
+    >
+      <div class="min-w-[210px] max-w-[270px] rounded-2xl bg-[#FBF8F3]/95 backdrop-blur-md border border-[#D8C7B4] shadow-2xl p-3 text-[#3A2C21]">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-1.5 mb-1">
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-[#EBF2EC] text-[#4F6F57] text-[10px] font-extrabold tracking-wide">
+                Google 底圖標點
+              </span>
+              ${
+                categoryLabel
+                  ? `<span class="text-[10px] font-semibold text-[#8C7664] truncate">${escapeHTML(categoryLabel)}</span>`
+                  : ''
+              }
+            </div>
+            <div class="text-sm font-extrabold text-[#3A2C21] leading-snug break-words">
+              ${loading ? '讀取底圖地標中…' : escapeHTML(name || 'Google 地圖地點')}
+            </div>
+            ${
+              !loading && address
+                ? `<div class="text-[11px] text-[#786454] mt-0.5 line-clamp-2 leading-tight">${escapeHTML(address)}</div>`
+                : ''
+            }
+          </div>
+          <button
+            type="button"
+            class="btn-close-poi-card w-6 h-6 rounded-full hover:bg-[#EFE7DC] text-[#8C7664] hover:text-[#3A2C21] flex items-center justify-center shrink-0 text-sm font-bold transition"
+            aria-label="關閉"
+          >×</button>
+        </div>
+        ${
+          loading
+            ? `<div class="mt-2.5 h-8 rounded-xl bg-[#EFE7DC] animate-pulse"></div>`
+            : `
+          <button
+            type="button"
+            class="btn-add-basemap-poi mt-2.5 w-full py-2 px-3 rounded-xl bg-[#816448] hover:bg-[#6B513A] active:scale-[0.98] text-[#FAF4EC] text-xs font-extrabold shadow-sm transition flex items-center justify-center gap-1.5"
+          >
+            <span>＋</span>
+            <span>加入目前行程</span>
+          </button>
+        `
+        }
+      </div>
+      <div class="w-0 h-0 mx-auto border-l-[7px] border-l-transparent border-r-[7px] border-r-transparent border-t-[8px] border-t-[#FBF8F3] drop-shadow-sm"></div>
+    </div>
+  `;
+
+  const overlay = createGoogleHtmlOverlay(googleMap, {
+    lat,
+    lng,
+    html: cardHtml,
+    className: 'basemap-poi-overlay',
+    zIndex: 3200,
+    pane: 'floatPane',
+  });
+
+  const el = overlay.getElement();
+  // 防止卡片上的點擊與滾動冒泡至 Google Map 底層
+  ['click', 'mousedown', 'mouseup', 'pointerdown', 'pointerup', 'touchstart', 'touchend', 'dblclick'].forEach(
+    (evtName) => {
+      el.addEventListener(evtName, (ev) => ev.stopPropagation());
+    }
+  );
+
+  el.querySelector('.btn-close-poi-card')?.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    if (typeof onClose === 'function') onClose();
+  });
+
+  el.querySelector('.btn-add-basemap-poi')?.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    if (typeof onAdd === 'function') onAdd();
+  });
+
+  return overlay;
+}

@@ -1,5 +1,6 @@
 import {
   handleComputeRoutes,
+  handlePlaceDetails,
   handleRatesRequest,
   handleReverseGeocode,
   handleSearchPlaces,
@@ -15,6 +16,17 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
   if (req.method === 'GET') {
+    const wantsPlace =
+      req.query?.place === '1' ||
+      req.query?.action === 'place' ||
+      (typeof req.url === 'string' && /[?&](place=1|action=place)\b/.test(req.url));
+    if (wantsPlace) {
+      const parsed = new URL(req.url || '', 'http://localhost');
+      const placeId = req.query?.placeId ?? parsed.searchParams.get('placeId') ?? '';
+      const result = await handlePlaceDetails(placeId, process.env);
+      return res.status(result.statusCode).json(result.body);
+    }
+
     const wantsSearch =
       req.query?.search === '1' ||
       req.query?.action === 'search' ||

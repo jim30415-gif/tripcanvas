@@ -184,6 +184,11 @@ html, body {
     bottom: 6px;
     transition: right 0.24s cubic-bezier(0.22, 1, 0.36, 1);
   }
+  #google-zoom-controls {
+    right: calc(var(--right-dock) + 14px);
+    bottom: 24px;
+    transition: right 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+  }
 
   /* 底部總支出膠囊與展開明細自動置中於兩側浮動區塊之間的可見地圖走廊 */
   #desktop-expense-corridor {
@@ -599,15 +604,36 @@ aside.right-panel {
     border-radius: 9999px;
   }
 
-  /* 手機版將 Leaflet 縮放 +/- 移至右上角縮放鈕下方，避免與右下圓球及往上彈出的日期方塊重疊 */
+  /* 手機版將縮放 +/- 移至右上角聚焦鈕下方，避免與右下圓球及往上彈出的日期方塊重疊 */
   .leaflet-bottom.leaflet-right {
     bottom: auto !important;
     top: 56px !important;
     right: 2px !important;
   }
 
+  #google-zoom-controls {
+    bottom: auto;
+    top: 62px;
+    right: 12px;
+  }
+
   .leaflet-bottom.leaflet-right .leaflet-control-attribution {
     display: none !important;
+  }
+}
+
+.basemap-poi-card {
+  animation: poiCardPop 0.16s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes poiCardPop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-100% - 6px)) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, calc(-100% - 14px)) scale(1);
   }
 }
 

@@ -1044,7 +1044,8 @@ export async function reverseGeocode(lat, lng, { zoom = 17 } = {}) {
       name: top.name,
       placeId: top.placeId,
       source: 'osm_poi',
-      snapped: hasCoords && Number.isFinite(top.distanceMeters) && top.distanceMeters <= snapThreshold,
+      // 免費開源圖資與 Google 底圖圖示位置可能不同步，故不自動亂吸座標（僅保留座標供詳情頁手動切換候選時使用）
+      snapped: false,
       candidates: dedupedPois.length > 1 ? dedupedPois : [],
     };
     if (hasCoords) {
@@ -1060,5 +1061,74 @@ export async function reverseGeocode(lat, lng, { zoom = 17 } = {}) {
   if (nominatimName) {
     return { name: nominatimName, placeId: '', source: 'nominatim', snapped: false, candidates: [] };
   }
+  return null;
+}
+
+/**
+ * 透過 Google Maps 原生點擊底圖圖示取得的 placeId，精準取得該圖示對應的繁中名稱與座標
+ * 優先走後端代理 /api/routes?place=1，若未啟用則自動嘗試瀏覽器端 Google Maps Places Library
+ */
+export async function fetchPlaceDetailsById(placeId) {
+  const cleanId = String(placeId || '').trim();
+  if (!cleanId) return null;
+
+  // 1. 優先走同源伺服器代理（避免瀏覽器金鑰權限不足）
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 3800);
+    const qs = new URLSearchParams({ place: '1', placeId: cleanId });
+    const res = await fetch(`/api/routes?${qs.toString()}`, { signal: ctrl.signal });
+    clearTimeout(timer);
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.status === 'ok' && data?.name) {
+        return {
+          placeId: data.placeId || cleanId,
+          name: String(data.name).trim(),
+          lat: Number.isFinite(Number(data.lat)) ? Number(data.lat) : null,
+          lng: Number.isFinite(Number(data.lng)) ? Number(data.lng) : null,
+          address: data.address || '',
+          categoryLabel: data.categoryLabel || '',
+          countryCode: data.countryCode || '',
+          source: 'google_place_id',
+        };
+      }
+    }
+  } catch {
+    // fallback to client SDK below
+  }
+
+  // 2. 瀏覽器端 Google Maps Places Library 備援（若使用者僅在瀏覽器金鑰啟用 Places API）
+  try {
+    const g = typeof window !== 'undefined' ? window.google : null;
+    if (g?.maps?.importLibrary) {
+      const placesLib = await g.maps.importLibrary('places');
+      if (placesLib?.Place) {
+        const place = new placesLib.Place({ id: cleanId, requestedLanguage: 'zh-TW' });
+        await place.fetchFields({
+          fields: ['id', 'displayName', 'location', 'formattedAddress', 'primaryTypeDisplayName'],
+        });
+        const name = String(place.displayName || '').trim();
+        if (name) {
+          const loc = place.location;
+          const pLat = typeof loc?.lat === 'function' ? loc.lat() : Number(loc?.lat);
+          const pLng = typeof loc?.lng === 'function' ? loc.lng() : Number(loc?.lng);
+          return {
+            placeId: place.id || cleanId,
+            name,
+            lat: Number.isFinite(pLat) ? Number(pLat.toFixed(6)) : null,
+            lng: Number.isFinite(pLng) ? Number(pLng.toFixed(6)) : null,
+            address: place.formattedAddress || '',
+            categoryLabel: place.primaryTypeDisplayName || '',
+            countryCode: '',
+            source: 'google_place_id',
+          };
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
   return null;
 }

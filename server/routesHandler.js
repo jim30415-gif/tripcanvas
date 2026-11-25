@@ -495,13 +495,19 @@ function getNavitimeApiKey(env = process.env) {
 export function handleStatusRequest(env = process.env) {
   const apiKey = (env?.GOOGLE_MAPS_API_KEY || '').trim();
   const navitimeKey = getNavitimeApiKey(env);
+  const mapsJsKey = String(env?.GOOGLE_MAPS_JS_API_KEY || env?.VITE_GOOGLE_MAPS_API_KEY || '').trim();
+  const body = {
+    configured: Boolean(apiKey),
+    navitimeConfigured: Boolean(navitimeKey),
+    mapsJsConfigured: Boolean(mapsJsKey),
+    provider: 'google_routes_v2',
+  };
+  if (mapsJsKey) {
+    body.mapsJsKey = mapsJsKey;
+  }
   return {
     statusCode: 200,
-    body: {
-      configured: Boolean(apiKey),
-      navitimeConfigured: Boolean(navitimeKey),
-      provider: 'google_routes_v2',
-    },
+    body,
   };
 }
 
@@ -789,22 +795,22 @@ const LOW_PRIORITY_GOOGLE_POI_TYPES = new Set([
 
 function computeReverseRadiusMeters(zoom) {
   const z = Number(zoom);
-  if (!Number.isFinite(z)) return 65;
-  if (z >= 19) return 40;
-  if (z >= 18) return 55;
-  if (z >= 17) return 80;
-  if (z >= 16) return 115;
-  return 150;
+  if (!Number.isFinite(z)) return 60;
+  if (z >= 19) return 30;
+  if (z >= 18) return 45;
+  if (z >= 17) return 65;
+  if (z >= 16) return 95;
+  return 135;
 }
 
 function computeSnapThresholdMeters(zoom) {
   const z = Number(zoom);
-  if (!Number.isFinite(z)) return 55;
-  if (z >= 19) return 32;
-  if (z >= 18) return 45;
-  if (z >= 17) return 65;
-  if (z >= 16) return 95;
-  return 130;
+  if (!Number.isFinite(z)) return 40;
+  if (z >= 19) return 22;
+  if (z >= 18) return 32;
+  if (z >= 17) return 45;
+  if (z >= 16) return 65;
+  return 90;
 }
 
 function calcDistanceMeters(lat1, lng1, lat2, lng2) {
@@ -828,16 +834,22 @@ function isPureLatinLabel(name) {
 }
 
 /**
- * 依「Google 地圖標點名稱優先，無標點則取路名」原則選出最適合的標點預設名稱、吸附座標與鄰近候選地標
+ * 依「Google 顯著底圖標點優先，無標點則取路名」原則選出最適合的標點預設名稱、吸附座標與鄰近候選地標
  */
-export function pickBestPlaceFromGoogle(placesData, geocodeData, origin = null, zoom = null) {
+export function pickBestPlaceFromGoogle(
+  placesData,
+  geocodeData,
+  origin = null,
+  zoom = null,
+  { rankedByPopularity = false } = {}
+) {
   const places = Array.isArray(placesData?.places) ? placesData.places : [];
   const validPois = [];
   const seenNames = new Set();
   const inCjkRegion = isCjkRegionOrigin(origin);
   const snapThreshold = computeSnapThresholdMeters(zoom);
 
-  const pushCandidate = ({ name, placeId, pLat, pLng, primary, types, businessStatus }) => {
+  const pushCandidate = ({ name, placeId, pLat, pLng, primary, types, businessStatus, prominenceRank }) => {
     const cleanName = String(name || '').trim();
     if (!cleanName || seenNames.has(cleanName)) return;
     if (businessStatus === 'CLOSED_PERMANENTLY') return;
@@ -853,8 +865,11 @@ export function pickBestPlaceFromGoogle(placesData, geocodeData, origin = null, 
     const distMeters =
       origin && hasCoords ? calcDistanceMeters(origin.lat, origin.lng, pLat, pLng) : validPois.length * 10;
 
-    // 計算等效距離：低優先設施（ATM／辦公室）與東亞區純英文條目小幅讓位給緊鄰的中文／日文底圖標點
+    // 計算等效距離：當以 POPULARITY 排序時，Google 底圖顯著地標（排名靠前）優先於隱藏小攤販，不亂吸無名小店
     let effectiveDist = distMeters;
+    if (rankedByPopularity && Number.isFinite(prominenceRank)) {
+      effectiveDist += prominenceRank * 9;
+    }
     const isLowPriority =
       (primary && LOW_PRIORITY_GOOGLE_POI_TYPES.has(primary)) ||
       (typeList.length > 0 &&
@@ -862,7 +877,7 @@ export function pickBestPlaceFromGoogle(placesData, geocodeData, origin = null, 
         !typeList.some((t) =>
           ['restaurant', 'cafe', 'tourist_attraction', 'shopping_mall', 'store', 'train_station', 'subway_station', 'hotel', 'lodging'].includes(t)
         ));
-    if (isLowPriority) effectiveDist += 22;
+    if (isLowPriority) effectiveDist += 26;
     if (inCjkRegion && isPureLatinLabel(cleanName)) effectiveDist += 16;
 
     validPois.push({
@@ -876,7 +891,7 @@ export function pickBestPlaceFromGoogle(placesData, geocodeData, origin = null, 
     });
   };
 
-  for (const place of places) {
+  places.forEach((place, idx) => {
     pushCandidate({
       name: place?.displayName?.text,
       placeId: place?.id || '',
@@ -885,12 +900,13 @@ export function pickBestPlaceFromGoogle(placesData, geocodeData, origin = null, 
       primary: place?.primaryType || '',
       types: place?.types,
       businessStatus: place?.businessStatus || '',
+      prominenceRank: idx,
     });
-  }
+  });
 
   // Legacy Places API (results[]) 相容解析
   const legacyPlaces = Array.isArray(placesData?.results) ? placesData.results : [];
-  for (const place of legacyPlaces) {
+  legacyPlaces.forEach((place, idx) => {
     pushCandidate({
       name: place?.name,
       placeId: place?.place_id || '',
@@ -899,8 +915,9 @@ export function pickBestPlaceFromGoogle(placesData, geocodeData, origin = null, 
       primary: '',
       types: place?.types,
       businessStatus: place?.business_status || '',
+      prominenceRank: idx,
     });
-  }
+  });
 
   if (validPois.length > 0) {
     if (origin) validPois.sort((a, b) => a.effectiveDist - b.effectiveDist);
@@ -1010,7 +1027,7 @@ export async function handleReverseGeocode(lat, lng, env = process.env, zoom = n
   let geocodeData = null;
   let placesApiDisabled = false;
 
-  // 1. 優先以 Google Places API (New) 依地圖縮放動態半徑（40–150m）查詢最近 Google 底圖標點（與底圖 hl=zh-TW 完全一致）
+  // 1. 優先以 Google Places API (New) 的 POPULARITY 顯著度排序搭配緊緻縮放半徑，優先抓出畫面上看得到的底圖大地標／主要店家
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 3500);
@@ -1024,7 +1041,7 @@ export async function handleReverseGeocode(lat, lng, env = process.env, zoom = n
       },
       body: JSON.stringify({
         maxResultCount: 15,
-        rankPreference: 'DISTANCE',
+        rankPreference: 'POPULARITY',
         languageCode: 'zh-TW',
         excludedTypes: GOOGLE_NEARBY_EXCLUDED_TYPES,
         locationRestriction: {
@@ -1046,17 +1063,17 @@ export async function handleReverseGeocode(lat, lng, env = process.env, zoom = n
     // 逾時或網路異常時降級
   }
 
-  const fromPlaces = pickBestPlaceFromGoogle(placesData, null, origin, zoom);
+  const fromPlaces = pickBestPlaceFromGoogle(placesData, null, origin, zoom, { rankedByPopularity: true });
   if (fromPlaces) {
     return { statusCode: 200, body: { status: 'ok', ...fromPlaces } };
   }
 
-  // 1b. 若 Places API (New) 未啟用，自動嘗試相容舊版 Google Places Nearby Search
+  // 1b. 若 Places API (New) 未啟用，自動嘗試相容舊版 Google Places Nearby Search（以顯著度優先）
   if (placesApiDisabled || !placesData) {
     try {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 3200);
-      const legacyUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${numLat},${numLng}&rankby=distance&language=zh-TW&key=${encodeURIComponent(apiKey)}`;
+      const legacyUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${numLat},${numLng}&radius=${radius}&language=zh-TW&key=${encodeURIComponent(apiKey)}`;
       const res = await fetch(legacyUrl, { signal: ctrl.signal });
       clearTimeout(timer);
       if (res.ok) {
@@ -1071,7 +1088,9 @@ export async function handleReverseGeocode(lat, lng, env = process.env, zoom = n
               calcDistanceMeters(numLat, numLng, rLat, rLng) <= radius
             );
           });
-          const fromLegacy = pickBestPlaceFromGoogle({ results: nearbyOnly }, null, origin, zoom);
+          const fromLegacy = pickBestPlaceFromGoogle({ results: nearbyOnly }, null, origin, zoom, {
+            rankedByPopularity: true,
+          });
           if (fromLegacy) {
             return { statusCode: 200, body: { status: 'ok', ...fromLegacy } };
           }
@@ -1099,6 +1118,110 @@ export async function handleReverseGeocode(lat, lng, env = process.env, zoom = n
   const picked = pickBestPlaceFromGoogle(null, geocodeData, origin, zoom);
   if (picked) {
     return { statusCode: 200, body: { status: 'ok', ...picked } };
+  }
+
+  return {
+    statusCode: 200,
+    body: {
+      status: placesApiDisabled ? 'places_api_disabled' : 'not_found',
+      name: null,
+    },
+  };
+}
+
+/**
+ * 透過 Google Maps 點擊底圖圖示取得的原生 placeId，精準查詢該圖示對應的繁中名稱與精確座標（100% 與畫面顯示一致）
+ */
+export async function handlePlaceDetails(placeId, env = process.env) {
+  const cleanId = String(placeId || '').trim();
+  if (!cleanId || !/^[A-Za-z0-9_\-]+$/.test(cleanId)) {
+    return { statusCode: 400, body: { status: 'invalid', name: null } };
+  }
+
+  const apiKey = (env?.GOOGLE_MAPS_API_KEY || '').trim();
+  if (!apiKey) {
+    return { statusCode: 200, body: { status: 'unconfigured', name: null } };
+  }
+
+  let placesApiDisabled = false;
+
+  // 1. Places API (New) Place Details（Pro SKU：每月 5,000 次免費）
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 3500);
+    const url = `https://places.googleapis.com/v1/places/${encodeURIComponent(cleanId)}?languageCode=zh-TW`;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask':
+          'id,displayName,location,shortFormattedAddress,formattedAddress,primaryTypeDisplayName,addressComponents',
+      },
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    if (res.ok) {
+      const p = await res.json();
+      const name = p?.displayName?.text?.trim() || '';
+      const pLat = p?.location?.latitude;
+      const pLng = p?.location?.longitude;
+      if (name) {
+        const countryComp = (p.addressComponents || []).find((c) => (c.types || []).includes('country'));
+        const countryCode = (countryComp?.shortText || '').toUpperCase();
+        return {
+          statusCode: 200,
+          body: {
+            status: 'ok',
+            placeId: p.id || cleanId,
+            name,
+            lat: Number.isFinite(pLat) ? Number(pLat.toFixed(6)) : null,
+            lng: Number.isFinite(pLng) ? Number(pLng.toFixed(6)) : null,
+            address: p?.shortFormattedAddress || p?.formattedAddress || '',
+            categoryLabel: p?.primaryTypeDisplayName?.text || '',
+            countryCode,
+            source: 'google_place_id',
+          },
+        };
+      }
+    } else if (res.status === 401 || res.status === 403) {
+      placesApiDisabled = true;
+    }
+  } catch {
+    // fallback below
+  }
+
+  // 2. 相容備援：Legacy Place Details
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 3200);
+    const legacyUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(cleanId)}&fields=place_id,name,geometry,formatted_address,address_components&language=zh-TW&key=${encodeURIComponent(apiKey)}`;
+    const res = await fetch(legacyUrl, { signal: ctrl.signal });
+    clearTimeout(timer);
+    if (res.ok) {
+      const data = await res.json();
+      const r = data?.result;
+      if (data?.status === 'OK' && r?.name) {
+        const countryComp = (r.address_components || []).find((c) => (c.types || []).includes('country'));
+        const rLat = r?.geometry?.location?.lat;
+        const rLng = r?.geometry?.location?.lng;
+        return {
+          statusCode: 200,
+          body: {
+            status: 'ok',
+            placeId: r.place_id || cleanId,
+            name: String(r.name).trim(),
+            lat: Number.isFinite(rLat) ? Number(rLat.toFixed(6)) : null,
+            lng: Number.isFinite(rLng) ? Number(rLng.toFixed(6)) : null,
+            address: r.formatted_address || '',
+            categoryLabel: '',
+            countryCode: (countryComp?.short_name || '').toUpperCase(),
+            source: 'google_place_id',
+          },
+        };
+      }
+    }
+  } catch {
+    // ignore
   }
 
   return {
