@@ -47,17 +47,18 @@ function makeGeminiSuccess(parsedObj) {
   });
 }
 
-test('getScreenshotFeatureStatus reports unconfigured without GEMINI_API_KEY and enabled with key', () => {
+test('getScreenshotFeatureStatus reports unconfigured without GEMINI_API_KEY and osm_free stopGeocoder with key', () => {
   resetScreenshotQuotaStateForTest();
   const s1 = getScreenshotFeatureStatus({});
   assert.equal(s1.enabled, false);
   assert.equal(s1.reason, 'UNCONFIGURED');
+  assert.equal(s1.stopGeocoder, 'osm_free');
 
   const s2 = getScreenshotFeatureStatus({ GEMINI_API_KEY: 'free-key-123' });
   assert.equal(s2.enabled, true);
   assert.equal(s2.locked, false);
+  assert.equal(s2.stopGeocoder, 'osm_free');
   assert.equal(s2.limits.dailyParseRemaining, 80);
-  assert.equal(s2.limits.dailyPlacesRemaining, 120);
 });
 
 test('handleScreenshotParseRequest validates image format, size, and coordinates', async () => {
@@ -87,9 +88,10 @@ test('handleScreenshotParseRequest validates image format, size, and coordinates
   assert.equal(badCoord.body.error, 'INVALID_COORDS');
 });
 
-test('handleScreenshotParseRequest parses Japan bus screenshot, anchors stops via Places, snaps real bus roads via OSRM, and caches stops', async () => {
+test('handleScreenshotParseRequest anchors stops via 100% free Photon/OSM (zero Google Places calls even with GOOGLE_MAPS_API_KEY) and snaps real bus roads via OSRM', async () => {
   resetScreenshotQuotaStateForTest();
-  const env = { GEMINI_API_KEY: 'free-gemini-key', GOOGLE_MAPS_API_KEY: 'places-key' };
+  // 即使環境有設定 GOOGLE_MAPS_API_KEY，截圖站牌定位也絕不可呼叫 Google Places API
+  const env = { GEMINI_API_KEY: 'free-gemini-key', GOOGLE_MAPS_API_KEY: 'should-never-be-called' };
 
   const geminiParsed = {
     isTransitScreenshot: true,
@@ -121,7 +123,8 @@ test('handleScreenshotParseRequest parses Japan bus screenshot, anchors stops vi
     ],
   };
 
-  let placesCallCount = 0;
+  let googlePlacesCalls = 0;
+  let photonCalls = 0;
   let osrmBusWaypoints = '';
   const sampleBusPoly = encodePolyline([
     [36.5642, 136.6632],
@@ -136,37 +139,45 @@ test('handleScreenshotParseRequest parses Japan bus screenshot, anchors stops vi
   await withMockedFetch(
     async (url, opts) => {
       const u = String(url);
+      if (u.includes('places.googleapis.com')) {
+        googlePlacesCalls += 1;
+        throw new Error('Google Places must NEVER be called for screenshot stop anchoring!');
+      }
       if (u.includes('generativelanguage.googleapis.com')) {
         assert.equal(opts.headers['x-goog-api-key'], 'free-gemini-key');
         return makeGeminiSuccess(geminiParsed);
       }
-      if (u.includes('places.googleapis.com/v1/places:searchText')) {
-        placesCallCount += 1;
-        const body = JSON.parse(opts.body);
-        if (body.textQuery.includes('兼六園下')) {
+      if (u.includes('photon.komoot.io/api/')) {
+        photonCalls += 1;
+        const q = new URL(u).searchParams.get('q') || '';
+        if (q.includes('兼六園下')) {
           return makeJsonResponse({
-            places: [
-              // 刻意放一個超遠雜訊點，驗證走廊過濾會排除它
-              { id: 'far', displayName: { text: '遠方雜訊' }, location: { latitude: 35.68, longitude: 139.76 }, types: ['bus_stop'] },
-              { id: 's1', displayName: { text: '兼六園下・金沢城' }, location: { latitude: 36.5642, longitude: 136.6632 }, types: ['bus_stop'] },
+            features: [
+              // 遠方雜訊點（應被走廊過濾排除）
+              { geometry: { coordinates: [139.76, 35.68] }, properties: { name: '兼六園下遠方', osm_key: 'highway', osm_value: 'bus_stop' } },
+              // 非站牌設施（得分低於公車站牌）
+              { geometry: { coordinates: [136.6630, 36.5640] }, properties: { name: '兼六園下交差点', osm_key: 'highway', osm_value: 'traffic_signals' } },
+              // 精準公車站牌（應獲選）
+              { geometry: { coordinates: [136.6632, 36.5642] }, properties: { name: '兼六園下・金沢城', osm_key: 'highway', osm_value: 'bus_stop' } },
             ],
           });
         }
-        if (body.textQuery.includes('武蔵ヶ辻')) {
+        if (q === '武蔵ヶ辻') {
+          // 驗證複合站名「武蔵ヶ辻・近江町市場」完整查無時會自動退回主站名「武蔵ヶ辻」命中
           return makeJsonResponse({
-            places: [
-              { id: 's2', displayName: { text: '武蔵ヶ辻・近江町市場' }, location: { latitude: 36.5712, longitude: 136.6562 }, types: ['bus_stop'] },
+            features: [
+              { geometry: { coordinates: [136.6562, 36.5712] }, properties: { name: '武蔵ヶ辻・近江町市場', osm_key: 'highway', osm_value: 'bus_stop' } },
             ],
           });
         }
-        if (body.textQuery.includes('香林坊')) {
+        if (q.includes('香林坊')) {
           return makeJsonResponse({
-            places: [
-              { id: 's3', displayName: { text: '香林坊' }, location: { latitude: 36.5612, longitude: 136.6542 }, types: ['bus_stop'] },
+            features: [
+              { geometry: { coordinates: [136.6542, 36.5612] }, properties: { name: '香林坊', osm_key: 'highway', osm_value: 'bus_stop' } },
             ],
           });
         }
-        return makeJsonResponse({ places: [] });
+        return makeJsonResponse({ features: [] });
       }
       if (u.includes('routing.openstreetmap.de/routed-car')) {
         osrmBusWaypoints = u;
@@ -176,7 +187,7 @@ test('handleScreenshotParseRequest parses Japan bus screenshot, anchors stops vi
         return makeJsonResponse({ code: 'Ok', routes: [{ geometry: sampleWalkPoly, distance: 220, duration: 180 }] });
       }
       if (u.includes('open.er-api.com') || u.includes('frankfurter')) {
-        return makeJsonResponse({ rates: { TWD: 0.21 } });
+        return makeJsonResponse({ result: 'success', rates: { JPY: 4.7 } });
       }
       return makeJsonResponse({}, 404);
     },
@@ -192,13 +203,15 @@ test('handleScreenshotParseRequest parses Japan bus screenshot, anchors stops vi
         { ip: '1.2.3.4', env }
       );
 
+      assert.equal(googlePlacesCalls, 0);
       assert.equal(res1.statusCode, 200);
       assert.equal(res1.body.status, 'ok');
       assert.equal(res1.body.route.provider, 'screenshot');
       assert.equal(res1.body.route.durationMin, 18);
       assert.equal(res1.body.stopStats.totalStops, 3);
       assert.equal(res1.body.stopStats.matchedStops, 3);
-      assert.equal(placesCallCount, 3);
+      assert.equal(res1.body.stopStats.placesCallsUsed, 0);
+      assert.equal(res1.body.stopStats.geocoder, 'osm_free');
 
       // 驗證 OSRM 公車段有把上車站→中途站(香林坊)→下車站串成 3 個中繼點
       assert.ok(osrmBusWaypoints.includes('136.663200,36.564200;136.654200,36.561200;136.656200,36.571200'));
@@ -218,7 +231,8 @@ test('handleScreenshotParseRequest parses Japan bus screenshot, anchors stops vi
       assert.equal(res1.body.route.fare.originalAmount, 210);
       assert.ok(res1.body.route.fare.amountTwd > 0);
 
-      // 第二次同樣站名透過 screenshot-build 重建：應完全命中站牌快取（0 次 Google Places 呼叫、0 次 Gemini 呼叫）
+      // 第二次透過 screenshot-build 重建：應完全命中站牌快取（0 次 Photon / 0 次 Places / 0 次 Gemini）
+      const prevPhotonCalls = photonCalls;
       const res2 = await handleScreenshotBuildRouteRequest(
         {
           draft: res1.body.draft,
@@ -229,91 +243,72 @@ test('handleScreenshotParseRequest parses Japan bus screenshot, anchors stops vi
       );
       assert.equal(res2.statusCode, 200);
       assert.equal(res2.body.status, 'ok');
+      assert.equal(res2.body.stopStats.freeLookupsUsed, 0);
       assert.equal(res2.body.stopStats.placesCallsUsed, 0);
-      assert.equal(placesCallCount, 3);
+      assert.equal(photonCalls, prevPhotonCalls);
+      assert.equal(googlePlacesCalls, 0);
     }
   );
 });
 
-test('Google Places 429 immediately trips circuit breaker and locks screenshot import to protect free quota', async () => {
+test('Stop geocoder falls back cleanly to free OSM Nominatim when Photon has no match', async () => {
   resetScreenshotQuotaStateForTest();
-  const env = { GEMINI_API_KEY: 'free-key', GOOGLE_MAPS_API_KEY: 'places-key' };
-  let geminiCalls = 0;
+  let nominatimCalled = false;
 
   await withMockedFetch(
     async (url) => {
       const u = String(url);
-      if (u.includes('generativelanguage.googleapis.com')) {
-        geminiCalls += 1;
-        return makeGeminiSuccess({
-          isTransitScreenshot: true,
-          totalDurationMin: 15,
-          segments: [
-            {
-              type: 'TRANSIT',
-              vehicleType: 'BUS',
-              lineName: '206',
-              departureStopName: '京都駅前',
-              arrivalStopName: '清水道',
-              durationMin: 15,
-            },
-          ],
-        });
+      if (u.includes('photon.komoot.io')) {
+        return makeJsonResponse({ features: [] });
       }
-      if (u.includes('places.googleapis.com')) {
-        return makeJsonResponse({ error: { status: 'RESOURCE_EXHAUSTED', message: 'Quota exceeded' } }, 429);
+      if (u.includes('nominatim.openstreetmap.org')) {
+        nominatimCalled = true;
+        return makeJsonResponse([
+          { lat: '36.5645', lon: '136.6635', class: 'highway', type: 'bus_stop' },
+        ]);
       }
-      return makeJsonResponse({}, 404);
+      return makeJsonResponse({ code: 'NoRoute' }, 200);
     },
     async () => {
-      const r1 = await handleScreenshotParseRequest(
-        { imageDataUrl: FAKE_IMG_DATA_URL, origin: KANAZAWA_ORIGIN, destination: KANAZAWA_DEST },
-        { ip: '9.9.9.9', env }
-      );
-      assert.equal(r1.statusCode, 429);
-      assert.equal(r1.body.status, 'quota_limited');
-      assert.equal(r1.body.error, 'PLACES_QUOTA_EXCEEDED');
-
-      const status = getScreenshotFeatureStatus(env);
-      assert.equal(status.locked, true);
-      assert.equal(status.reason, 'PLACES_QUOTA_EXCEEDED');
-
-      // 鎖定後再呼叫 screenshot-parse 與 screenshot-build 皆直接被拒，且不再呼叫 Gemini
-      const r2 = await handleScreenshotParseRequest(
-        { imageDataUrl: FAKE_IMG_DATA_URL, origin: KANAZAWA_ORIGIN, destination: KANAZAWA_DEST },
-        { ip: '8.8.8.8', env }
-      );
-      assert.equal(r2.statusCode, 429);
-      assert.equal(r2.body.status, 'quota_limited');
-      assert.equal(geminiCalls, 1);
-
-      const r3 = await handleScreenshotBuildRouteRequest(
+      const res = await handleScreenshotBuildRouteRequest(
         {
-          draft: { segments: [{ type: 'TRANSIT', vehicleType: 'BUS', lineName: '206', departureStopName: 'A', arrivalStopName: 'B' }] },
+          draft: {
+            totalDurationMin: 12,
+            segments: [
+              {
+                type: 'TRANSIT',
+                vehicleType: 'BUS',
+                lineName: '90',
+                departureStopName: '兼六園下',
+                arrivalStopName: '近江町市場',
+                durationMin: 12,
+              },
+            ],
+          },
           origin: KANAZAWA_ORIGIN,
           destination: KANAZAWA_DEST,
         },
-        { env }
+        { env: { GOOGLE_MAPS_API_KEY: 'never-used' } }
       );
-      assert.equal(r3.statusCode, 429);
-      assert.equal(r3.body.status, 'quota_limited');
+      assert.equal(nominatimCalled, true);
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.body.stopStats.matchedStops, 2);
+      assert.equal(res.body.stopStats.placesCallsUsed, 0);
     }
   );
 });
 
-test('Per-IP daily limit, Places daily cap, and Gemini 429 lock prevent abuse cleanly', async () => {
+test('Per-IP daily limit, global daily parse cap, and Gemini 429 cooldown lock prevent abuse cleanly', async () => {
   resetScreenshotQuotaStateForTest();
   const env = {
     GEMINI_API_KEY: 'free-key',
-    GOOGLE_MAPS_API_KEY: 'places-key',
     SCREENSHOT_MAX_PER_IP_DAY: '1',
-    SCREENSHOT_PLACES_DAILY_LIMIT: '1',
+    SCREENSHOT_DAILY_LIMIT: '2',
   };
 
   await withMockedFetch(
     async (url) => {
-      const u = String(url);
-      if (u.includes('generativelanguage.googleapis.com')) {
+      if (String(url).includes('generativelanguage.googleapis.com')) {
         return makeGeminiSuccess({
           isTransitScreenshot: true,
           totalDurationMin: 12,
@@ -329,13 +324,22 @@ test('Per-IP daily limit, Places daily cap, and Gemini 429 lock prevent abuse cl
       );
       assert.equal(ok1.statusCode, 200);
 
-      // 同 IP 第 2 次超過每日上限
+      // 同 IP 第 2 次超過每 IP 每日上限
       const blockedIp = await handleScreenshotParseRequest(
         { imageDataUrl: FAKE_IMG_DATA_URL, origin: KANAZAWA_ORIGIN, destination: KANAZAWA_DEST },
         { ip: '10.0.0.1', env }
       );
       assert.equal(blockedIp.statusCode, 429);
       assert.equal(blockedIp.body.error, 'IP_DAILY_LIMIT');
+
+      // 換 IP 消耗第 2 次 -> 觸發全站每日上限鎖定
+      const ok2 = await handleScreenshotParseRequest(
+        { imageDataUrl: FAKE_IMG_DATA_URL, origin: KANAZAWA_ORIGIN, destination: KANAZAWA_DEST },
+        { ip: '10.0.0.2', env }
+      );
+      assert.equal(ok2.statusCode, 200);
+      assert.equal(getScreenshotFeatureStatus(env).locked, true);
+      assert.equal(getScreenshotFeatureStatus(env).reason, 'DAILY_PARSE_CAP');
     }
   );
 
@@ -346,7 +350,7 @@ test('Per-IP daily limit, Places daily cap, and Gemini 429 lock prevent abuse cl
     async () => {
       const g429 = await handleScreenshotParseRequest(
         { imageDataUrl: FAKE_IMG_DATA_URL, origin: KANAZAWA_ORIGIN, destination: KANAZAWA_DEST },
-        { ip: '10.0.0.2', env: { GEMINI_API_KEY: 'free-key' } }
+        { ip: '10.0.0.3', env: { GEMINI_API_KEY: 'free-key' } }
       );
       assert.equal(g429.statusCode, 429);
       assert.equal(g429.body.error, 'GEMINI_QUOTA_EXCEEDED');

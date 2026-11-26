@@ -98,11 +98,9 @@ function renderQuotaBannerHtml(q) {
     `;
   }
   const parseRem = q.limits?.dailyParseRemaining;
-  const placesRem = q.limits?.dailyPlacesRemaining;
-  const quotaHint =
-    Number.isFinite(parseRem) && Number.isFinite(placesRem)
-      ? `今日免費額度保護：剩餘 ${parseRem} 次解析 · ${placesRem} 次站牌定位`
-      : '使用 Google AI Studio 免費層解析（自動控管每日額度防超支）';
+  const quotaHint = Number.isFinite(parseRem)
+    ? `今日免費額度保護：剩餘 ${parseRem} 次 AI 解析 · 站牌定位全程免費（OSM）`
+    : '使用 Google AI Studio 免費層解析 ＋ 免費 OSM 站牌定位';
   return `
     <div class="flex items-center justify-between gap-2 text-[11px] text-owl-subtext px-0.5">
       <span>${escapeHTML(quotaHint)}</span>

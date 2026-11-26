@@ -9,7 +9,7 @@ const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash-lite';
 const FALLBACK_GEMINI_MODEL = 'gemini-2.5-flash';
 
 const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024; // 1.5 MB 解碼後上限
-const MAX_STOPS_PER_REQUEST = 4; // 每次截圖最多消耗 4 次站牌定位，防單次請求刷額度
+const MAX_STOPS_PER_REQUEST = 4; // 每次截圖最多定位 4 個站牌（全程使用免費開源 Photon / OSM，不觸碰 Google Places 計費）
 const STOP_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const MAX_STOP_CACHE = 500;
 const MAX_IP_DAILY_KEYS = 1000;
@@ -44,25 +44,13 @@ const VEHICLE_META = {
   OTHER: { label: '大眾運輸', emoji: '🚌', defaultColor: '#5B758A' },
 };
 
-const TRANSIT_PLACE_TYPES = new Set([
-  'bus_stop',
-  'bus_station',
-  'transit_station',
-  'train_station',
-  'subway_station',
-  'light_rail_station',
-  'ferry_terminal',
-]);
+const PHOTON_BUS_VALUES = new Set(['bus_stop', 'bus_station', 'tram_stop', 'platform', 'stop_position']);
+const PHOTON_RAIL_VALUES = new Set(['station', 'halt', 'subway_entrance', 'tram_stop']);
 
-// ==================== 1. 免費層安全配額與防刷爆熔斷器 ====================
+// ==================== 1. 免費層安全配額與防刷爆保護 ====================
 
 function getUtcDayKey(now = Date.now()) {
   return new Date(now).toISOString().slice(0, 10);
-}
-
-function getNextUtcMidnightMs(now = Date.now()) {
-  const d = new Date(now);
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1, 0, 0, 0);
 }
 
 function parsePositiveInt(raw, fallback, min = 1, max = 10000) {
@@ -75,11 +63,8 @@ function createInitialQuotaState(dayKey = getUtcDayKey()) {
   return {
     dayKey,
     globalParseCount: 0,
-    globalPlacesCount: 0,
     ipDailyCounts: new Map(),
-    placesLockedUntil: 0,
     geminiLockedUntil: 0,
-    placesLockReason: '',
     geminiLockReason: '',
   };
 }
@@ -102,7 +87,6 @@ export function resetScreenshotQuotaStateForTest() {
 function getQuotaLimits(env = process.env) {
   return {
     dailyParseLimit: parsePositiveInt(env?.SCREENSHOT_DAILY_LIMIT, 80, 1, 2000),
-    dailyPlacesLimit: parsePositiveInt(env?.SCREENSHOT_PLACES_DAILY_LIMIT, 120, 1, 2000),
     maxPerIpDay: parsePositiveInt(env?.SCREENSHOT_MAX_PER_IP_DAY, 15, 1, 500),
   };
 }
@@ -122,26 +106,14 @@ export function getScreenshotFeatureStatus(env = process.env, now = Date.now()) 
       locked: false,
       reason: 'UNCONFIGURED',
       message: '伺服器尚未設定 GEMINI_API_KEY（Google AI Studio 免費金鑰），暫不開放截圖辨識匯入。',
+      stopGeocoder: 'osm_free',
       limits: {
         dailyParseRemaining: 0,
-        dailyPlacesRemaining: 0,
       },
     };
   }
 
   const dailyParseRemaining = Math.max(0, limits.dailyParseLimit - quotaState.globalParseCount);
-  const dailyPlacesRemaining = Math.max(0, limits.dailyPlacesLimit - quotaState.globalPlacesCount);
-
-  if (quotaState.placesLockedUntil > now || dailyPlacesRemaining <= 0) {
-    return {
-      enabled: true,
-      locked: true,
-      reason: quotaState.placesLockReason || 'PLACES_QUOTA_EXCEEDED',
-      message:
-        'Google Places 站牌定位免費額度今日已達安全上限，為避免產生費用已暫停截圖匯入功能，明日將自動恢復，請先改用手動填寫。',
-      limits: { dailyParseRemaining, dailyPlacesRemaining: 0 },
-    };
-  }
 
   if (quotaState.geminiLockedUntil > now) {
     return {
@@ -149,7 +121,8 @@ export function getScreenshotFeatureStatus(env = process.env, now = Date.now()) 
       locked: true,
       reason: quotaState.geminiLockReason || 'GEMINI_QUOTA_EXCEEDED',
       message: 'Google AI Studio 免費視覺辨識額度暫時達上限，請稍後再試或改用手動填寫。',
-      limits: { dailyParseRemaining, dailyPlacesRemaining },
+      stopGeocoder: 'osm_free',
+      limits: { dailyParseRemaining },
     };
   }
 
@@ -159,7 +132,8 @@ export function getScreenshotFeatureStatus(env = process.env, now = Date.now()) 
       locked: true,
       reason: 'DAILY_PARSE_CAP',
       message: '今日免費截圖匯入總次數已達安全上限，明日將自動恢復，請先改用手動填寫。',
-      limits: { dailyParseRemaining: 0, dailyPlacesRemaining },
+      stopGeocoder: 'osm_free',
+      limits: { dailyParseRemaining: 0 },
     };
   }
 
@@ -168,14 +142,9 @@ export function getScreenshotFeatureStatus(env = process.env, now = Date.now()) 
     locked: false,
     reason: '',
     message: '',
-    limits: { dailyParseRemaining, dailyPlacesRemaining },
+    stopGeocoder: 'osm_free',
+    limits: { dailyParseRemaining },
   };
-}
-
-function tripPlacesQuotaLock(reason = 'PLACES_QUOTA_EXCEEDED', now = Date.now()) {
-  ensureCurrentDayBucket(now);
-  quotaState.placesLockedUntil = getNextUtcMidnightMs(now);
-  quotaState.placesLockReason = reason;
 }
 
 function tripGeminiQuotaLock(reason = 'GEMINI_QUOTA_EXCEEDED', now = Date.now()) {
@@ -518,7 +487,7 @@ export function normalizeParsedScreenshotDraft(raw, { inJapan = false } = {}) {
   };
 }
 
-// ==================== 4. 站牌定位（嚴控 Places 免費額度＋快取）與貼路公車路線建構 ====================
+// ==================== 4. 100% 免費開源站牌定位（Photon → OSM Nominatim，完全不觸碰 Google Places 計費）與貼路公車建構 ====================
 
 function getStopCacheKey(stopName, vehicleType, origin) {
   const gridLat = Math.round(origin.lat * 20) / 20;
@@ -560,6 +529,13 @@ function buildStopSearchQuery(stopName, vehicleType, inJapan) {
   return clean;
 }
 
+function extractPrimaryStopToken(stopName) {
+  const clean = String(stopName || '').trim();
+  const primary = clean.split(/[・／/(（]/)[0]?.trim() || '';
+  if (primary.length >= 2 && primary !== clean) return primary;
+  return '';
+}
+
 function computeCorridorRect(origin, destination) {
   const straightKm = calcDistanceKm(origin.lat, origin.lng, destination.lat, destination.lng);
   const padKm = Math.min(35, Math.max(2.5, straightKm * 0.45));
@@ -580,27 +556,136 @@ function computeCorridorRect(origin, destination) {
   };
 }
 
-function isPlacesQuotaExceededResponse(httpStatus, data) {
-  if (httpStatus === 429) return true;
-  const errStatus = String(data?.error?.status || '').toUpperCase();
-  const errMsg = String(data?.error?.message || '').toLowerCase();
-  return (
-    errStatus === 'RESOURCE_EXHAUSTED' ||
-    errStatus === 'OVER_QUERY_LIMIT' ||
-    errMsg.includes('quota') ||
-    errMsg.includes('rate limit')
-  );
+function scorePhotonFeature(feature, cleanName, vehicleType, origin, destination, maxCorridorKm) {
+  const coords = feature?.geometry?.coordinates;
+  if (!Array.isArray(coords) || coords.length < 2) return null;
+  const lng = Number(coords[0]);
+  const lat = Number(coords[1]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  const devKm = pointToSegmentKm({ lat, lng }, origin, destination);
+  if (devKm > maxCorridorKm) return null;
+
+  const props = feature?.properties || {};
+  const osmKey = String(props.osm_key || '').toLowerCase();
+  const osmVal = String(props.osm_value || '').toLowerCase();
+  const featName = String(props.name || '').trim();
+
+  const isBusTagged = osmKey === 'public_transport' || PHOTON_BUS_VALUES.has(osmVal);
+  const isRailTagged = osmKey === 'railway' || PHOTON_RAIL_VALUES.has(osmVal);
+  const isFerryTagged = osmVal === 'ferry_terminal';
+
+  let typeBonus = 0;
+  if (ROAD_TRANSIT_TYPES.has(vehicleType)) {
+    if (isBusTagged) typeBonus = 35;
+    else if (isRailTagged) typeBonus = 14;
+  } else if (vehicleType === 'FERRY') {
+    if (isFerryTagged) typeBonus = 35;
+  } else if (isRailTagged) {
+    typeBonus = 35;
+  } else if (isBusTagged) {
+    typeBonus = 14;
+  }
+
+  let nameBonus = 0;
+  if (featName) {
+    const normFeat = featName.toLowerCase();
+    const normQuery = cleanName.toLowerCase();
+    if (normFeat === normQuery) nameBonus = 14;
+    else if (normFeat.includes(normQuery) || normQuery.includes(normFeat)) nameBonus = 10;
+  }
+
+  return {
+    lat,
+    lng,
+    matchedName: featName || cleanName,
+    source: 'photon_osm',
+    score: typeBonus + nameBonus - devKm * 2.5,
+  };
 }
 
-class PlacesQuotaExceededError extends Error {
-  constructor(reason = 'PLACES_QUOTA_EXCEEDED') {
-    super(reason);
-    this.name = 'PlacesQuotaExceededError';
-    this.reason = reason;
+async function queryPhotonStop(queryText, cleanName, vehicleType, origin, destination, corridor) {
+  const midLat = ((origin.lat + destination.lat) / 2).toFixed(5);
+  const midLng = ((origin.lng + destination.lng) / 2).toFixed(5);
+  const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(queryText)}&lat=${midLat}&lon=${midLng}&limit=6`;
+
+  try {
+    const { res, data } = await fetchJsonWithTimeout(
+      fetch,
+      url,
+      { headers: { 'User-Agent': 'TripCanvas/2.0 (free-stop-anchor)' } },
+      3500
+    );
+    if (!res.ok || !Array.isArray(data?.features) || data.features.length === 0) return null;
+
+    let best = null;
+    for (const f of data.features) {
+      const scored = scorePhotonFeature(f, cleanName, vehicleType, origin, destination, corridor.maxCorridorKm);
+      if (scored && (!best || scored.score > best.score)) {
+        best = scored;
+      }
+    }
+    if (!best) return null;
+    return { lat: best.lat, lng: best.lng, matchedName: best.matchedName, source: best.source };
+  } catch {
+    return null;
   }
 }
 
-async function geocodeTransitStop(stopName, vehicleType, origin, destination, env, budget) {
+async function queryNominatimStop(queryText, cleanName, vehicleType, origin, destination, corridor, inJapan) {
+  try {
+    const viewbox = [
+      corridor.low.longitude.toFixed(5),
+      corridor.high.latitude.toFixed(5),
+      corridor.high.longitude.toFixed(5),
+      corridor.low.latitude.toFixed(5),
+    ].join(',');
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=4&bounded=1&viewbox=${encodeURIComponent(viewbox)}&q=${encodeURIComponent(queryText)}`;
+    const { res, data } = await fetchJsonWithTimeout(
+      fetch,
+      url,
+      {
+        headers: {
+          'User-Agent': 'TripCanvas/2.0 (free-stop-anchor)',
+          'Accept-Language': inJapan ? 'ja,zh-TW' : 'zh-TW,en',
+        },
+      },
+      3500
+    );
+
+    if (!res.ok || !Array.isArray(data) || data.length === 0) return null;
+
+    let best = null;
+    for (const item of data) {
+      const lat = Number(item?.lat);
+      const lng = Number(item?.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      const devKm = pointToSegmentKm({ lat, lng }, origin, destination);
+      if (devKm > corridor.maxCorridorKm) continue;
+
+      const cls = String(item?.class || '').toLowerCase();
+      const typ = String(item?.type || '').toLowerCase();
+      const isBus = cls === 'public_transport' || PHOTON_BUS_VALUES.has(typ);
+      const isRail = cls === 'railway' || PHOTON_RAIL_VALUES.has(typ);
+      const bonus =
+        (ROAD_TRANSIT_TYPES.has(vehicleType) && isBus) || (!ROAD_TRANSIT_TYPES.has(vehicleType) && isRail)
+          ? 30
+          : isBus || isRail
+            ? 12
+            : 0;
+      const score = bonus - devKm * 2.5;
+      if (!best || score > best.score) {
+        best = { lat, lng, matchedName: cleanName, source: 'osm_nominatim', score };
+      }
+    }
+    if (!best) return null;
+    return { lat: best.lat, lng: best.lng, matchedName: best.matchedName, source: best.source };
+  } catch {
+    return null;
+  }
+}
+
+async function geocodeTransitStop(stopName, vehicleType, origin, destination, _env, budget) {
   const cleanName = normalizeText(stopName, 60);
   if (!cleanName) return null;
 
@@ -614,125 +699,30 @@ async function geocodeTransitStop(stopName, vehicleType, origin, destination, en
     return null;
   }
 
-  const inJapan = isJapanTrip(origin, destination);
-  const query = buildStopSearchQuery(cleanName, vehicleType, inJapan);
-  const corridor = computeCorridorRect(origin, destination);
-  const googleKey = String(env?.GOOGLE_MAPS_API_KEY || '').trim();
-
-  // 1. 若有設定 Google Maps 金鑰：使用 Places Text Search（受嚴格每日免費額度上限與 429 熔斷器保護）
-  if (googleKey) {
-    const now = Date.now();
-    ensureCurrentDayBucket(now);
-    const { dailyPlacesLimit } = getQuotaLimits(env);
-
-    if (quotaState.placesLockedUntil > now || quotaState.globalPlacesCount >= dailyPlacesLimit) {
-      tripPlacesQuotaLock('PLACES_DAILY_CAP', now);
-      throw new PlacesQuotaExceededError('PLACES_DAILY_CAP');
-    }
-
-    budget.remainingLookups -= 1;
-    quotaState.globalPlacesCount += 1;
-    budget.placesCallsUsed += 1;
-
-    try {
-      const { res, data } = await fetchJsonWithTimeout(
-        fetch,
-        'https://places.googleapis.com/v1/places:searchText',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Goog-Api-Key': googleKey,
-            'X-Goog-FieldMask': 'places.id,places.displayName,places.location,places.types',
-          },
-          body: JSON.stringify({
-            textQuery: query,
-            languageCode: inJapan ? 'ja' : 'zh-TW',
-            maxResultCount: 3,
-            locationRestriction: {
-              rectangle: {
-                low: corridor.low,
-                high: corridor.high,
-              },
-            },
-          }),
-        },
-        3500
-      );
-
-      if (isPlacesQuotaExceededResponse(res.status, data)) {
-        tripPlacesQuotaLock('PLACES_QUOTA_EXCEEDED', Date.now());
-        throw new PlacesQuotaExceededError('PLACES_QUOTA_EXCEEDED');
-      }
-
-      if (res.ok && Array.isArray(data?.places) && data.places.length > 0) {
-        let best = null;
-        let bestScore = -Infinity;
-        for (const p of data.places) {
-          const lat = Number(p?.location?.latitude);
-          const lng = Number(p?.location?.longitude);
-          if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-          const devKm = pointToSegmentKm({ lat, lng }, origin, destination);
-          if (devKm > corridor.maxCorridorKm) continue;
-          const types = Array.isArray(p.types) ? p.types : [];
-          const isTransitTyped = types.some((t) => TRANSIT_PLACE_TYPES.has(t));
-          const score = (isTransitTyped ? 20 : 0) - devKm;
-          if (score > bestScore) {
-            bestScore = score;
-            best = { lat, lng, matchedName: p?.displayName?.text || cleanName, source: 'google_places' };
-          }
-        }
-        writeStopCache(cacheKey, best);
-        return best;
-      }
-
-      writeStopCache(cacheKey, null);
-      return null;
-    } catch (err) {
-      if (err instanceof PlacesQuotaExceededError) throw err;
-      return null;
-    }
-  }
-
-  // 2. 伺服器未設 Google Maps 金鑰時（例：本地免金鑰開發），改以免費 OSM Nominatim 範圍搜尋
   budget.remainingLookups -= 1;
-  try {
-    const viewbox = [
-      corridor.low.longitude.toFixed(5),
-      corridor.high.latitude.toFixed(5),
-      corridor.high.longitude.toFixed(5),
-      corridor.low.latitude.toFixed(5),
-    ].join(',');
-    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=3&bounded=1&viewbox=${encodeURIComponent(viewbox)}&q=${encodeURIComponent(query)}`;
-    const { res, data } = await fetchJsonWithTimeout(
-      fetch,
-      url,
-      {
-        headers: {
-          'User-Agent': 'TripCanvas/2.0 (screenshot-stop-anchor)',
-          'Accept-Language': inJapan ? 'ja,zh-TW' : 'zh-TW,en',
-        },
-      },
-      3500
-    );
+  budget.freeLookupsUsed += 1;
 
-    if (res.ok && Array.isArray(data) && data.length > 0) {
-      for (const item of data) {
-        const lat = Number(item?.lat);
-        const lng = Number(item?.lon);
-        if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-        if (pointToSegmentKm({ lat, lng }, origin, destination) > corridor.maxCorridorKm) continue;
-        const found = { lat, lng, matchedName: cleanName, source: 'osm_nominatim' };
-        writeStopCache(cacheKey, found);
-        return found;
-      }
-    }
-  } catch {
-    // 忽略 Nominatim 逾時
+  const inJapan = isJapanTrip(origin, destination);
+  const corridor = computeCorridorRect(origin, destination);
+  const primaryToken = extractPrimaryStopToken(cleanName);
+
+  // 1. 優先使用免費開源 Photon（支援座標鄰近加權與 highway=bus_stop 精準篩選，永遠 $0）
+  let found = await queryPhotonStop(cleanName, cleanName, vehicleType, origin, destination, corridor);
+  if (!found && primaryToken) {
+    found = await queryPhotonStop(primaryToken, cleanName, vehicleType, origin, destination, corridor);
   }
 
-  writeStopCache(cacheKey, null);
-  return null;
+  // 2. 備援：免費 OpenStreetMap Nominatim 走廊範圍搜尋（同樣永遠 $0、完全不碰 Google Places API）
+  if (!found) {
+    const nomQuery = buildStopSearchQuery(cleanName, vehicleType, inJapan);
+    found = await queryNominatimStop(nomQuery, cleanName, vehicleType, origin, destination, corridor, inJapan);
+  }
+  if (!found && primaryToken) {
+    found = await queryNominatimStop(primaryToken, cleanName, vehicleType, origin, destination, corridor, inJapan);
+  }
+
+  writeStopCache(cacheKey, found);
+  return found;
 }
 
 async function queryFreeOsrmPolyline(waypoints, profile = 'car', { excludeMotorway = false } = {}) {
@@ -791,7 +781,7 @@ export async function anchorAndBuildTransitRoute(
 ) {
   const inJapan = isJapanTrip(origin, destination);
   const normalizedDraft = normalizeParsedScreenshotDraft(draft, { inJapan });
-  const budget = { remainingLookups: MAX_STOPS_PER_REQUEST, placesCallsUsed: 0 };
+  const budget = { remainingLookups: MAX_STOPS_PER_REQUEST, freeLookupsUsed: 0 };
 
   // 1. 依序對所有 TRANSIT 段的「上車站、下車站、最多 2 個中途站」做站牌定位
   const anchoredDraftSegments = [];
@@ -1058,7 +1048,9 @@ export async function anchorAndBuildTransitRoute(
     stopStats: {
       totalStops: totalStopCandidates,
       matchedStops: matchedStopsCount,
-      placesCallsUsed: budget.placesCallsUsed,
+      freeLookupsUsed: budget.freeLookupsUsed,
+      placesCallsUsed: 0,
+      geocoder: 'osm_free',
     },
   };
 }
@@ -1244,60 +1236,21 @@ export async function handleScreenshotParseRequest(body, { ip = 'local', env = p
     };
   }
 
-  // 進行站牌定位與貼路公車路線串連（若觸發 Google Places 免費上限，立刻熔斷並限制功能）
-  try {
-    const built = await anchorAndBuildTransitRoute({ draft: normalized, origin, destination }, env);
-    return {
-      statusCode: 200,
-      body: {
-        status: 'ok',
-        ...built,
-        confidence: normalized.confidence,
-        warning: normalized.warning,
-        quota: getScreenshotFeatureStatus(env, Date.now()),
-      },
-    };
-  } catch (err) {
-    if (err instanceof PlacesQuotaExceededError) {
-      const lockedStatus = getScreenshotFeatureStatus(env, Date.now());
-      return {
-        statusCode: 429,
-        body: {
-          status: 'quota_limited',
-          error: err.reason || 'PLACES_QUOTA_EXCEEDED',
-          message: lockedStatus.message,
-          quota: lockedStatus,
-        },
-      };
-    }
-    throw err;
-  }
+  // 以 100% 免費 Photon / OSM 進行站牌定位與 OSRM 貼路公車路線串連（不呼叫 Google Places API）
+  const built = await anchorAndBuildTransitRoute({ draft: normalized, origin, destination }, env);
+  return {
+    statusCode: 200,
+    body: {
+      status: 'ok',
+      ...built,
+      confidence: normalized.confidence,
+      warning: normalized.warning,
+      quota: getScreenshotFeatureStatus(env, Date.now()),
+    },
+  };
 }
 
 export async function handleScreenshotBuildRouteRequest(body, { env = process.env } = {}) {
-  const now = Date.now();
-  ensureCurrentDayBucket(now);
-  const { dailyPlacesLimit } = getQuotaLimits(env);
-  const googleKey = String(env?.GOOGLE_MAPS_API_KEY || '').trim();
-  const placesLocked =
-    quotaState.placesLockedUntil > now || (Boolean(googleKey) && quotaState.globalPlacesCount >= dailyPlacesLimit);
-
-  if (placesLocked) {
-    tripPlacesQuotaLock(quotaState.placesLockReason || 'PLACES_DAILY_CAP', now);
-    const lockedStatus = getScreenshotFeatureStatus(env, now);
-    return {
-      statusCode: 429,
-      body: {
-        status: 'quota_limited',
-        error: quotaState.placesLockReason || 'PLACES_QUOTA_EXCEEDED',
-        message:
-          lockedStatus.message ||
-          'Google Places 站牌定位免費額度今日已達安全上限，為避免產生費用已暫停截圖匯入功能，明日將自動恢復，請先改用手動填寫。',
-        quota: lockedStatus,
-      },
-    };
-  }
-
   const origin = body?.origin;
   const destination = body?.destination;
   const draft = body?.draft;
@@ -1313,29 +1266,13 @@ export async function handleScreenshotBuildRouteRequest(body, { env = process.en
     };
   }
 
-  try {
-    const built = await anchorAndBuildTransitRoute({ draft, origin, destination }, env);
-    return {
-      statusCode: 200,
-      body: {
-        status: 'ok',
-        ...built,
-        quota: getScreenshotFeatureStatus(env, Date.now()),
-      },
-    };
-  } catch (err) {
-    if (err instanceof PlacesQuotaExceededError) {
-      const lockedStatus = getScreenshotFeatureStatus(env, Date.now());
-      return {
-        statusCode: 429,
-        body: {
-          status: 'quota_limited',
-          error: err.reason || 'PLACES_QUOTA_EXCEEDED',
-          message: lockedStatus.message,
-          quota: lockedStatus,
-        },
-      };
-    }
-    throw err;
-  }
+  const built = await anchorAndBuildTransitRoute({ draft, origin, destination }, env);
+  return {
+    statusCode: 200,
+    body: {
+      status: 'ok',
+      ...built,
+      quota: getScreenshotFeatureStatus(env, Date.now()),
+    },
+  };
 }
