@@ -157,22 +157,27 @@ export function getTransportDisplayInfo(t) {
 
       const isNavitime = t.provider === 'navitime';
       const isTransitous = t.provider === 'transitous';
+      const isScreenshot = t.provider === 'screenshot';
       const badge = isWalkOnly
         ? '僅步行'
-        : isTransitous
-          ? transitSegs[0]?.vehicleType === 'BUS'
-            ? '日本公車'
-            : '日本開放'
-          : isNavitime
-            ? '日本分段'
-            : '分段路線';
+        : isScreenshot
+          ? '截圖匯入'
+          : isTransitous
+            ? transitSegs[0]?.vehicleType === 'BUS'
+              ? '日本公車'
+              : '日本開放'
+            : isNavitime
+              ? '日本分段'
+              : '分段路線';
       const fallbackSub = isWalkOnly
         ? '此段無鐵道／公開公車，僅步行估算'
-        : isTransitous
-          ? '日本開放資料公車／大眾運輸分段'
-          : isNavitime
-            ? '日本 NAVITIME 分段路線'
-            : 'Google 分段路線';
+        : isScreenshot
+          ? '截圖解析與站牌定位分段路線'
+          : isTransitous
+            ? '日本開放資料公車／大眾運輸分段'
+            : isNavitime
+              ? '日本 NAVITIME 分段路線'
+              : 'Google 分段路線';
 
       return {
         kind: 'transit-segmented',

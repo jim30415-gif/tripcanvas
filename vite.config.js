@@ -9,6 +9,11 @@ import {
 } from './server/routesHandler.js';
 import { handleStaticMapRequest } from './server/staticMap.js';
 import {
+  getScreenshotFeatureStatus,
+  handleScreenshotBuildRouteRequest,
+  handleScreenshotParseRequest,
+} from './server/screenshotTransit.js';
+import {
   handleDriveCallback,
   handleDriveLogin,
   handleDriveLogout,
@@ -198,6 +203,11 @@ function createRoutesApiPlugin(env) {
           res.end(JSON.stringify(result.body));
           return;
         }
+        if (parsedUrl.searchParams.get('action') === 'screenshot-status') {
+          res.statusCode = 200;
+          res.end(JSON.stringify(getScreenshotFeatureStatus(env)));
+          return;
+        }
         const result = handleStatusRequest(env);
         res.statusCode = result.statusCode;
         res.end(JSON.stringify(result.body));
@@ -211,20 +221,25 @@ function createRoutesApiPlugin(env) {
       }
 
       try {
-        const body = await readJsonBody(req);
         const postAction = parsedUrl.searchParams.get('action') || '';
+        const maxBodyBytes = postAction === 'screenshot-parse' ? 2.5 * 1024 * 1024 : 256 * 1024;
+        const body = await readJsonBody(req, maxBodyBytes);
         const result =
-          postAction === 'staticmap'
-            ? await handleStaticMapRequest(body, env)
-            : await handleComputeRoutes(body, env);
+          postAction === 'screenshot-parse'
+            ? await handleScreenshotParseRequest(body, { ip: 'local', env })
+            : postAction === 'screenshot-build'
+              ? await handleScreenshotBuildRouteRequest(body, { env })
+              : postAction === 'staticmap'
+                ? await handleStaticMapRequest(body, env)
+                : await handleComputeRoutes(body, env);
         res.statusCode = result.statusCode;
         res.end(JSON.stringify(result.body));
       } catch (err) {
-        res.statusCode = 400;
+        res.statusCode = err?.message === 'PAYLOAD_TOO_LARGE' ? 413 : 400;
         res.end(
           JSON.stringify({
-            error: 'INVALID_JSON',
-            message: err?.message === 'PAYLOAD_TOO_LARGE' ? '請求內容過大' : '無法解析 JSON 請求內容',
+            error: err?.message === 'PAYLOAD_TOO_LARGE' ? 'PAYLOAD_TOO_LARGE' : 'INVALID_JSON',
+            message: err?.message === 'PAYLOAD_TOO_LARGE' ? '截圖檔案過大，請壓縮或重新選擇圖片' : '無法解析 JSON 請求內容',
           })
         );
       }

@@ -21,6 +21,13 @@ import {
   refreshIcons,
 } from '../utils/format.js';
 import { isCustomDialogOpen, showToast } from './dialog.js';
+import {
+  bindScreenshotTransitUI,
+  hasPendingScreenshotReview,
+  refreshScreenshotImportStatus,
+  renderScreenshotImportUI,
+  resetScreenshotImportUI,
+} from './screenshotTransitUI.js';
 
 let editingTransportContext = null;
 let onChangeCallback = null;
@@ -45,6 +52,7 @@ function routeHasTransitSegments(route) {
 }
 
 function getTransitProviderLabel(provider) {
+  if (provider === 'screenshot') return '截圖匯入';
   if (provider === 'navitime') return 'NAVITIME';
   if (provider === 'transitous') return 'Transitous';
   return 'Google';
@@ -272,8 +280,9 @@ function switchToManualBusMode() {
   renderTransitTabState();
   renderTransitTypeChips();
   renderTransportCostHint();
+  renderScreenshotImportUI();
+  refreshScreenshotImportStatus();
   runManualBusRoadPreview();
-  document.getElementById('input-transit-line')?.focus();
 }
 
 function renderTransitTypeChips() {
@@ -554,16 +563,21 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
     `;
     document.getElementById('btn-walkonly-switch-bus')?.addEventListener('click', switchToManualBusMode);
   } else {
-    const headerTitle = isTransitous
-      ? '已透過日本開放資料取得公車／大眾運輸路線'
-      : isNavitime
-        ? '已取得日本 NAVITIME 分段路線'
-        : '已取得 Google 分段路線與班次';
-    const subNote = isTransitous
-      ? '<div class="text-xs text-owl-muted">資料來源：<a href="https://transitous.org/sources/" target="_blank" rel="noopener noreferrer" class="underline hover:text-owl-primaryDeep">Transitous（日本 GTFS-JP）</a> 與 OpenStreetMap；若無自動票價可直接於下方填寫日圓換算台幣。</div>'
-      : isNavitime
-        ? '<div class="text-xs text-owl-muted">涵蓋日本 JR／新幹線／地鐵／私鐵與步行（平均車程估算）；若需搭地方公車可點下方 Google Maps 對照。</div>'
-        : '';
+    const isScreenshot = (selected.provider || ctx.transitResult?.provider) === 'screenshot';
+    const headerTitle = isScreenshot
+      ? '已從截圖匯入分段路線與站牌動線'
+      : isTransitous
+        ? '已透過日本開放資料取得公車／大眾運輸路線'
+        : isNavitime
+          ? '已取得日本 NAVITIME 分段路線'
+          : '已取得 Google 分段路線與班次';
+    const subNote = isScreenshot
+      ? '<div class="text-xs text-owl-muted">已依截圖站名定位並串連步行與公車／大眾運輸分段，請點右下角「套用設定」寫入地圖，或切回「手動填寫紀錄」重新匯入。</div>'
+      : isTransitous
+        ? '<div class="text-xs text-owl-muted">資料來源：<a href="https://transitous.org/sources/" target="_blank" rel="noopener noreferrer" class="underline hover:text-owl-primaryDeep">Transitous（日本 GTFS-JP）</a> 與 OpenStreetMap；若無自動票價可直接於下方填寫日圓換算台幣。</div>'
+        : isNavitime
+          ? '<div class="text-xs text-owl-muted">涵蓋日本 JR／新幹線／地鐵／私鐵與步行（平均車程估算）；若需搭地方公車可點下方 Google Maps 對照。</div>'
+          : '';
 
     statusEl.innerHTML = `
       <div class="space-y-1">
@@ -992,12 +1006,14 @@ export function openTransportModal(dayId, pinIndex) {
       : '';
 
   renderTransportModalControls();
+  resetScreenshotImportUI();
   const modalEl = document.getElementById('modal-transport');
   modalEl.classList.remove('hidden');
   refreshIcons(modalEl);
 
   if (editingTransportContext.selectedMode === 'transit') {
     if (editingTransportContext.transitSubTab === 'manual') {
+      refreshScreenshotImportStatus();
       if (editingTransportContext.selectedTransitType === '公車') {
         runManualBusRoadPreview();
       }
@@ -1011,6 +1027,7 @@ export function openTransportModal(dayId, pinIndex) {
 
 export function closeTransportModal() {
   document.getElementById('modal-transport').classList.add('hidden');
+  resetScreenshotImportUI();
   const saveBtn = document.getElementById('btn-save-transport');
   if (saveBtn) {
     saveBtn.disabled = false;
@@ -1022,6 +1039,13 @@ export function closeTransportModal() {
 async function saveTransportSetting() {
   if (!editingTransportContext || editingTransportContext.isSaving) return;
   const ctx = editingTransportContext;
+
+  if (ctx.selectedMode === 'transit' && ctx.transitSubTab === 'manual' && hasPendingScreenshotReview()) {
+    showToast('截圖辨識結果尚未確認，請先點擊「確認匯入此路線」或「放棄截圖」', 'warn');
+    document.getElementById('screenshot-review-card')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+
   const state = getState();
   const day = state.days.find((d) => d.id === ctx.dayId);
   const pinA = day?.pins.find((p) => p.id === ctx.pinAId) || day?.pins[ctx.pinIndex];
@@ -1060,7 +1084,12 @@ async function saveTransportSetting() {
       saveState((msg) => showToast(msg, 'error'));
       closeTransportModal();
       if (typeof onChangeCallback === 'function') onChangeCallback();
-      showToast('已套用大眾運輸分段路線與支出', 'success');
+      showToast(
+        (chosenRoute.provider || ctx.transitResult.provider) === 'screenshot'
+          ? '已套用截圖匯入的公車／大眾運輸分段路線與支出'
+          : '已套用大眾運輸分段路線與支出',
+        'success'
+      );
       return;
     }
 
@@ -1254,11 +1283,49 @@ export function bindTransportModalEvents({ onStateChanged }) {
     editingTransportContext.transitSubTab = 'manual';
     renderTransitTabState();
     renderTransportCostHint();
+    renderScreenshotImportUI();
+    refreshScreenshotImportStatus();
     if (editingTransportContext.selectedTransitType === '公車') {
       runManualBusRoadPreview();
     } else {
       renderManualBusRoadPreview();
     }
+  });
+
+  bindScreenshotTransitUI({
+    getActiveRouteContext: () => editingTransportContext,
+    onConfirmRoute: ({ route, draft }) => {
+      const ctx = editingTransportContext;
+      if (!ctx || !route) return;
+
+      ctx.transitResult = {
+        status: 'ok',
+        provider: 'screenshot',
+        routes: [route],
+      };
+      ctx.selectedRouteIndex = 0;
+      ctx.transitSubTab = 'auto';
+
+      // 自動帶入截圖票價（保留原幣別以利外幣即時換算檢視）
+      const costInput = document.getElementById('input-transport-cost');
+      const currencySel = document.getElementById('select-transport-currency');
+      if (Number(draft?.fareAmount) > 0 && costInput) {
+        const cur = draft.fareCurrency || 'TWD';
+        if (currencySel && Array.from(currencySel.options).some((o) => o.value === cur)) {
+          currencySel.value = cur;
+          costInput.value = String(draft.fareAmount);
+        } else if (route.fare?.amountTwd > 0) {
+          if (currencySel) currencySel.value = 'TWD';
+          costInput.value = String(route.fare.amountTwd);
+        }
+        ctx.userEditedCost = true;
+      }
+
+      renderTransitTabState();
+      renderTransitAutoResults({ autoFillFare: false });
+      renderTransportCostHint();
+      showToast('已匯入截圖分段路線，請按右下角「套用設定」儲存至地圖', 'success');
+    },
   });
 
   document.getElementById('select-transit-time-mode').addEventListener('change', (e) => {

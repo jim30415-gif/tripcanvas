@@ -8,6 +8,11 @@ import {
 } from '../server/routesHandler.js';
 import { handleStaticMapRequest } from '../server/staticMap.js';
 import {
+  getScreenshotFeatureStatus,
+  handleScreenshotBuildRouteRequest,
+  handleScreenshotParseRequest,
+} from '../server/screenshotTransit.js';
+import {
   checkRateLimit,
   checkSameOriginRequest,
   extractClientIp,
@@ -107,6 +112,12 @@ export default async function handler(req, res) {
         return res.status(result.statusCode).json(result.body);
       }
 
+      const wantsScreenshotStatus = action === 'screenshot-status';
+      if (wantsScreenshotStatus) {
+        res.setHeader('Cache-Control', 'no-store');
+        return res.status(200).json(getScreenshotFeatureStatus(process.env));
+      }
+
       const result = handleStatusRequest(process.env);
       res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=300');
       return res.status(result.statusCode).json(result.body);
@@ -125,9 +136,15 @@ export default async function handler(req, res) {
 
     const postAction = getSingleParam(parsed, req.query, 'action') || '';
     const isStaticMap = postAction === 'staticmap';
-    const rate = isStaticMap
-      ? checkRateLimit('routes_staticmap', ip, 30, 60_000)
-      : checkRateLimit('routes_post', ip, 40, 60_000);
+    const isScreenshotParse = postAction === 'screenshot-parse';
+    const isScreenshotBuild = postAction === 'screenshot-build';
+    const rate = isScreenshotParse
+      ? checkRateLimit('routes_screenshot_parse', ip, 6, 60_000)
+      : isScreenshotBuild
+        ? checkRateLimit('routes_screenshot_build', ip, 15, 60_000)
+        : isStaticMap
+          ? checkRateLimit('routes_staticmap', ip, 30, 60_000)
+          : checkRateLimit('routes_post', ip, 40, 60_000);
     if (!rate.allowed) {
       res.setHeader('Retry-After', String(rate.retryAfterSec));
       return res.status(rate.statusCode).json(rate.body);
@@ -147,9 +164,13 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'INVALID_JSON', message: '請求內容格式不正確' });
     }
 
-    const result = isStaticMap
-      ? await handleStaticMapRequest(body, process.env)
-      : await handleComputeRoutes(body, process.env);
+    const result = isScreenshotParse
+      ? await handleScreenshotParseRequest(body, { ip, env: process.env })
+      : isScreenshotBuild
+        ? await handleScreenshotBuildRouteRequest(body, { env: process.env })
+        : isStaticMap
+          ? await handleStaticMapRequest(body, process.env)
+          : await handleComputeRoutes(body, process.env);
     return res.status(result.statusCode).json(result.body);
   } catch (err) {
     console.error('[api/routes] unhandled error:', err?.message || err);
