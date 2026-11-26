@@ -149,7 +149,7 @@ export function checkSameOriginRequest(headers = {}, env = {}, { requireBrowserS
     return {
       ok: false,
       statusCode: 403,
-      body: { status: 'forbidden', error: 'MISSING_ORIGIN', message: '請透過漫步地圖網頁存取此服務' },
+      body: { status: 'forbidden', error: 'MISSING_ORIGIN', message: '請透過漫旅網頁存取此服務' },
     };
   }
 

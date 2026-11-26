@@ -254,7 +254,7 @@ export function closeExportModal() {
 export function openExportModal() {
   const state = getState();
   const activeTrip = getActiveTrip();
-  const tripName = activeTrip?.name || '漫步地圖行程';
+  const tripName = activeTrip?.name || '漫旅行程';
   const days = Array.isArray(state?.days) ? state.days : [];
   const stats = calcDaysSummaryStats(days);
 

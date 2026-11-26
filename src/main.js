@@ -575,7 +575,7 @@ function exportJSON() {
 function importJSON(file) {
   if (!file) return;
   if (file.size > MAX_IMPORT_FILE_BYTES) {
-    showToast('匯入檔案超過 5 MB 上限，請確認為漫步地圖匯出的 JSON 檔', 'error');
+    showToast('匯入檔案超過 5 MB 上限，請確認為漫旅匯出的 JSON 檔', 'error');
     return;
   }
   const reader = new FileReader();

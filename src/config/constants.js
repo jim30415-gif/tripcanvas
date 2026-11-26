@@ -53,7 +53,7 @@ export const SILENT_TILE_SOURCES = [
     type: 'canvas',
     options: {
       maxZoom: 20,
-      attribution: 'TripCanvas 離線向量網格',
+      attribution: '漫旅 離線向量網格',
     },
   },
 ];

@@ -170,12 +170,12 @@ export function calcDaysSummaryStats(daysList) {
 }
 
 export function sanitizeExportFilename(raw = '') {
-  const cleaned = String(raw || '漫步地圖行程')
+  const cleaned = String(raw || '漫旅行程')
     .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '_')
     .replace(/\s+/g, '_')
     .replace(/_+/g, '_')
     .replace(/^_|_$/g, '');
-  return (cleaned || '漫步地圖行程').slice(0, 60);
+  return (cleaned || '漫旅行程').slice(0, 60);
 }
 
 /**
@@ -995,7 +995,7 @@ function drawBudgetAndFooter(ctx, stats, { includeBudget = true } = {}) {
   ctx.font = `600 15px ${FONT_STACK}`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillText('由 漫步地圖 TripCanvas 自動排版生成 · 標準 A4 (210 × 297 mm)', 44, footerLineY);
+  ctx.fillText('由 漫旅 自動排版生成 · 標準 A4 (210 × 297 mm)', 44, footerLineY);
   ctx.textAlign = 'right';
   ctx.fillText(`匯出日期 ${todayStr}`, A4_WIDTH - 44, footerLineY);
   ctx.textAlign = 'left';
@@ -1315,7 +1315,7 @@ function drawOverviewGrid(ctx, { days, startY, maxY, density }) {
 /**
  * 將單一 A4 頁面規格渲染為標準 1240×1754 px (150 DPI A4) Canvas 與 PNG Data URL
  */
-export async function renderA4PageToCanvas(pageSpec, { tripName = '漫步地圖行程' } = {}) {
+export async function renderA4PageToCanvas(pageSpec, { tripName = '漫旅行程' } = {}) {
   try {
     if (typeof document !== 'undefined' && document.fonts?.ready) {
       await Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 600))]);
@@ -1341,8 +1341,8 @@ export async function renderA4PageToCanvas(pageSpec, { tripName = '漫步地圖�
   // 2. 頂部標題帶
   const headerH = drawHeaderBand(ctx, {
     eyebrow: isOverview
-      ? `漫步地圖 TripCanvas · 全行程 ${targetDays.length} 天總覽`
-      : `漫步地圖 TripCanvas · ${pageSpec.day.name} 行程懶人包`,
+      ? `漫旅 · 全行程 ${targetDays.length} 天總覽`
+      : `漫旅 · ${pageSpec.day.name} 行程懶人包`,
     title: isOverview ? tripName : pageSpec.day.name,
     subtitle: isOverview
       ? `共 ${targetDays.length} 天 · 依地圖與實際路徑自動排版`
@@ -1503,7 +1503,7 @@ export function downloadDataUrlAsFile(dataUrl, filename) {
 /**
  * 開啟標準 A4 多頁列印／另存 PDF 視窗（每頁精準滿版 210mm × 297mm）
  */
-export function openA4PrintWindow(renderedPages, tripName = '漫步地圖行程', preOpenedWindow = null) {
+export function openA4PrintWindow(renderedPages, tripName = '漫旅行程', preOpenedWindow = null) {
   const win = preOpenedWindow && !preOpenedWindow.closed ? preOpenedWindow : window.open('', '_blank');
   if (!win) return false;
 

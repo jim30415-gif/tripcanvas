@@ -288,5 +288,5 @@ test('calcDaysSummaryStats aggregates sub-spot categories and transport expenses
 
 test('sanitizeExportFilename removes invalid filename characters', () => {
   assert.equal(sanitizeExportFilename('綠島 3天2夜 / 潛水:行程*?'), '綠島_3天2夜_潛水_行程');
-  assert.equal(sanitizeExportFilename('   '), '漫步地圖行程');
+  assert.equal(sanitizeExportFilename('   '), '漫旅行程');
 });

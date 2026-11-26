@@ -1,7 +1,7 @@
 {
-  "name": "漫步地圖 TripCanvas",
-  "short_name": "漫步地圖",
-  "description": "獻給熱愛獨旅和自由行的互動式地圖行程規劃工具",
+  "name": "漫旅",
+  "short_name": "漫旅",
+  "description": "互動式地圖行程規劃工具",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#F5EFE6",
