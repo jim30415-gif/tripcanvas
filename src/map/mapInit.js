@@ -15,6 +15,7 @@ let mapInstance = null; // Leaflet Map or google.maps.Map
 let overlayGroup = null;
 let activeBaseLayer = null;
 let searchMarker = null;
+let userLocationLayers = [];
 let resizeObserver = null;
 let googleProjection = null;
 let basemapPoiOverlay = null;
@@ -611,6 +612,7 @@ async function fallbackToLeafletAfterAuthFailure() {
   hideBasemapPoiPopover();
   if (overlayGroup) overlayGroup.clearLayers();
   clearSearchHighlightMarker();
+  clearUserLocationMarker();
   if (mapInstance) {
     try {
       window.google?.maps?.event?.clearInstanceListeners?.(mapInstance);
@@ -857,6 +859,117 @@ export function showSearchHighlightMarker(lat, lng) {
     fillOpacity: 0.34,
     weight: 3,
   }).addTo(mapInstance);
+}
+
+export function clearUserLocationMarker() {
+  if (!userLocationLayers.length) return;
+  for (const layer of userLocationLayers) {
+    try {
+      if (typeof layer?.setMap === 'function') {
+        layer.setMap(null);
+      } else if (mapInstance && typeof mapInstance.removeLayer === 'function') {
+        mapInstance.removeLayer(layer);
+      }
+    } catch {
+      // ignore
+    }
+  }
+  userLocationLayers = [];
+}
+
+/**
+ * 顯示使用者目前位置藍點、外圈光暈與定位精度誤差圓（支援 Google Maps 與 Leaflet 雙引擎，且不寫入行程資料）
+ */
+export function showUserLocationMarker(lat, lng, accuracyMeters = 0) {
+  if (!mapInstance || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  clearUserLocationMarker();
+
+  const clampedAcc =
+    Number.isFinite(accuracyMeters) && accuracyMeters >= 15 ? Math.min(Math.round(accuracyMeters), 2500) : 0;
+
+  if (activeEngine === 'google') {
+    const gmaps = window.google?.maps;
+    if (!gmaps) return;
+    if (clampedAcc > 0) {
+      userLocationLayers.push(
+        new gmaps.Circle({
+          center: { lat, lng },
+          radius: clampedAcc,
+          map: mapInstance,
+          clickable: false,
+          zIndex: 940,
+          strokeColor: '#3B82F6',
+          strokeOpacity: 0.36,
+          strokeWeight: 1.5,
+          fillColor: '#3B82F6',
+          fillOpacity: 0.13,
+        })
+      );
+    }
+    userLocationLayers.push(
+      new gmaps.Marker({
+        position: { lat, lng },
+        map: mapInstance,
+        clickable: false,
+        zIndex: 945,
+        icon: {
+          path: gmaps.SymbolPath.CIRCLE,
+          scale: 14,
+          strokeWeight: 0,
+          fillColor: '#3B82F6',
+          fillOpacity: 0.22,
+        },
+      }),
+      new gmaps.Marker({
+        position: { lat, lng },
+        map: mapInstance,
+        clickable: false,
+        zIndex: 950,
+        icon: {
+          path: gmaps.SymbolPath.CIRCLE,
+          scale: 7.5,
+          strokeColor: '#FFFFFF',
+          strokeWeight: 3,
+          fillColor: '#2563EB',
+          fillOpacity: 1,
+        },
+      })
+    );
+    return;
+  }
+
+  const L = leafletLib;
+  if (!L) return;
+  if (clampedAcc > 0) {
+    userLocationLayers.push(
+      L.circle([lat, lng], {
+        radius: clampedAcc,
+        color: '#3B82F6',
+        weight: 1.5,
+        opacity: 0.36,
+        fillColor: '#3B82F6',
+        fillOpacity: 0.13,
+        interactive: false,
+      }).addTo(mapInstance)
+    );
+  }
+  userLocationLayers.push(
+    L.circleMarker([lat, lng], {
+      radius: 13,
+      stroke: false,
+      fillColor: '#3B82F6',
+      fillOpacity: 0.22,
+      interactive: false,
+    }).addTo(mapInstance),
+    L.circleMarker([lat, lng], {
+      radius: 7,
+      color: '#FFFFFF',
+      weight: 3,
+      fillColor: '#2563EB',
+      fillOpacity: 1,
+      interactive: false,
+    }).addTo(mapInstance)
+  );
 }
 
 function clearBasemapPoiOverlayDom() {

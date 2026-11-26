@@ -26,6 +26,7 @@ import {
   onNextMapZoomEnd,
   showBasemapPoiPopover,
   hideBasemapPoiPopover,
+  showUserLocationMarker,
 } from './map/mapInit.js';
 import { isPinRepositioning, renderDayPinsOnMap, wasPinRecentlyDragged } from './map/pinRenderer.js';
 import { drawRouteSegmentOnMap } from './map/routeRenderer.js';
@@ -521,6 +522,95 @@ function fitMapToVisiblePins(silentIfEmpty = false) {
   fitBoundsToPoints(pts, opts);
 }
 
+let isLocatingUser = false;
+
+function requestBrowserPosition(options) {
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(resolve, reject, options);
+  });
+}
+
+async function locateCurrentUser() {
+  if (typeof navigator === 'undefined' || !navigator.geolocation) {
+    showToast('目前瀏覽器不支援定位功能', 'warn');
+    return;
+  }
+  if (isLocatingUser) return;
+
+  const btn = document.getElementById('btn-locate-user');
+  const setLocatingUI = (busy, located = false) => {
+    if (!btn) return;
+    btn.setAttribute('aria-busy', busy ? 'true' : 'false');
+    btn.classList.toggle('animate-pulse', busy);
+    btn.classList.toggle('text-[#2563EB]', !busy && located);
+    btn.classList.toggle('border-[#93C5FD]', !busy && located);
+  };
+
+  isLocatingUser = true;
+  setLocatingUI(true);
+
+  try {
+    let pos;
+    try {
+      pos = await requestBrowserPosition({
+        enableHighAccuracy: true,
+        timeout: 9000,
+        maximumAge: 15000,
+      });
+    } catch (firstErr) {
+      // 使用者明確拒絕權限時直接回報，不重試
+      if (firstErr?.code === 1) throw firstErr;
+      // 室內／純 Wi-Fi 平板與電腦若高精度 GPS 逾時，自動改用一般網路定位重試一次
+      pos = await requestBrowserPosition({
+        enableHighAccuracy: false,
+        timeout: 8000,
+        maximumAge: 60000,
+      });
+    }
+
+    const lat = Number(pos?.coords?.latitude);
+    const lng = Number(pos?.coords?.longitude);
+    const accuracy = Number(pos?.coords?.accuracy) || 0;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      throw new Error('INVALID_COORDS');
+    }
+
+    showUserLocationMarker(lat, lng, accuracy);
+
+    const targetZoom =
+      accuracy > 0 && accuracy <= 80
+        ? 16
+        : accuracy <= 400
+          ? 15
+          : accuracy <= 1500
+            ? 14
+            : 13;
+    const opts =
+      window.innerWidth < 1024 && hasOpenMobileOverlay()
+        ? { ...getMobileFitBoundsOptions({ daysPopupOpen: false }), maxZoom: targetZoom }
+        : getDesktopFitBoundsOptions(targetZoom);
+    fitBoundsToPoints([[lat, lng]], opts);
+
+    setLocatingUI(false, true);
+    if (accuracy > 0 && accuracy <= 500) {
+      showToast(`已定位至目前位置（精度約 ${Math.round(accuracy)} 公尺）`, 'success');
+    } else {
+      showToast('已定位至目前位置', 'success');
+    }
+  } catch (err) {
+    setLocatingUI(false, false);
+    if (err?.code === 1) {
+      showToast('尚未允許定位權限，請至瀏覽器或裝置設定開啟「漫旅」的位置權限', 'warn');
+    } else if (err?.code === 3) {
+      showToast('定位逾時，請確認裝置已開啟定位服務後再試一次', 'warn');
+    } else {
+      showToast('目前無法取得您的位置，請確認定位服務已開啟後再試', 'warn');
+    }
+  } finally {
+    isLocatingUser = false;
+  }
+}
+
 function addPinAtCoordinate(lat, lng, customName = null, meta = {}) {
   const state = getState();
   const activeDay = getActiveDay(state);
@@ -618,7 +708,7 @@ function importJSON(file) {
 }
 
 function bindGlobalEvents() {
-  document.getElementById('btn-fit-bounds')?.addEventListener('click', () => fitMapToVisiblePins(false));
+  document.getElementById('btn-locate-user')?.addEventListener('click', locateCurrentUser);
   document.getElementById('btn-add-day')?.addEventListener('click', createAndAddNewDay);
 
   // 電腦版左右欄獨立收合／展開箭頭 ＋ 全螢幕地圖切換
