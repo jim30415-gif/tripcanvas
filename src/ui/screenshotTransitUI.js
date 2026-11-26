@@ -246,8 +246,8 @@ function renderReviewCardHtml() {
           ${
             seg.vehicleType === 'BUS' || interText
               ? `<div>
-                  <label class="block text-[11px] font-bold text-owl-subtext mb-0.5">中途關鍵停靠站（選填，以頓號分隔，可讓公車路徑更貼近繞行路線）</label>
-                  <input type="text" value="${escapeHTML(interText)}" placeholder="例：香林坊、片町" data-ss-seg-idx="${idx}" data-ss-seg-field="intermediateStopNames" class="w-full px-2.5 py-1.5 rounded-lg border border-owl-border bg-white text-xs text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
+                  <label class="block text-[11px] font-bold text-owl-subtext mb-0.5">中途關鍵停靠站（選填，以頓號分隔，最多 5 站・平均涵蓋前／中／後站點更貼路）</label>
+                  <input type="text" value="${escapeHTML(interText)}" placeholder="例：橫山町、旭町、若松、角間新町" data-ss-seg-idx="${idx}" data-ss-seg-field="intermediateStopNames" class="w-full px-2.5 py-1.5 rounded-lg border border-owl-border bg-white text-xs text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
                 </div>`
               : ''
           }
@@ -750,10 +750,10 @@ function bindDynamicScreenshotCardEvents(root) {
         seg.arrivalCoord = null;
       } else if (field === 'intermediateStopNames') {
         seg.intermediateStopNames = el.value
-          .split(/[、,，\s]+/)
+          .split(/[、,，\n]+/)
           .map((x) => x.trim())
           .filter(Boolean)
-          .slice(0, 2);
+          .slice(0, 5);
         seg.intermediateCoords = [];
       }
 

@@ -16,8 +16,8 @@ const FALLBACK_GEMINI_MODELS = [
 ];
 
 const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024; // 1.5 MB 解碼後上限
-const MAX_STOPS_PER_REQUEST = 6; // 每次截圖最多定位 6 個站牌（上下車 + 最多 3 中途站；全程免費 Photon / OSM，不觸碰 Google Places 計費）
-const MAX_INTERMEDIATE_STOPS = 3;
+const MAX_STOPS_PER_REQUEST = 8; // 每次截圖最多定位 8 個站牌（上下車 + 最多 5 個均勻分佈中途站；全程免費 Photon / OSM，不觸碰 Google Places 計費）
+const MAX_INTERMEDIATE_STOPS = 5;
 const STOP_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const MAX_STOP_CACHE = 500;
 const MAX_IP_DAILY_KEYS = 1000;
@@ -270,15 +270,37 @@ function normalizeText(raw, maxLen = 80) {
 }
 
 function cleanStopName(raw) {
-  let s = normalizeText(raw, 64);
+  let s = normalizeText(raw, 72);
   if (!s) return '';
-  // 去除 Google Maps / 時刻表常見尾綴，保留精準站名以利 Photon / OSM 定位
+  // 去除 Google Maps / 時刻表常見尾綴與行政區括號（如「旭町 [金沢市]」、「Kanazawadaigakushizenkenmae Bus Stop」）
   s = s
-    .replace(/\s*\((?:バス|バス停|公車|公車站|停留所|bus(?:\s*stop)?)\)\s*$/i, '')
+    .replace(/\s*\[[^\]\[]{1,16}\]\s*$/i, '')
+    .replace(/\s*\((?:バス|バス停|公車|公車站|停留所|bus(?:\s*stop)?|station)\)\s*$/i, '')
+    .replace(/\s+(?:bus\s*stop|bus\s*station)\s*$/i, '')
     .replace(/\s*(?:バス停|停留所|公車站牌|公車站|上車站|下車站|上車|下車)\s*$/i, '')
     .replace(/^(?:上車|下車|乘車|降車)[:：\s]+/i, '')
     .trim();
   return s.slice(0, 60);
+}
+
+/**
+ * 將沿途停靠站均勻抽樣至最多 maxCount 站，確保同時覆蓋「起點附近、中段、終點附近」的關鍵轉折站點
+ */
+export function selectEvenlySpacedIntermediateStops(stops, maxCount = MAX_INTERMEDIATE_STOPS) {
+  const list = Array.isArray(stops) ? stops.filter(Boolean) : [];
+  if (list.length <= maxCount) return list;
+  if (maxCount <= 1) return [list[Math.floor(list.length / 2)]];
+
+  const picked = [];
+  const usedIndices = new Set();
+  for (let i = 0; i < maxCount; i++) {
+    const idx = Math.round((i * (list.length - 1)) / (maxCount - 1));
+    if (!usedIndices.has(idx)) {
+      usedIndices.add(idx);
+      picked.push(list[idx]);
+    }
+  }
+  return picked;
 }
 
 function normalizeTimeText(raw) {
@@ -402,44 +424,44 @@ const GEMINI_RESPONSE_SCHEMA = {
           },
           lineShortName: {
             type: 'STRING',
-            description: '公車號碼或簡短路線代號（如 "206"、"紅26"、"RL"）；若無獨立短號碼或 WALK 段填 ""',
+            description: '公車號碼或簡短路線代號（如 "94"、"206"、"紅26"、"RL"）；若無獨立短號碼或 WALK 段填 ""',
           },
           lineName: {
             type: 'STRING',
-            description: '截圖方框或路線標題內的完整名稱（如 "循環バス [金沢駅~金沢駅]"、"京都市営バス 206"）；WALK 段填 ""',
+            description: '截圖方框或路線標題內的完整名稱（如 "94 金沢大学線"、"循環バス [金沢駅~金沢駅]"）；WALK 段填 ""',
           },
           headsign: {
             type: 'STRING',
-            description: '開往方向／行先文字（如 "広坂・21世紀美術館・兼六園下・金沢城経由橋場町・ひがし茶屋街行"）；無或 WALK 段填 ""',
+            description: '開往方向／行先文字（如 "金沢大学行"、"広坂・21世紀美術館・兼六園下・金沢城経由橋場町・ひがし茶屋街行"）；無或 WALK 段填 ""',
           },
           departureTimeText: {
             type: 'STRING',
-            description: '此段出發或上車時刻，一律轉 24 小時制 HH:MM（如 下午1:55 -> "13:55"），無則填 ""',
+            description: '此段出發或上車時刻，一律轉 24 小時制 HH:MM（如 下午3:34 -> "15:34"），無則填 ""',
           },
           arrivalTimeText: {
             type: 'STRING',
-            description: '此段抵達或下車時刻，一律轉 24 小時制 HH:MM（如 下午2:04 -> "14:04"），無則填 ""',
+            description: '此段抵達或下車時刻，一律轉 24 小時制 HH:MM（如 下午3:50 -> "15:50"），無則填 ""',
           },
           durationMin: {
             type: 'INTEGER',
-            description: '此段耗時分鐘數，務必讀取截圖數字（如 "約 1 分" 填 1、"9 分 (4 站)" 填 9）',
+            description: '此段耗時分鐘數，務必讀取截圖數字（如 "步行 8 分鐘" 填 8、"經 13 站 (16 分鐘)" 填 16）',
           },
           stopCount: {
             type: 'INTEGER',
-            description: '此段停靠站數（如 "9 分 (4 站)" 填 4）；未標示或 WALK 段填 0',
+            description: '此段停靠站數（如 "經 13 站 (16 分鐘)" 填 13）；未標示或 WALK 段填 0',
           },
           departureStopName: {
             type: 'STRING',
-            description: 'TRANSIT 段的上車站牌名稱（粗實線起點旁的站名，如 "武蔵ヶ辻・近江町市場"，去除（バス）贅字）；WALK 段填 ""',
+            description: 'TRANSIT 段的上車站牌名稱；日本站名若截圖顯示英文／羅馬拼音（如 Kenrokuen Garden・Kanazawa Castle Park），請還原為官方日文漢字站名（如 "兼六園下・金沢城"）；去除 (バス)/Bus Stop 贅字；WALK 段填 ""',
           },
           arrivalStopName: {
             type: 'STRING',
-            description: 'TRANSIT 段的下車站牌名稱（粗實線終點旁的站名，如 "兼六園下"，去除（バス）贅字）；WALK 段填 ""',
+            description: 'TRANSIT 段的下車站牌名稱；日本站名若截圖顯示英文／羅馬拼音（如 Kanazawadaigakushizenkenmae Bus Stop），請還原為官方日文漢字站名（如 "金沢大学自然研前"）；去除 (バス)/Bus Stop 贅字；WALK 段填 ""',
           },
           intermediateStopNames: {
             type: 'ARRAY',
             items: { type: 'STRING' },
-            description: '若截圖有展開中途停靠站，依順序填入上車與下車之間的中途站名（最多 3 站，去除（バス）贅字）；未展開或 WALK 段填 []',
+            description: '依實際行駛順序盡量完整列出上車與下車之間的中途站名（無論來自左側展開清單或右側地圖路線上標示的沿途公車站名，最多 12 站，涵蓋前段、中段與後段站點），去除 (バス)/[市區名]/Bus Stop 贅字；無可見中途站或 WALK 段填 []',
           },
           colorHex: {
             type: 'STRING',
@@ -457,23 +479,23 @@ const GEMINI_RESPONSE_SCHEMA = {
 
 function buildGeminiPrompt({ originName, destinationName, inJapan, includeSchemaHint = false }) {
   const regionHint = inJapan
-    ? '此路段位於日本（常見為 Google Maps、NAVITIME、Yahoo! 乗換案内截圖；站名與路線名請忠實保留圖片上的日文漢字或英文原文，票價幣別通常為 JPY）。'
+    ? '此路段位於日本（常見為 Google Maps、NAVITIME、Yahoo! 乗換案内截圖；票價幣別通常為 JPY）。特別注意：若 Google Maps 把日本公車站牌顯示成英文或連寫羅馬拼音（如 "Kenrokuen Garden・Kanazawa Castle Park"、"Kanazawadaigakushizenkenmae Bus Stop"、"Minami-cho・Oyama Jinja Shrine"），請於 departureStopName / arrivalStopName / intermediateStopNames 直接還原為正確的官方日文漢字站名（如 "兼六園下・金沢城"、"金沢大学自然研前"、"南町・尾山神社"），大幅提升 OpenStreetMap 站牌定位準確率。'
     : '此路段常見為 Google Maps、公車動態 App 或時刻表截圖（請忠實保留截圖上的繁中／原文，台灣票價幣別通常為 TWD）。';
 
   const lines = [
-    '你是高精度大眾運輸截圖 OCR 與結構化解析器。請仔細逐行閱讀截圖中的每一個字、每一個時刻與每一個站名，完整填寫所有欄位，不可遺漏 TRANSIT 段的路線名、上車站、下車站、耗時、站數或時刻。',
+    '你是高精度大眾運輸截圖 OCR 與結構化解析器。請仔細逐行閱讀截圖中的文字、時刻、站名，以及右側地圖路線上標註的沿途站牌，完整填寫所有欄位，不可遺漏 TRANSIT 段的路線名、上車站、下車站、中途站、耗時、站數或時刻。',
     regionHint,
     originName || destinationName
       ? `參考行程起終點：起點「${normalizeText(originName, 40) || '未命名'}」→ 終點「${normalizeText(destinationName, 40) || '未命名'}」。`
       : '',
-    'Google Maps / 轉乘 App 垂直時間軸判讀重點：',
+    'Google Maps / 轉乘 App 判讀重點：',
     '1. 最上方與最下方附地址的圓點是「起點／終點地標」，虛線是步行（WALK），粗實線是搭車（TRANSIT）。',
-    '2. 每個 TRANSIT 段的「粗實線起點圓點」旁文字就是上車站（departureStopName），「粗實線終點圓點」旁文字就是下車站（arrivalStopName）；例如「武蔵ヶ辻・近江町市場（バス）」請填 "武蔵ヶ辻・近江町市場"（去除（バス）／公車站等括號贅字）。',
-    '3. 公車／電車圖示旁通常有「方框路線名」與「開往方向（〜行／往〜）」：方框內的路線名稱填入 lineName（若有純號碼／短代號如 "206"、"紅26"、"RL" 才填 lineShortName，否則 lineShortName 填 ""），方向文字填入 headsign。',
-    '4. 務必讀取每段的耗時與站數（例如「約 1 分」→ durationMin: 1；「9 分 (4 站)」→ durationMin: 9, stopCount: 4；「約 10 分」→ durationMin: 10）。',
-    '5. 若粗實線中間有展開較小圓點的中途停靠站（例如 Minami-cho・Oyama Jinja Shrine、香林坊、広坂・21世紀美術館），請依序填入 intermediateStopNames（最多 3 站，均勻涵蓋全程，去除（バス）贅字）。',
-    '6. 時刻務必轉成 24 小時制 HH:MM（例：下午1:54 → "13:54"、下午2:04 → "14:04"、上午9:05 → "09:05"）。整趟最上／最下時刻填入根層級 departureTimeText / arrivalTimeText，搭車上下車時刻填入該 TRANSIT 段的 departureTimeText / arrivalTimeText。',
-    '7. 若圖片左下／上方有顯示費用（如「費用：¥210」），填入 fareAmount: 210 與 fareCurrency: "JPY"。',
+    '2. 每個 TRANSIT 段的粗實線起點旁文字為上車站（departureStopName），粗實線終點旁文字為下車站（arrivalStopName）；務必去除（バス）、(バス)、Bus Stop、[市區名]、月台等贅字。',
+    '3. 公車／電車圖示旁通常有「方框路線名」與「開往方向（〜行／往〜）」：方框內的完整路線名填入 lineName（若有純號碼／短代號如 "94"、"206"、"紅26"、"RL" 請同時填入 lineShortName），方向文字填入 headsign。',
+    '4. 務必讀取每段的耗時與站數（例如「步行 8 分鐘」→ durationMin: 8；「經 13 站 (16 分鐘)」→ durationMin: 16, stopCount: 13；「步行 12 分鐘」→ durationMin: 12）。',
+    '5. 中途停靠站（intermediateStopNames）至關重要：請同時檢查「左側展開的中途站清單」與「右側地圖藍線／色線上沿途標註的站牌圓點」（如橫山町、暁町、桜町、田井町、旭町口、旭町、若松橋、若松西、若松、角間新町），依「上車站 → 下車站」的行駛順序盡量完整列出所有可見中途站（最多 12 站，不可只取前 3 站而忽略中後段！），系統會自動平均分佈取樣前／中／後關鍵定位點。',
+    '6. 時刻務必轉成 24 小時制 HH:MM（例：下午3:26 → "15:26"、下午4:01 → "16:01"、上午9:05 → "09:05"）。整趟最上／最下時刻填入根層級 departureTimeText / arrivalTimeText，搭車上下車時刻填入該 TRANSIT 段的 departureTimeText / arrivalTimeText。',
+    '7. 若圖片有顯示費用（如「¥390」或「費用：¥210」），填入 fareAmount（純數字）與 fareCurrency（如 "JPY"）。',
     '8. 若圖片明顯不是交通路線或時刻表截圖，設 isTransitScreenshot = false 並在 warning 簡短說明。',
   ];
 
@@ -679,7 +701,7 @@ export function normalizeParsedScreenshotDraft(raw, { inJapan = false } = {}) {
     const departureStopName = cleanStopName(s.departureStopName);
     const arrivalStopName = cleanStopName(s.arrivalStopName);
     const seenMid = new Set();
-    const intermediateStopNames = Array.isArray(s.intermediateStopNames)
+    const cleanedIntermediates = Array.isArray(s.intermediateStopNames)
       ? s.intermediateStopNames
           .map((n) => cleanStopName(n))
           .filter((n) => {
@@ -687,8 +709,8 @@ export function normalizeParsedScreenshotDraft(raw, { inJapan = false } = {}) {
             seenMid.add(n);
             return true;
           })
-          .slice(0, MAX_INTERMEDIATE_STOPS)
       : [];
+    const intermediateStopNames = selectEvenlySpacedIntermediateStops(cleanedIntermediates, MAX_INTERMEDIATE_STOPS);
     const rawStops = parseOptionalFiniteNumber(s.stopCount);
     const stopCount = Number.isFinite(rawStops) && rawStops >= 0 ? Math.min(200, Math.round(rawStops)) : 0;
 
@@ -782,9 +804,9 @@ function scoreParsedDraftRichness(rawJson, normalized) {
 
 // ==================== 4. 100% 免費開源站牌定位（Photon → OSM Nominatim，完全不觸碰 Google Places 計費）與貼路公車建構 ====================
 
-function getStopCacheKey(stopName, vehicleType, origin) {
-  const gridLat = Math.round(origin.lat * 20) / 20;
-  const gridLng = Math.round(origin.lng * 20) / 20;
+function getStopCacheKey(stopName, vehicleType, biasPoint) {
+  const gridLat = Math.round(biasPoint.lat * 20) / 20;
+  const gridLng = Math.round(biasPoint.lng * 20) / 20;
   const kind = ROAD_TRANSIT_TYPES.has(vehicleType) ? 'bus' : 'rail';
   return `${gridLat.toFixed(2)},${gridLng.toFixed(2)}|${kind}|${stopName.toLowerCase()}`;
 }
@@ -829,6 +851,61 @@ function extractPrimaryStopToken(stopName) {
   return '';
 }
 
+const GENERIC_STOP_TOKENS = new Set([
+  'bus',
+  'stop',
+  'station',
+  'terminal',
+  'park',
+  'the',
+  'and',
+  'for',
+  'road',
+  'street',
+  'mae',
+]);
+
+function hasStopNameOverlap(featName, queryName) {
+  const normFeat = toHalfWidthAscii(featName).toLowerCase().replace(/[\s・·\-_/()[\].,:：]+/g, '');
+  const normQuery = toHalfWidthAscii(queryName).toLowerCase().replace(/[\s・·\-_/()[\].,:：]+/g, '');
+  if (!normFeat || !normQuery) return false;
+
+  const featCjk = normFeat.match(/[\u3040-\u30ff\u3400-\u9fff]/g) || [];
+  const queryCjk = normQuery.match(/[\u3040-\u30ff\u3400-\u9fff]/g) || [];
+
+  // 雙方皆為中日漢字／假名：要求精準包含或具足夠字元重疊，徹底杜絕無關站牌亂吸
+  if (featCjk.length > 0 && queryCjk.length > 0) {
+    if (normFeat.includes(normQuery) || normQuery.includes(normFeat)) return true;
+    const featSet = new Set(featCjk);
+    const uniqueQuery = [...new Set(queryCjk)];
+    let shared = 0;
+    for (const ch of uniqueQuery) {
+      if (featSet.has(ch)) shared += 1;
+    }
+    return shared >= Math.min(2, uniqueQuery.length);
+  }
+
+  // 雙方皆為英數／羅馬字：要求至少有一個非泛用單字重疊
+  if (featCjk.length === 0 && queryCjk.length === 0) {
+    if (normFeat.includes(normQuery) || normQuery.includes(normFeat)) return true;
+    const qTokens = toHalfWidthAscii(queryName)
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t.length >= 3 && !GENERIC_STOP_TOKENS.has(t));
+    if (qTokens.length === 0) return false;
+    return qTokens.some((tok) => normFeat.includes(tok));
+  }
+
+  // 跨語系（如英文查詢 "Kenrokuen Garden" 對應 OSM "兼六園下・金沢城"）：
+  // 只要查詢詞本身有實質專有名詞（非單純 "bus stop"），允許信任 Photon 的多語 name:en 匹配
+  const latinStr = queryCjk.length === 0 ? queryName : featName;
+  const meaningfulTokens = toHalfWidthAscii(latinStr)
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 3 && !GENERIC_STOP_TOKENS.has(t));
+  return meaningfulTokens.length > 0;
+}
+
 function computeCorridorRect(origin, destination) {
   const straightKm = calcDistanceKm(origin.lat, origin.lng, destination.lat, destination.lng);
   const padKm = Math.min(35, Math.max(2.5, straightKm * 0.45));
@@ -846,10 +923,19 @@ function computeCorridorRect(origin, destination) {
       longitude: Math.min(179.5, Math.max(origin.lng, destination.lng) + dLng),
     },
     maxCorridorKm: Math.min(40, Math.max(3.5, straightKm * 0.65)),
+    straightKm,
   };
 }
 
-function scorePhotonFeature(feature, cleanName, vehicleType, origin, destination, maxCorridorKm) {
+function scorePhotonFeature(
+  feature,
+  cleanName,
+  vehicleType,
+  origin,
+  destination,
+  corridor,
+  { role = 'intermediate', biasPoint = null, maxDistToBiasKm = Infinity } = {}
+) {
   const coords = feature?.geometry?.coordinates;
   if (!Array.isArray(coords) || coords.length < 2) return null;
   const lng = Number(coords[0]);
@@ -857,50 +943,80 @@ function scorePhotonFeature(feature, cleanName, vehicleType, origin, destination
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
 
   const devKm = pointToSegmentKm({ lat, lng }, origin, destination);
-  if (devKm > maxCorridorKm) return null;
+  if (devKm > corridor.maxCorridorKm) return null;
+
+  const distToBiasKm = biasPoint ? calcDistanceKm(lat, lng, biasPoint.lat, biasPoint.lng) : devKm;
+  if (Number.isFinite(maxDistToBiasKm) && distToBiasKm > maxDistToBiasKm) return null;
 
   const props = feature?.properties || {};
   const osmKey = String(props.osm_key || '').toLowerCase();
   const osmVal = String(props.osm_value || '').toLowerCase();
   const featName = String(props.name || '').trim();
 
+  if (featName && !hasStopNameOverlap(featName, cleanName)) return null;
+
   const isBusTagged = osmKey === 'public_transport' || PHOTON_BUS_VALUES.has(osmVal);
   const isRailTagged = osmKey === 'railway' || PHOTON_RAIL_VALUES.has(osmVal);
   const isFerryTagged = osmVal === 'ferry_terminal';
+  const isTransitTagged = isBusTagged || isRailTagged || isFerryTagged;
+
+  // 中途站若僅配到一般地名／行政區而非真實站牌，要求必須緊貼路線走廊，避免把公車拉進住宅巷弄
+  if (role === 'intermediate' && !isTransitTagged && devKm > Math.min(1.5, corridor.maxCorridorKm)) {
+    return null;
+  }
 
   let typeBonus = 0;
   if (ROAD_TRANSIT_TYPES.has(vehicleType)) {
-    if (isBusTagged) typeBonus = 35;
+    if (isBusTagged) typeBonus = 38;
     else if (isRailTagged) typeBonus = 14;
   } else if (vehicleType === 'FERRY') {
-    if (isFerryTagged) typeBonus = 35;
+    if (isFerryTagged) typeBonus = 38;
   } else if (isRailTagged) {
-    typeBonus = 35;
+    typeBonus = 38;
   } else if (isBusTagged) {
     typeBonus = 14;
   }
 
   let nameBonus = 0;
   if (featName) {
-    const normFeat = featName.toLowerCase();
-    const normQuery = cleanName.toLowerCase();
-    if (normFeat === normQuery) nameBonus = 14;
+    const normFeat = toHalfWidthAscii(featName).toLowerCase();
+    const normQuery = toHalfWidthAscii(cleanName).toLowerCase();
+    if (normFeat === normQuery) nameBonus = 16;
     else if (normFeat.includes(normQuery) || normQuery.includes(normFeat)) nameBonus = 10;
   }
+
+  const biasPenaltyWeight = role === 'departure' || role === 'arrival' ? 4.0 : 2.2;
 
   return {
     lat,
     lng,
     matchedName: featName || cleanName,
     source: 'photon_osm',
-    score: typeBonus + nameBonus - devKm * 2.5,
+    isTransitTagged,
+    score: typeBonus + nameBonus - devKm * 2.5 - distToBiasKm * biasPenaltyWeight,
   };
 }
 
-async function queryPhotonStop(queryText, cleanName, vehicleType, origin, destination, corridor) {
-  const midLat = ((origin.lat + destination.lat) / 2).toFixed(5);
-  const midLng = ((origin.lng + destination.lng) / 2).toFixed(5);
-  const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(queryText)}&lat=${midLat}&lon=${midLng}&limit=6`;
+async function queryPhotonStop(
+  queryText,
+  cleanName,
+  vehicleType,
+  origin,
+  destination,
+  corridor,
+  opts = {}
+) {
+  const biasPoint = opts.biasPoint || {
+    lat: (origin.lat + destination.lat) / 2,
+    lng: (origin.lng + destination.lng) / 2,
+  };
+  const bbox = [
+    corridor.low.longitude.toFixed(5),
+    corridor.low.latitude.toFixed(5),
+    corridor.high.longitude.toFixed(5),
+    corridor.high.latitude.toFixed(5),
+  ].join(',');
+  const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(queryText)}&lat=${biasPoint.lat.toFixed(5)}&lon=${biasPoint.lng.toFixed(5)}&bbox=${encodeURIComponent(bbox)}&limit=10`;
 
   try {
     const { res, data } = await fetchJsonWithTimeout(
@@ -913,19 +1029,43 @@ async function queryPhotonStop(queryText, cleanName, vehicleType, origin, destin
 
     let best = null;
     for (const f of data.features) {
-      const scored = scorePhotonFeature(f, cleanName, vehicleType, origin, destination, corridor.maxCorridorKm);
+      const scored = scorePhotonFeature(f, cleanName, vehicleType, origin, destination, corridor, {
+        ...opts,
+        biasPoint,
+      });
       if (scored && (!best || scored.score > best.score)) {
         best = scored;
       }
     }
     if (!best) return null;
-    return { lat: best.lat, lng: best.lng, matchedName: best.matchedName, source: best.source };
+    return {
+      lat: best.lat,
+      lng: best.lng,
+      matchedName: best.matchedName,
+      source: best.source,
+      isTransitTagged: best.isTransitTagged,
+    };
   } catch {
     return null;
   }
 }
 
-async function queryNominatimStop(queryText, cleanName, vehicleType, origin, destination, corridor, inJapan) {
+async function queryNominatimStop(
+  queryText,
+  cleanName,
+  vehicleType,
+  origin,
+  destination,
+  corridor,
+  inJapan,
+  opts = {}
+) {
+  const biasPoint = opts.biasPoint || {
+    lat: (origin.lat + destination.lat) / 2,
+    lng: (origin.lng + destination.lng) / 2,
+  };
+  const maxDistToBiasKm = Number.isFinite(opts.maxDistToBiasKm) ? opts.maxDistToBiasKm : Infinity;
+
   try {
     const viewbox = [
       corridor.low.longitude.toFixed(5),
@@ -933,7 +1073,7 @@ async function queryNominatimStop(queryText, cleanName, vehicleType, origin, des
       corridor.high.longitude.toFixed(5),
       corridor.low.latitude.toFixed(5),
     ].join(',');
-    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=4&bounded=1&viewbox=${encodeURIComponent(viewbox)}&q=${encodeURIComponent(queryText)}`;
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=5&bounded=1&viewbox=${encodeURIComponent(viewbox)}&q=${encodeURIComponent(queryText)}`;
     const { res, data } = await fetchJsonWithTimeout(
       fetch,
       url,
@@ -956,35 +1096,60 @@ async function queryNominatimStop(queryText, cleanName, vehicleType, origin, des
       const devKm = pointToSegmentKm({ lat, lng }, origin, destination);
       if (devKm > corridor.maxCorridorKm) continue;
 
+      const distToBiasKm = calcDistanceKm(lat, lng, biasPoint.lat, biasPoint.lng);
+      if (distToBiasKm > maxDistToBiasKm) continue;
+
+      const label = String(item?.name || item?.display_name || '').trim();
+      if (label && !hasStopNameOverlap(label, cleanName)) continue;
+
       const cls = String(item?.class || '').toLowerCase();
       const typ = String(item?.type || '').toLowerCase();
       const isBus = cls === 'public_transport' || PHOTON_BUS_VALUES.has(typ);
       const isRail = cls === 'railway' || PHOTON_RAIL_VALUES.has(typ);
+      const isTransitTagged = isBus || isRail;
       const bonus =
         (ROAD_TRANSIT_TYPES.has(vehicleType) && isBus) || (!ROAD_TRANSIT_TYPES.has(vehicleType) && isRail)
-          ? 30
+          ? 34
           : isBus || isRail
             ? 12
             : 0;
-      const score = bonus - devKm * 2.5;
+      const biasWeight = opts.role === 'departure' || opts.role === 'arrival' ? 4.0 : 2.2;
+      const score = bonus - devKm * 2.5 - distToBiasKm * biasWeight;
       if (!best || score > best.score) {
-        best = { lat, lng, matchedName: cleanName, source: 'osm_nominatim', score };
+        best = { lat, lng, matchedName: cleanName, source: 'osm_nominatim', isTransitTagged, score };
       }
     }
     if (!best) return null;
-    return { lat: best.lat, lng: best.lng, matchedName: best.matchedName, source: best.source };
+    return {
+      lat: best.lat,
+      lng: best.lng,
+      matchedName: best.matchedName,
+      source: best.source,
+      isTransitTagged: best.isTransitTagged,
+    };
   } catch {
     return null;
   }
 }
 
-async function geocodeTransitStop(stopName, vehicleType, origin, destination, _env, budget) {
-  const cleanName = normalizeText(stopName, 60);
+async function geocodeTransitStop(stopName, vehicleType, origin, destination, _env, budget, opts = {}) {
+  const cleanName = cleanStopName(stopName);
   if (!cleanName) return null;
 
-  const cacheKey = getStopCacheKey(cleanName, vehicleType, origin);
+  const biasPoint = opts.biasPoint || {
+    lat: (origin.lat + destination.lat) / 2,
+    lng: (origin.lng + destination.lng) / 2,
+  };
+  const cacheKey = getStopCacheKey(cleanName, vehicleType, biasPoint);
   const cached = readStopCache(cacheKey);
   if (cached !== undefined) {
+    if (
+      cached &&
+      Number.isFinite(opts.maxDistToBiasKm) &&
+      calcDistanceKm(cached.lat, cached.lng, biasPoint.lat, biasPoint.lng) > opts.maxDistToBiasKm
+    ) {
+      return null;
+    }
     return cached;
   }
 
@@ -998,24 +1163,76 @@ async function geocodeTransitStop(stopName, vehicleType, origin, destination, _e
   const inJapan = isJapanTrip(origin, destination);
   const corridor = computeCorridorRect(origin, destination);
   const primaryToken = extractPrimaryStopToken(cleanName);
+  const queryOpts = { ...opts, biasPoint };
 
-  // 1. 優先使用免費開源 Photon（支援座標鄰近加權與 highway=bus_stop 精準篩選，永遠 $0）
-  let found = await queryPhotonStop(cleanName, cleanName, vehicleType, origin, destination, corridor);
+  // 1. 優先使用免費開源 Photon（帶走廊 bbox、角色位置加權與 highway=bus_stop 精準篩選，永遠 $0）
+  let found = await queryPhotonStop(cleanName, cleanName, vehicleType, origin, destination, corridor, queryOpts);
   if (!found && primaryToken) {
-    found = await queryPhotonStop(primaryToken, cleanName, vehicleType, origin, destination, corridor);
+    found = await queryPhotonStop(primaryToken, cleanName, vehicleType, origin, destination, corridor, queryOpts);
   }
 
   // 2. 備援：免費 OpenStreetMap Nominatim 走廊範圍搜尋（同樣永遠 $0、完全不碰 Google Places API）
   if (!found) {
     const nomQuery = buildStopSearchQuery(cleanName, vehicleType, inJapan);
-    found = await queryNominatimStop(nomQuery, cleanName, vehicleType, origin, destination, corridor, inJapan);
+    found = await queryNominatimStop(nomQuery, cleanName, vehicleType, origin, destination, corridor, inJapan, queryOpts);
   }
   if (!found && primaryToken) {
-    found = await queryNominatimStop(primaryToken, cleanName, vehicleType, origin, destination, corridor, inJapan);
+    found = await queryNominatimStop(primaryToken, cleanName, vehicleType, origin, destination, corridor, inJapan, queryOpts);
   }
 
   writeStopCache(cacheKey, found);
   return found;
+}
+
+function projectAlongSegment(p, a, b) {
+  const cosLat = Math.cos(((a.lat + b.lat) / 2) * (Math.PI / 180));
+  const dx = (b.lng - a.lng) * cosLat;
+  const dy = b.lat - a.lat;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq < 1e-10) return 0.5;
+  return (((p.lng - a.lng) * cosLat) * dx + (p.lat - a.lat) * dy) / lenSq;
+}
+
+/**
+ * 過濾明顯折返、離題過遠或過於貼近相鄰站的中途座標，避免 OSRM 畫出突兀迴轉尖刺
+ */
+export function pruneOutlierIntermediateCoords(startPt, interCoords, endPt) {
+  if (!Array.isArray(interCoords) || interCoords.length === 0 || !isValidCoord(startPt) || !isValidCoord(endPt)) {
+    return [];
+  }
+  const straightKm = calcDistanceKm(startPt.lat, startPt.lng, endPt.lat, endPt.lng);
+  const accepted = [];
+  let prevPt = startPt;
+  let prevT = 0;
+
+  for (const pt of interCoords) {
+    if (!isValidCoord(pt)) continue;
+    // 與起點、終點或上一個接受點距離過近（< 80 公尺），略過避免同路段雙向站牌折返
+    if (calcDistanceKm(pt.lat, pt.lng, startPt.lat, startPt.lng) < 0.08) continue;
+    if (calcDistanceKm(pt.lat, pt.lng, endPt.lat, endPt.lng) < 0.08) continue;
+    if (calcDistanceKm(pt.lat, pt.lng, prevPt.lat, prevPt.lng) < 0.08) continue;
+
+    const t = projectAlongSegment(pt, startPt, endPt);
+    // 長距離直線段禁止大幅往回折返（允許市區繞行公車微幅彎曲）
+    if (straightKm >= 1.2 && (t < -0.3 || t > 1.3 || t < prevT - 0.25)) {
+      continue;
+    }
+
+    const directToEnd = calcDistanceKm(prevPt.lat, prevPt.lng, endPt.lat, endPt.lng);
+    const viaMid =
+      calcDistanceKm(prevPt.lat, prevPt.lng, pt.lat, pt.lng) +
+      calcDistanceKm(pt.lat, pt.lng, endPt.lat, endPt.lng);
+    const extraKm = viaMid - directToEnd;
+    if (directToEnd > 0.3 && viaMid > directToEnd * 2.6 && extraKm > 1.2) {
+      continue;
+    }
+
+    accepted.push(pt);
+    prevPt = pt;
+    prevT = Math.max(prevT, t);
+  }
+
+  return accepted;
 }
 
 async function queryFreeOsrmPolyline(waypoints, profile = 'car', { excludeMotorway = false } = {}) {
@@ -1075,44 +1292,96 @@ export async function anchorAndBuildTransitRoute(
   const inJapan = isJapanTrip(origin, destination);
   const normalizedDraft = normalizeParsedScreenshotDraft(draft, { inJapan });
   const budget = { remainingLookups: MAX_STOPS_PER_REQUEST, freeLookupsUsed: 0 };
+  const straightKm = calcDistanceKm(origin.lat, origin.lng, destination.lat, destination.lng);
 
-  // 1. 依序對所有 TRANSIT 段的「上車站、下車站、最多 3 個中途站」做站牌定位
+  const rawTransitIndices = normalizedDraft.segments
+    .map((s, idx) => (s.type === 'TRANSIT' ? idx : -1))
+    .filter((idx) => idx >= 0);
+
+  // 1. 依角色定位所有 TRANSIT 段的「上車站（靠起點）、下車站（靠終點）、最多 5 個均勻分佈中途站（沿線內插加權）」
   const anchoredDraftSegments = [];
   let totalStopCandidates = 0;
   let matchedStopsCount = 0;
 
-  for (const seg of normalizedDraft.segments) {
+  for (let segIdx = 0; segIdx < normalizedDraft.segments.length; segIdx++) {
+    const seg = normalizedDraft.segments[segIdx];
     if (seg.type === 'WALK') {
       anchoredDraftSegments.push({ ...seg });
       continue;
     }
 
+    const isFirstTransitSeg = segIdx === rawTransitIndices[0];
+    const isLastTransitSeg = segIdx === rawTransitIndices[rawTransitIndices.length - 1];
+    const prevSeg = segIdx > 0 ? normalizedDraft.segments[segIdx - 1] : null;
+    const nextSeg = segIdx < normalizedDraft.segments.length - 1 ? normalizedDraft.segments[segIdx + 1] : null;
+
     let depCoord = null;
     let arrCoord = null;
-    const interCoords = [];
+    let interCoords = [];
 
     if (seg.departureStopName) {
       totalStopCandidates += 1;
-      depCoord = await geocodeTransitStop(seg.departureStopName, seg.vehicleType, origin, destination, env, budget);
+      const depBias = isFirstTransitSeg
+        ? origin
+        : { lat: (origin.lat + destination.lat) / 2, lng: (origin.lng + destination.lng) / 2 };
+      const depMaxKm =
+        isFirstTransitSeg && prevSeg?.type === 'WALK'
+          ? Math.max(2.0, (prevSeg.durationMin || 5) * 0.16 + 0.9)
+          : Math.max(3.5, straightKm * 0.65);
+      depCoord = await geocodeTransitStop(seg.departureStopName, seg.vehicleType, origin, destination, env, budget, {
+        role: 'departure',
+        biasPoint: depBias,
+        maxDistToBiasKm: depMaxKm,
+      });
       if (depCoord) matchedStopsCount += 1;
     }
 
     if (seg.arrivalStopName) {
       totalStopCandidates += 1;
-      arrCoord = await geocodeTransitStop(seg.arrivalStopName, seg.vehicleType, origin, destination, env, budget);
+      const arrBias = isLastTransitSeg
+        ? destination
+        : { lat: (origin.lat + destination.lat) / 2, lng: (origin.lng + destination.lng) / 2 };
+      const arrMaxKm =
+        isLastTransitSeg && nextSeg?.type === 'WALK'
+          ? Math.max(2.0, (nextSeg.durationMin || 5) * 0.16 + 0.9)
+          : Math.max(3.5, straightKm * 0.65);
+      arrCoord = await geocodeTransitStop(seg.arrivalStopName, seg.vehicleType, origin, destination, env, budget, {
+        role: 'arrival',
+        biasPoint: arrBias,
+        maxDistToBiasKm: arrMaxKm,
+      });
       if (arrCoord) matchedStopsCount += 1;
     }
 
+    const startAnchor = depCoord || (isFirstTransitSeg ? origin : origin);
+    const endAnchor = arrCoord || (isLastTransitSeg ? destination : destination);
+
     if (ROAD_TRANSIT_TYPES.has(seg.vehicleType) && Array.isArray(seg.intermediateStopNames)) {
-      for (const midName of seg.intermediateStopNames.slice(0, MAX_INTERMEDIATE_STOPS)) {
+      const selectedMidNames = selectEvenlySpacedIntermediateStops(seg.intermediateStopNames, MAX_INTERMEDIATE_STOPS);
+      const midSpanKm = calcDistanceKm(startAnchor.lat, startAnchor.lng, endAnchor.lat, endAnchor.lng);
+      const midMaxKm = Math.max(2.5, midSpanKm * 0.65);
+
+      for (let k = 0; k < selectedMidNames.length; k++) {
+        const midName = selectedMidNames[k];
         if (!midName || budget.remainingLookups <= 0) break;
         totalStopCandidates += 1;
-        const midCoord = await geocodeTransitStop(midName, seg.vehicleType, origin, destination, env, budget);
+        const ratio = (k + 1) / (selectedMidNames.length + 1);
+        const midBias = {
+          lat: startAnchor.lat + (endAnchor.lat - startAnchor.lat) * ratio,
+          lng: startAnchor.lng + (endAnchor.lng - startAnchor.lng) * ratio,
+        };
+        const midCoord = await geocodeTransitStop(midName, seg.vehicleType, origin, destination, env, budget, {
+          role: 'intermediate',
+          biasPoint: midBias,
+          maxDistToBiasKm: midMaxKm,
+        });
         if (midCoord) {
           matchedStopsCount += 1;
           interCoords.push({ name: midName, lat: midCoord.lat, lng: midCoord.lng });
         }
       }
+
+      interCoords = pruneOutlierIntermediateCoords(startAnchor, interCoords, endAnchor);
     }
 
     anchoredDraftSegments.push({

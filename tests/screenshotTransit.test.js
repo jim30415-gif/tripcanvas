@@ -6,7 +6,9 @@ import {
   handleScreenshotBuildRouteRequest,
   handleScreenshotParseRequest,
   normalizeParsedScreenshotDraft,
+  pruneOutlierIntermediateCoords,
   resetScreenshotQuotaStateForTest,
+  selectEvenlySpacedIntermediateStops,
 } from '../server/screenshotTransit.js';
 import { encodePolyline } from '../src/services/polyline.js';
 
@@ -553,7 +555,7 @@ test('handleScreenshotParseRequest falls back on 404 model unavailable, stages 4
   );
 });
 
-test('normalizeParsedScreenshotDraft cleans stop names, converts 12-hour CJK times, caps 3 intermediate stops, and defaults currency by region', () => {
+test('normalizeParsedScreenshotDraft cleans stop names, converts 12-hour CJK times, evenly samples 5 intermediate stops, and defaults currency by region', () => {
   const draft = normalizeParsedScreenshotDraft(
     {
       isTransitScreenshot: true,
@@ -564,10 +566,22 @@ test('normalizeParsedScreenshotDraft cleans stop names, converts 12-hour CJK tim
         {
           type: 'TRANSIT',
           vehicleType: 'BUS',
-          lineName: '京都市営バス ２０５',
-          departureStopName: '京都駅前（バス）',
-          arrivalStopName: '金閣寺道 バス停',
-          intermediateStopNames: ['京都駅前', '四条大宮', '西ノ京円町', '北野白梅町', 'わら天神前'],
+          lineName: '94 金沢大学線',
+          departureStopName: '兼六園下（バス）',
+          arrivalStopName: 'Kanazawadaigakushizenkenmae Bus Stop',
+          intermediateStopNames: [
+            '兼六園下',
+            '横山町 (バス)',
+            '暁町 (バス)',
+            '桜町 (バス)',
+            '田井町 (バス)',
+            '旭町口 (バス)',
+            '旭町 [金沢市]',
+            '若松橋 (バス)',
+            '若松西 (バス)',
+            '若松',
+            '角間新町 (バス)',
+          ],
           departureTimeText: '上午9:05',
           arrivalTimeText: '上午9:43',
           durationMin: 0,
@@ -582,13 +596,95 @@ test('normalizeParsedScreenshotDraft cleans stop names, converts 12-hour CJK tim
   assert.equal(draft.arrivalTimeText, '14:14');
   assert.equal(draft.totalDurationMin, 20);
   assert.equal(draft.segments.length, 1);
-  assert.equal(draft.segments[0].lineName, '京都市営バス 205');
-  assert.equal(draft.segments[0].departureStopName, '京都駅前');
-  assert.equal(draft.segments[0].arrivalStopName, '金閣寺道');
+  assert.equal(draft.segments[0].departureStopName, '兼六園下');
+  assert.equal(draft.segments[0].arrivalStopName, 'Kanazawadaigakushizenkenmae');
   assert.equal(draft.segments[0].departureTimeText, '09:05');
   assert.equal(draft.segments[0].arrivalTimeText, '09:43');
   // durationMin 未填時可由上下車時刻自動推算 38 分
   assert.equal(draft.segments[0].durationMin, 38);
-  // 排除與上車站重複的「京都駅前」，並上限截斷為 3 站
-  assert.deepEqual(draft.segments[0].intermediateStopNames, ['四条大宮', '西ノ京円町', '北野白梅町']);
+  // 排除與上車站重複的「兼六園下」，從 10 站中均勻挑選 5 站（同時涵蓋前、中、後段並清除 (バス)/[金沢市]）
+  assert.deepEqual(draft.segments[0].intermediateStopNames, ['横山町', '桜町', '旭町', '若松西', '角間新町']);
+  assert.deepEqual(selectEvenlySpacedIntermediateStops(['A', 'B', 'C'], 5), ['A', 'B', 'C']);
+});
+
+test('Role-biased geocoder rejects unrelated distant stops & pruneOutlierIntermediateCoords removes backtracking spikes', async () => {
+  resetScreenshotQuotaStateForTest();
+  const origin = { lat: 36.5698, lng: 136.6626 }; // 寺島蔵人邸
+  const destination = { lat: 36.5449, lng: 136.7095 }; // 金沢大学角間
+
+  // 驗證幾何過濾器：保留正常沿線中途點，剔除往反方向跳到金沢站的折返尖刺
+  const pruned = pruneOutlierIntermediateCoords(
+    { lat: 36.5654, lng: 136.6623 },
+    [
+      { name: '横山町', lat: 36.5635, lng: 136.6703 },
+      { name: '旭町', lat: 36.5531, lng: 136.6827 },
+      { name: '誤吸折返點', lat: 36.5787, lng: 136.6472 },
+      { name: '角間新町', lat: 36.5538, lng: 136.6983 },
+    ],
+    { lat: 36.5445, lng: 136.7068 }
+  );
+  assert.deepEqual(
+    pruned.map((p) => p.name),
+    ['横山町', '旭町', '角間新町']
+  );
+
+  // 驗證 role-aware 步行半徑與站名重疊防護：下車站若誤回 6.5km 外的無關站牌，必須拒收而不把公車折返拉走
+  await withMockedFetch(
+    async (url) => {
+      const u = String(url);
+      if (u.includes('photon.komoot.io')) {
+        const q = new URL(u).searchParams.get('q') || '';
+        if (q.includes('兼六園下')) {
+          return makeJsonResponse({
+            features: [
+              {
+                geometry: { coordinates: [136.6623, 36.5654] },
+                properties: { name: '兼六園下・金沢城', osm_key: 'highway', osm_value: 'bus_stop' },
+              },
+            ],
+          });
+        }
+        // 模擬誤吸到遠離終點 6.5km 的金沢站公車站牌
+        return makeJsonResponse({
+          features: [
+            {
+              geometry: { coordinates: [136.6472, 36.5787] },
+              properties: { name: '金沢駅東口', osm_key: 'highway', osm_value: 'bus_stop' },
+            },
+          ],
+        });
+      }
+      if (u.includes('nominatim.openstreetmap.org')) {
+        return makeJsonResponse([]);
+      }
+      return makeJsonResponse({ code: 'NoRoute' }, 200);
+    },
+    async () => {
+      const res = await handleScreenshotBuildRouteRequest(
+        {
+          origin,
+          destination,
+          draft: {
+            totalDurationMin: 35,
+            segments: [
+              { type: 'WALK', durationMin: 8 },
+              {
+                type: 'TRANSIT',
+                vehicleType: 'BUS',
+                lineName: '94 金沢大学線',
+                departureStopName: '兼六園下',
+                arrivalStopName: 'Kanazawadaigakushizenkenmae Bus Stop',
+                durationMin: 16,
+              },
+              { type: 'WALK', durationMin: 12 },
+            ],
+          },
+        },
+        { env: {} }
+      );
+      assert.equal(res.statusCode, 200);
+      assert.ok(res.body.draft.segments[1].departureCoord);
+      assert.equal(res.body.draft.segments[1].arrivalCoord, null);
+    }
+  );
 });
