@@ -16,7 +16,8 @@ const FALLBACK_GEMINI_MODELS = [
 ];
 
 const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024; // 1.5 MB 解碼後上限
-const MAX_STOPS_PER_REQUEST = 4; // 每次截圖最多定位 4 個站牌（全程使用免費開源 Photon / OSM，不觸碰 Google Places 計費）
+const MAX_STOPS_PER_REQUEST = 6; // 每次截圖最多定位 6 個站牌（上下車 + 最多 3 中途站；全程免費 Photon / OSM，不觸碰 Google Places 計費）
+const MAX_INTERMEDIATE_STOPS = 3;
 const STOP_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const MAX_STOP_CACHE = 500;
 const MAX_IP_DAILY_KEYS = 1000;
@@ -253,88 +254,236 @@ function parseImageDataUrl(raw) {
   return { mimeType, base64Data, approxBytes };
 }
 
-function normalizeText(raw, maxLen = 80) {
+function toHalfWidthAscii(raw) {
   return String(raw || '')
+    .replace(/[\uFF01-\uFF5E]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))
+    .replace(/\u3000/g, ' ')
+    .replace(/[～〜]/g, '~');
+}
+
+function normalizeText(raw, maxLen = 80) {
+  return toHalfWidthAscii(raw)
     .replace(/[\u0000-\u001f]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, maxLen);
 }
 
+function cleanStopName(raw) {
+  let s = normalizeText(raw, 64);
+  if (!s) return '';
+  // 去除 Google Maps / 時刻表常見尾綴，保留精準站名以利 Photon / OSM 定位
+  s = s
+    .replace(/\s*\((?:バス|バス停|公車|公車站|停留所|bus(?:\s*stop)?)\)\s*$/i, '')
+    .replace(/\s*(?:バス停|停留所|公車站牌|公車站|上車站|下車站|上車|下車)\s*$/i, '')
+    .replace(/^(?:上車|下車|乘車|降車)[:：\s]+/i, '')
+    .trim();
+  return s.slice(0, 60);
+}
+
 function normalizeTimeText(raw) {
-  const s = normalizeText(raw, 24);
-  const match = s.match(/\b(\d{1,2}:\d{2})\b/);
-  return match ? match[1] : s.slice(0, 12);
+  const s = normalizeText(raw, 28);
+  if (!s) return '';
+
+  const isPm = /(?:下午|午後|晚上|傍晚|\bpm\b|\bp\.m\.)/i.test(s);
+  const isAm = /(?:上午|午前|凌晨|早上|\bam\b|\ba\.m\.)/i.test(s);
+  const match = s.match(/(\d{1,2})\s*[:：]\s*(\d{2})/);
+  if (!match) return '';
+
+  let hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute) || minute < 0 || minute > 59 || hour < 0 || hour > 23) {
+    return '';
+  }
+
+  if (isPm && hour >= 1 && hour <= 11) {
+    hour += 12;
+  } else if (isAm && hour === 12) {
+    hour = 0;
+  }
+
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function parseMinutesBetween(depTimeText, arrTimeText) {
+  if (!depTimeText || !arrTimeText) return 0;
+  const dm = depTimeText.match(/^(\d{2}):(\d{2})$/);
+  const am = arrTimeText.match(/^(\d{2}):(\d{2})$/);
+  if (!dm || !am) return 0;
+  const dep = Number(dm[1]) * 60 + Number(dm[2]);
+  let arr = Number(am[1]) * 60 + Number(am[2]);
+  if (arr < dep) arr += 24 * 60;
+  const diff = arr - dep;
+  return diff > 0 && diff <= 1440 ? diff : 0;
 }
 
 // ==================== 3. Gemini Free Tier 視覺解析 ====================
 
+const SEGMENT_FIELD_ORDER = [
+  'type',
+  'vehicleType',
+  'lineShortName',
+  'lineName',
+  'headsign',
+  'departureTimeText',
+  'arrivalTimeText',
+  'durationMin',
+  'stopCount',
+  'departureStopName',
+  'arrivalStopName',
+  'intermediateStopNames',
+  'colorHex',
+];
+
+const ROOT_FIELD_ORDER = [
+  'isTransitScreenshot',
+  'confidence',
+  'warning',
+  'departureTimeText',
+  'arrivalTimeText',
+  'totalDurationMin',
+  'fareAmount',
+  'fareCurrency',
+  'segments',
+];
+
 const GEMINI_RESPONSE_SCHEMA = {
   type: 'OBJECT',
+  description: '從大眾運輸路線截圖擷取的完整轉乘結構',
   properties: {
-    isTransitScreenshot: { type: 'BOOLEAN' },
-    confidence: { type: 'STRING', enum: ['high', 'medium', 'low'] },
-    warning: { type: 'STRING' },
-    totalDurationMin: { type: 'INTEGER' },
-    departureTimeText: { type: 'STRING' },
-    arrivalTimeText: { type: 'STRING' },
-    fareAmount: { type: 'NUMBER' },
-    fareCurrency: { type: 'STRING' },
+    isTransitScreenshot: {
+      type: 'BOOLEAN',
+      description: '是否為大眾運輸路線、導航步驟或時刻表截圖',
+    },
+    confidence: {
+      type: 'STRING',
+      enum: ['high', 'medium', 'low'],
+      description: '截圖文字清晰度與辨識信心程度',
+    },
+    warning: {
+      type: 'STRING',
+      description: '若圖片模糊或非交通截圖時的簡短中文提醒，正常情況填空字串 ""',
+    },
+    departureTimeText: {
+      type: 'STRING',
+      description: '整趟行程最上方的出發時刻，一律轉 24 小時制 HH:MM（如 下午1:54 -> "13:54"），無則填 ""',
+    },
+    arrivalTimeText: {
+      type: 'STRING',
+      description: '整趟行程最下方的抵達時刻，一律轉 24 小時制 HH:MM（如 下午2:14 -> "14:14"），無則填 ""',
+    },
+    totalDurationMin: {
+      type: 'INTEGER',
+      description: '整趟行程總耗時（分鐘），若未直接標示請以抵達減出發時刻或各段耗時加總計算',
+    },
+    fareAmount: {
+      type: 'NUMBER',
+      description: '截圖顯示的票價數字（如 費用：¥210 -> 210），未顯示填 0',
+    },
+    fareCurrency: {
+      type: 'STRING',
+      description: '票價幣別代碼（如 JPY、TWD、USD），未顯示填 ""',
+    },
     segments: {
       type: 'ARRAY',
+      description: '依移動順序排列的所有步驟（例如 WALK -> TRANSIT -> WALK）',
       items: {
         type: 'OBJECT',
         properties: {
-          type: { type: 'STRING', enum: ['WALK', 'TRANSIT'] },
+          type: {
+            type: 'STRING',
+            enum: ['WALK', 'TRANSIT'],
+            description: '步行填 WALK，搭乘任何公車/地鐵/鐵路/電車/渡輪填 TRANSIT',
+          },
           vehicleType: {
             type: 'STRING',
-            enum: ['BUS', 'SUBWAY', 'RAIL', 'TRAM', 'FERRY', 'CABLE_CAR', 'OTHER'],
+            enum: ['BUS', 'SUBWAY', 'RAIL', 'TRAM', 'FERRY', 'CABLE_CAR', 'OTHER', 'NONE'],
+            description: 'WALK 段填 "NONE"；公車/巴士填 "BUS"；地鐵/捷運填 "SUBWAY"；JR/火車填 "RAIL"；路面電車填 "TRAM"',
           },
-          lineName: { type: 'STRING' },
-          lineShortName: { type: 'STRING' },
-          headsign: { type: 'STRING' },
-          durationMin: { type: 'INTEGER' },
-          stopCount: { type: 'INTEGER' },
-          departureStopName: { type: 'STRING' },
-          arrivalStopName: { type: 'STRING' },
+          lineShortName: {
+            type: 'STRING',
+            description: '公車號碼或簡短路線代號（如 "206"、"紅26"、"RL"）；若無獨立短號碼或 WALK 段填 ""',
+          },
+          lineName: {
+            type: 'STRING',
+            description: '截圖方框或路線標題內的完整名稱（如 "循環バス [金沢駅~金沢駅]"、"京都市営バス 206"）；WALK 段填 ""',
+          },
+          headsign: {
+            type: 'STRING',
+            description: '開往方向／行先文字（如 "広坂・21世紀美術館・兼六園下・金沢城経由橋場町・ひがし茶屋街行"）；無或 WALK 段填 ""',
+          },
+          departureTimeText: {
+            type: 'STRING',
+            description: '此段出發或上車時刻，一律轉 24 小時制 HH:MM（如 下午1:55 -> "13:55"），無則填 ""',
+          },
+          arrivalTimeText: {
+            type: 'STRING',
+            description: '此段抵達或下車時刻，一律轉 24 小時制 HH:MM（如 下午2:04 -> "14:04"），無則填 ""',
+          },
+          durationMin: {
+            type: 'INTEGER',
+            description: '此段耗時分鐘數，務必讀取截圖數字（如 "約 1 分" 填 1、"9 分 (4 站)" 填 9）',
+          },
+          stopCount: {
+            type: 'INTEGER',
+            description: '此段停靠站數（如 "9 分 (4 站)" 填 4）；未標示或 WALK 段填 0',
+          },
+          departureStopName: {
+            type: 'STRING',
+            description: 'TRANSIT 段的上車站牌名稱（粗實線起點旁的站名，如 "武蔵ヶ辻・近江町市場"，去除（バス）贅字）；WALK 段填 ""',
+          },
+          arrivalStopName: {
+            type: 'STRING',
+            description: 'TRANSIT 段的下車站牌名稱（粗實線終點旁的站名，如 "兼六園下"，去除（バス）贅字）；WALK 段填 ""',
+          },
           intermediateStopNames: {
             type: 'ARRAY',
             items: { type: 'STRING' },
+            description: '若截圖有展開中途停靠站，依順序填入上車與下車之間的中途站名（最多 3 站，去除（バス）贅字）；未展開或 WALK 段填 []',
           },
-          departureTimeText: { type: 'STRING' },
-          arrivalTimeText: { type: 'STRING' },
-          colorHex: { type: 'STRING' },
+          colorHex: {
+            type: 'STRING',
+            description: '路線官方代表色 #RRGGBB；無明確代表色或 WALK 段填 ""',
+          },
         },
-        required: ['type'],
+        propertyOrdering: SEGMENT_FIELD_ORDER,
+        required: SEGMENT_FIELD_ORDER,
       },
     },
   },
-  required: ['isTransitScreenshot', 'segments'],
+  propertyOrdering: ROOT_FIELD_ORDER,
+  required: ROOT_FIELD_ORDER,
 };
 
-function buildGeminiPrompt({ originName, destinationName, inJapan }) {
+function buildGeminiPrompt({ originName, destinationName, inJapan, includeSchemaHint = false }) {
   const regionHint = inJapan
-    ? '此路段位於日本（可能為 Google Maps、NAVITIME、Yahoo! 乗換案内、公車站時刻表或地鐵轉乘截圖；站名請保留日文漢字或繁中原文，票價幣別通常為 JPY）。'
-    : '此路段可能為 Google Maps、公車動態 App 或時刻表截圖（站名保留截圖上的繁中／原文，台灣票價幣別通常為 TWD）。';
+    ? '此路段位於日本（常見為 Google Maps、NAVITIME、Yahoo! 乗換案内截圖；站名與路線名請忠實保留圖片上的日文漢字或英文原文，票價幣別通常為 JPY）。'
+    : '此路段常見為 Google Maps、公車動態 App 或時刻表截圖（請忠實保留截圖上的繁中／原文，台灣票價幣別通常為 TWD）。';
 
-  return [
-    '你是旅遊交通路線截圖解析器。請從使用者上傳的交通查詢截圖中，精準擷取「單一最佳或展開中」的大眾運輸轉乘路線結構，回傳嚴格 JSON。',
+  const lines = [
+    '你是高精度大眾運輸截圖 OCR 與結構化解析器。請仔細逐行閱讀截圖中的每一個字、每一個時刻與每一個站名，完整填寫所有欄位，不可遺漏 TRANSIT 段的路線名、上車站、下車站、耗時、站數或時刻。',
     regionHint,
     originName || destinationName
-      ? `參考起終點：起點「${normalizeText(originName, 40) || '未命名'}」→ 終點「${normalizeText(destinationName, 40) || '未命名'}」。`
+      ? `參考行程起終點：起點「${normalizeText(originName, 40) || '未命名'}」→ 終點「${normalizeText(destinationName, 40) || '未命名'}」。`
       : '',
-    '解析規則：',
-    '1. 若圖片明顯不是交通路線、時刻表或地圖導航截圖，設 isTransitScreenshot = false 並在 warning 簡短說明。',
-    '2. 若截圖中有多條候選路線，優先解析畫面中「已展開詳細步驟」或「第一條主要路線」。',
-    '3. segments 依實際移動順序排列（如 WALK → TRANSIT → WALK）。',
-    '4. 公車請務必設 vehicleType = "BUS"，並把公車號碼填入 lineShortName（例："206"、"紅26"、"RL"），完整路線名填入 lineName（例："城下まち金沢周遊バス 左回り"）。',
-    '5. 務必擷取上車站 departureStopName 與下車站 arrivalStopName（去除「上車/下車/公車站/月台」等贅字，只留精準站名以利地圖定位）。若截圖有展開中途停靠站，於 intermediateStopNames 挑選最多 2 個關鍵中途站名（均勻分佈），未展開則回傳空陣列。',
-    '6. 若有顯示票價請填 fareAmount（純數字）與 fareCurrency（如 JPY / TWD / USD）；沒顯示填 0 與空字串。',
-    '7. 時刻請統一 HH:MM 格式（如 09:15）；顏色若有明顯官方線色徽章可填 #RRGGBB，否則留空字串。',
-    '8. 輸出 JSON 鍵名必須嚴格符合：{isTransitScreenshot, confidence, warning, totalDurationMin, departureTimeText, arrivalTimeText, fareAmount, fareCurrency, segments:[{type, vehicleType, lineName, lineShortName, headsign, durationMin, stopCount, departureStopName, arrivalStopName, intermediateStopNames, departureTimeText, arrivalTimeText, colorHex}]}。',
-  ]
-    .filter(Boolean)
-    .join('\n');
+    'Google Maps / 轉乘 App 垂直時間軸判讀重點：',
+    '1. 最上方與最下方附地址的圓點是「起點／終點地標」，虛線是步行（WALK），粗實線是搭車（TRANSIT）。',
+    '2. 每個 TRANSIT 段的「粗實線起點圓點」旁文字就是上車站（departureStopName），「粗實線終點圓點」旁文字就是下車站（arrivalStopName）；例如「武蔵ヶ辻・近江町市場（バス）」請填 "武蔵ヶ辻・近江町市場"（去除（バス）／公車站等括號贅字）。',
+    '3. 公車／電車圖示旁通常有「方框路線名」與「開往方向（〜行／往〜）」：方框內的路線名稱填入 lineName（若有純號碼／短代號如 "206"、"紅26"、"RL" 才填 lineShortName，否則 lineShortName 填 ""），方向文字填入 headsign。',
+    '4. 務必讀取每段的耗時與站數（例如「約 1 分」→ durationMin: 1；「9 分 (4 站)」→ durationMin: 9, stopCount: 4；「約 10 分」→ durationMin: 10）。',
+    '5. 若粗實線中間有展開較小圓點的中途停靠站（例如 Minami-cho・Oyama Jinja Shrine、香林坊、広坂・21世紀美術館），請依序填入 intermediateStopNames（最多 3 站，均勻涵蓋全程，去除（バス）贅字）。',
+    '6. 時刻務必轉成 24 小時制 HH:MM（例：下午1:54 → "13:54"、下午2:04 → "14:04"、上午9:05 → "09:05"）。整趟最上／最下時刻填入根層級 departureTimeText / arrivalTimeText，搭車上下車時刻填入該 TRANSIT 段的 departureTimeText / arrivalTimeText。',
+    '7. 若圖片左下／上方有顯示費用（如「費用：¥210」），填入 fareAmount: 210 與 fareCurrency: "JPY"。',
+    '8. 若圖片明顯不是交通路線或時刻表截圖，設 isTransitScreenshot = false 並在 warning 簡短說明。',
+  ];
+
+  if (includeSchemaHint) {
+    lines.push(
+      '9. 請回傳單一純 JSON 物件，包含欄位：{isTransitScreenshot, confidence, warning, departureTimeText, arrivalTimeText, totalDurationMin, fareAmount, fareCurrency, segments:[{type, vehicleType, lineShortName, lineName, headsign, departureTimeText, arrivalTimeText, durationMin, stopCount, departureStopName, arrivalStopName, intermediateStopNames, colorHex}]}。'
+    );
+  }
+
+  return lines.filter(Boolean).join('\n');
 }
 
 function isGeminiQuotaError(httpStatus, data) {
@@ -400,6 +549,10 @@ function buildCandidateModelList(env = process.env) {
   return [...new Set(raw)];
 }
 
+function supportsGemini3VisionConfig(model) {
+  return !/^gemini-2\./i.test(String(model || '').trim());
+}
+
 async function invokeGeminiVision({
   apiKey,
   model,
@@ -407,13 +560,18 @@ async function invokeGeminiVision({
   base64Data,
   prompt,
   includeSchema = true,
+  useEnhancedVision = true,
 }) {
   const generationConfig = {
-    maxOutputTokens: 2048,
+    maxOutputTokens: 4096,
     responseMimeType: 'application/json',
   };
   if (includeSchema) {
     generationConfig.responseSchema = GEMINI_RESPONSE_SCHEMA;
+  }
+  if (useEnhancedVision && supportsGemini3VisionConfig(model)) {
+    generationConfig.mediaResolution = 'MEDIA_RESOLUTION_HIGH';
+    generationConfig.thinkingConfig = { thinkingLevel: 'LOW' };
   }
 
   const payload = {
@@ -489,12 +647,21 @@ function extractGeminiJson(data) {
 export function normalizeParsedScreenshotDraft(raw, { inJapan = false } = {}) {
   const rawSegs = Array.isArray(raw?.segments) ? raw.segments.slice(0, 8) : [];
   const segments = [];
+  let firstRawDepTime = '';
+  let lastRawArrTime = '';
 
   for (const s of rawSegs) {
     if (!s || typeof s !== 'object') continue;
     const type = String(s.type || '').toUpperCase() === 'WALK' ? 'WALK' : 'TRANSIT';
+    const segDepTime = normalizeTimeText(s.departureTimeText);
+    const segArrTime = normalizeTimeText(s.arrivalTimeText);
+    if (segDepTime && !firstRawDepTime) firstRawDepTime = segDepTime;
+    if (segArrTime) lastRawArrTime = segArrTime;
+
     const rawDur = parseOptionalFiniteNumber(s.durationMin);
-    const durationMin = Number.isFinite(rawDur) && rawDur > 0 ? Math.min(720, Math.round(rawDur)) : 0;
+    const timeDiffMin = parseMinutesBetween(segDepTime, segArrTime);
+    const durationMin =
+      Number.isFinite(rawDur) && rawDur > 0 ? Math.min(720, Math.round(rawDur)) : timeDiffMin;
 
     if (type === 'WALK') {
       segments.push({
@@ -508,14 +675,19 @@ export function normalizeParsedScreenshotDraft(raw, { inJapan = false } = {}) {
     const vehicleType = VALID_VEHICLE_TYPES.has(rawVeh) ? rawVeh : 'BUS';
     const lineName = normalizeText(s.lineName, 80);
     const lineShortName = normalizeText(s.lineShortName, 32);
-    const headsign = normalizeText(s.headsign, 60);
-    const departureStopName = normalizeText(s.departureStopName, 60);
-    const arrivalStopName = normalizeText(s.arrivalStopName, 60);
+    const headsign = normalizeText(s.headsign, 80);
+    const departureStopName = cleanStopName(s.departureStopName);
+    const arrivalStopName = cleanStopName(s.arrivalStopName);
+    const seenMid = new Set();
     const intermediateStopNames = Array.isArray(s.intermediateStopNames)
       ? s.intermediateStopNames
-          .map((n) => normalizeText(n, 60))
-          .filter((n) => n && n !== departureStopName && n !== arrivalStopName)
-          .slice(0, 2)
+          .map((n) => cleanStopName(n))
+          .filter((n) => {
+            if (!n || n === departureStopName || n === arrivalStopName || seenMid.has(n)) return false;
+            seenMid.add(n);
+            return true;
+          })
+          .slice(0, MAX_INTERMEDIATE_STOPS)
       : [];
     const rawStops = parseOptionalFiniteNumber(s.stopCount);
     const stopCount = Number.isFinite(rawStops) && rawStops >= 0 ? Math.min(200, Math.round(rawStops)) : 0;
@@ -531,24 +703,31 @@ export function normalizeParsedScreenshotDraft(raw, { inJapan = false } = {}) {
       departureStopName,
       arrivalStopName,
       intermediateStopNames,
-      departureTimeText: normalizeTimeText(s.departureTimeText),
-      arrivalTimeText: normalizeTimeText(s.arrivalTimeText),
+      departureTimeText: segDepTime,
+      arrivalTimeText: segArrTime,
       colorHex: sanitizeHexColor(s.colorHex),
     });
   }
 
+  const firstTransit = segments.find((s) => s.type === 'TRANSIT');
+  const lastTransit = [...segments].reverse().find((s) => s.type === 'TRANSIT');
+  const departureTimeText =
+    normalizeTimeText(raw?.departureTimeText) || firstRawDepTime || firstTransit?.departureTimeText || '';
+  const arrivalTimeText =
+    normalizeTimeText(raw?.arrivalTimeText) || lastRawArrTime || lastTransit?.arrivalTimeText || '';
+
   const summedDur = segments.reduce((sum, seg) => sum + (seg.durationMin || 0), 0);
+  const rootTimeDiffMin = parseMinutesBetween(departureTimeText, arrivalTimeText);
   const rawTotal = parseOptionalFiniteNumber(raw?.totalDurationMin);
   const totalDurationMin =
-    Number.isFinite(rawTotal) && rawTotal > 0 ? Math.min(1440, Math.round(rawTotal)) : Math.max(1, summedDur || 15);
+    Number.isFinite(rawTotal) && rawTotal > 0
+      ? Math.min(1440, Math.round(rawTotal))
+      : rootTimeDiffMin || Math.max(1, summedDur || 15);
 
   const rawFare = parseOptionalFiniteNumber(raw?.fareAmount);
   const fareAmount = Number.isFinite(rawFare) && rawFare > 0 ? Number(rawFare.toFixed(2)) : 0;
   const rawCur = normalizeText(raw?.fareCurrency, 8).toUpperCase();
   const fareCurrency = fareAmount > 0 ? rawCur || (inJapan ? 'JPY' : 'TWD') : inJapan ? 'JPY' : 'TWD';
-
-  const firstTransit = segments.find((s) => s.type === 'TRANSIT');
-  const lastTransit = [...segments].reverse().find((s) => s.type === 'TRANSIT');
 
   const rawConf = String(raw?.confidence || 'medium').toLowerCase();
   const confidence = ['high', 'medium', 'low'].includes(rawConf) ? rawConf : 'medium';
@@ -558,12 +737,47 @@ export function normalizeParsedScreenshotDraft(raw, { inJapan = false } = {}) {
     confidence,
     warning: normalizeText(raw?.warning, 160),
     totalDurationMin,
-    departureTimeText: normalizeTimeText(raw?.departureTimeText) || firstTransit?.departureTimeText || '',
-    arrivalTimeText: normalizeTimeText(raw?.arrivalTimeText) || lastTransit?.arrivalTimeText || '',
+    departureTimeText,
+    arrivalTimeText,
     fareAmount,
     fareCurrency,
     segments,
   };
+}
+
+function isHollowTransitParse(rawJson, normalized) {
+  if (!normalized?.isTransitScreenshot) return false;
+  const rawSegs = Array.isArray(rawJson?.segments) ? rawJson.segments : [];
+  const rawTransit = rawSegs.filter((s) => s && String(s.type || '').toUpperCase() !== 'WALK');
+  if (rawTransit.length === 0) return false;
+  return rawTransit.some((s) => {
+    const hasLine = Boolean(normalizeText(s.lineName, 80) || normalizeText(s.lineShortName, 32));
+    const hasDep = Boolean(cleanStopName(s.departureStopName));
+    const hasArr = Boolean(cleanStopName(s.arrivalStopName));
+    return !hasLine && !hasDep && !hasArr;
+  });
+}
+
+function scoreParsedDraftRichness(rawJson, normalized) {
+  if (!normalized?.isTransitScreenshot) return 0;
+  let score = 0;
+  if (normalized.departureTimeText) score += 2;
+  if (normalized.arrivalTimeText) score += 2;
+  if (normalized.fareAmount > 0) score += 1;
+
+  const rawSegs = Array.isArray(rawJson?.segments) ? rawJson.segments : [];
+  for (const s of rawSegs) {
+    if (!s || String(s.type || '').toUpperCase() === 'WALK') continue;
+    if (normalizeText(s.lineName, 80) || normalizeText(s.lineShortName, 32)) score += 4;
+    if (cleanStopName(s.departureStopName)) score += 4;
+    if (cleanStopName(s.arrivalStopName)) score += 4;
+    if (normalizeText(s.headsign, 80)) score += 2;
+    if (Number(s.stopCount) > 0) score += 2;
+    if (Array.isArray(s.intermediateStopNames) && s.intermediateStopNames.length > 0) {
+      score += Math.min(3, s.intermediateStopNames.length);
+    }
+  }
+  return score;
 }
 
 // ==================== 4. 100% 免費開源站牌定位（Photon → OSM Nominatim，完全不觸碰 Google Places 計費）與貼路公車建構 ====================
@@ -862,7 +1076,7 @@ export async function anchorAndBuildTransitRoute(
   const normalizedDraft = normalizeParsedScreenshotDraft(draft, { inJapan });
   const budget = { remainingLookups: MAX_STOPS_PER_REQUEST, freeLookupsUsed: 0 };
 
-  // 1. 依序對所有 TRANSIT 段的「上車站、下車站、最多 2 個中途站」做站牌定位
+  // 1. 依序對所有 TRANSIT 段的「上車站、下車站、最多 3 個中途站」做站牌定位
   const anchoredDraftSegments = [];
   let totalStopCandidates = 0;
   let matchedStopsCount = 0;
@@ -890,7 +1104,7 @@ export async function anchorAndBuildTransitRoute(
     }
 
     if (ROAD_TRANSIT_TYPES.has(seg.vehicleType) && Array.isArray(seg.intermediateStopNames)) {
-      for (const midName of seg.intermediateStopNames.slice(0, 2)) {
+      for (const midName of seg.intermediateStopNames.slice(0, MAX_INTERMEDIATE_STOPS)) {
         if (!midName || budget.remainingLookups <= 0) break;
         totalStopCandidates += 1;
         const midCoord = await geocodeTransitStop(midName, seg.vehicleType, origin, destination, env, budget);
@@ -1206,11 +1420,64 @@ export async function handleScreenshotParseRequest(body, { ip = 'local', env = p
   const apiKey = getGeminiApiKey(env);
   const candidateModels = buildCandidateModelList(env);
   const inJapan = isJapanTrip(origin, destination);
-  const prompt = buildGeminiPrompt({
+  const promptWithSchema = buildGeminiPrompt({
     originName: body?.originName || '',
     destinationName: body?.destinationName || '',
     inJapan,
+    includeSchemaHint: false,
   });
+  const promptPlainJson = buildGeminiPrompt({
+    originName: body?.originName || '',
+    destinationName: body?.destinationName || '',
+    inJapan,
+    includeSchemaHint: true,
+  });
+
+  const isRetryableParam400 = (httpStatus, errData) =>
+    httpStatus === 400 &&
+    !isGeminiAuthError(httpStatus, errData) &&
+    !isGeminiLocationError(httpStatus, errData) &&
+    !isGeminiModelUnavailableError(httpStatus, errData);
+
+  const callGeminiModelStaged = async (model) => {
+    let attempt = await invokeGeminiVision({
+      apiKey,
+      model,
+      mimeType: image.mimeType,
+      base64Data: image.base64Data,
+      prompt: promptWithSchema,
+      includeSchema: true,
+      useEnhancedVision: true,
+    });
+
+    // 若特定模型不支援 thinkingLevel 或 mediaResolution 而回 400，先移除增強參數並保留嚴格 responseSchema 重試
+    if (isRetryableParam400(attempt.res.status, attempt.data) && supportsGemini3VisionConfig(model)) {
+      attempt = await invokeGeminiVision({
+        apiKey,
+        model,
+        mimeType: image.mimeType,
+        base64Data: image.base64Data,
+        prompt: promptWithSchema,
+        includeSchema: true,
+        useEnhancedVision: false,
+      });
+    }
+
+    // 若仍對 responseSchema 回 400，最後降級為純 JSON 模式重試
+    if (isRetryableParam400(attempt.res.status, attempt.data)) {
+      attempt = await invokeGeminiVision({
+        apiKey,
+        model,
+        mimeType: image.mimeType,
+        base64Data: image.base64Data,
+        prompt: promptPlainJson,
+        includeSchema: false,
+        useEnhancedVision: false,
+      });
+    }
+
+    return attempt;
+  };
 
   // 依序嘗試 Gemini Free Tier 視覺模型（自動避開舊版 2.5 對新帳號 404 限制，並記住第一個成功模型）
   let res = null;
@@ -1220,31 +1487,7 @@ export async function handleScreenshotParseRequest(body, { ip = 'local', env = p
   try {
     for (const model of candidateModels) {
       usedModel = model;
-      ({ res, data } = await invokeGeminiVision({
-        apiKey,
-        model,
-        mimeType: image.mimeType,
-        base64Data: image.base64Data,
-        prompt,
-        includeSchema: true,
-      }));
-
-      // 若特定模型對嚴格 responseSchema 回 400（不含金鑰／區域錯誤），降級為純 JSON 模式重試一次
-      if (
-        res.status === 400 &&
-        !isGeminiAuthError(res.status, data) &&
-        !isGeminiLocationError(res.status, data) &&
-        !isGeminiModelUnavailableError(res.status, data)
-      ) {
-        ({ res, data } = await invokeGeminiVision({
-          apiKey,
-          model,
-          mimeType: image.mimeType,
-          base64Data: image.base64Data,
-          prompt,
-          includeSchema: false,
-        }));
-      }
+      ({ res, data } = await callGeminiModelStaged(model));
 
       if (res.ok) {
         if (!String(env?.GEMINI_VISION_MODEL || '').trim()) {
@@ -1348,7 +1591,7 @@ export async function handleScreenshotParseRequest(body, { ip = 'local', env = p
   quotaState.globalParseCount += 1;
   checkAndRecordIpDaily(ip, maxPerIpDay, Date.now(), { increment: true });
 
-  const parsedJson = extractGeminiJson(data);
+  let parsedJson = extractGeminiJson(data);
   if (!parsedJson || typeof parsedJson !== 'object') {
     return {
       statusCode: 200,
@@ -1361,7 +1604,31 @@ export async function handleScreenshotParseRequest(body, { ip = 'local', env = p
     };
   }
 
-  const normalized = normalizeParsedScreenshotDraft(parsedJson, { inJapan });
+  let normalized = normalizeParsedScreenshotDraft(parsedJson, { inJapan });
+
+  // 品質防護：若輕量模型漏填了所有公車路線名與上下車站名（空殼結果），自動改用免費層 gemini-3.6-flash 補讀一次
+  if (
+    isHollowTransitParse(parsedJson, normalized) &&
+    !String(env?.GEMINI_VISION_MODEL || '').trim() &&
+    usedModel !== 'gemini-3.6-flash'
+  ) {
+    try {
+      const upgraded = await callGeminiModelStaged('gemini-3.6-flash');
+      if (upgraded.res.ok) {
+        const upgradedJson = extractGeminiJson(upgraded.data);
+        if (upgradedJson && typeof upgradedJson === 'object') {
+          const upgradedNorm = normalizeParsedScreenshotDraft(upgradedJson, { inJapan });
+          if (scoreParsedDraftRichness(upgradedJson, upgradedNorm) > scoreParsedDraftRichness(parsedJson, normalized)) {
+            parsedJson = upgradedJson;
+            normalized = upgradedNorm;
+          }
+        }
+      }
+    } catch {
+      // 補讀失敗時安靜保留初次結果，不中斷使用者流程
+    }
+  }
+
   if (!normalized.isTransitScreenshot || normalized.segments.length === 0) {
     return {
       statusCode: 200,

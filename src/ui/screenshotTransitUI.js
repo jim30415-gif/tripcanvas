@@ -214,7 +214,11 @@ function renderReviewCardHtml() {
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
             <div>
               <label class="block text-[11px] font-bold text-owl-subtext mb-0.5">路線名 / 公車號碼</label>
-              <input type="text" value="${escapeHTML(seg.lineShortName || seg.lineName || '')}" placeholder="例：206、城下まち周遊バス" data-ss-seg-idx="${idx}" data-ss-seg-field="lineName" class="w-full px-2.5 py-1.5 rounded-lg border border-owl-border bg-owl-card/40 text-xs font-bold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
+              <input type="text" value="${escapeHTML(
+                seg.lineShortName && /^[\dA-Za-z\-]+$|^[紅藍綠橘棕黃黑小幹線快][\dA-Za-z]+$/.test(seg.lineShortName.trim())
+                  ? seg.lineShortName
+                  : seg.lineName || seg.lineShortName || ''
+              )}" placeholder="例：206、城下まち周遊バス" data-ss-seg-idx="${idx}" data-ss-seg-field="lineName" class="w-full px-2.5 py-1.5 rounded-lg border border-owl-border bg-owl-card/40 text-xs font-bold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
             </div>
             <div>
               <label class="block text-[11px] font-bold text-owl-subtext mb-0.5">開往方向 / 備註（選填）</label>

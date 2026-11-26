@@ -359,11 +359,10 @@ test('Per-IP daily limit, global daily parse cap, and Gemini 429 cooldown lock p
   );
 });
 
-test('handleScreenshotParseRequest falls back on 404 model unavailable, skips thought parts, retries without responseSchema on 400, and reports invalid API key clearly', async () => {
-  // 1. 404 模型不可用時自動跳到下一個可用模型 + 略過 thought=true 區塊 + 400 schema 降級純 JSON
+test('handleScreenshotParseRequest falls back on 404 model unavailable, stages 400 fallback, upgrades hollow parses to gemini-3.6-flash, and reports invalid API key clearly', async () => {
+  // 1. 404 模型不可用時自動跳到下一個可用模型 + 驗證 HIGH 畫質/LOW 思考/全必填 schema + 400 分階段降級 + 略過 thought=true 區塊
   resetScreenshotQuotaStateForTest();
-  const seenModels = [];
-  let schemaFallbackCount = 0;
+  const seenStages = [];
 
   await withMockedFetch(
     async (url, opts) => {
@@ -371,14 +370,24 @@ test('handleScreenshotParseRequest falls back on 404 model unavailable, skips th
       if (u.includes('generativelanguage.googleapis.com')) {
         const modelMatch = u.match(/\/models\/([^:]+):generateContent/);
         const model = modelMatch?.[1] || '';
-        seenModels.push(model);
         const payload = JSON.parse(opts.body);
+        const cfg = payload.generationConfig || {};
+        seenStages.push({
+          model,
+          hasSchema: Boolean(cfg.responseSchema),
+          hasEnhanced: Boolean(cfg.mediaResolution && cfg.thinkingConfig),
+        });
 
         if (model === 'gemini-3.5-flash-lite') {
+          // 驗證新版預設會帶出高解析度、LOW 思考與完整必填欄位
+          assert.equal(cfg.mediaResolution, 'MEDIA_RESOLUTION_HIGH');
+          assert.equal(cfg.thinkingConfig?.thinkingLevel, 'LOW');
+          assert.ok(cfg.responseSchema?.required?.includes('departureTimeText'));
+          assert.ok(cfg.responseSchema?.properties?.segments?.items?.required?.includes('departureStopName'));
+          assert.ok(cfg.responseSchema?.properties?.segments?.items?.required?.includes('lineName'));
           return makeJsonResponse({ error: { status: 'NOT_FOUND', message: 'model not found' } }, 404);
         }
-        if (model === 'gemini-3.1-flash-lite' && payload.generationConfig?.responseSchema) {
-          schemaFallbackCount += 1;
+        if (model === 'gemini-3.1-flash-lite' && cfg.responseSchema) {
           return makeJsonResponse({ error: { status: 'INVALID_ARGUMENT', message: 'Schema too complex' } }, 400);
         }
         return makeJsonResponse({
@@ -407,8 +416,12 @@ test('handleScreenshotParseRequest falls back on 404 model unavailable, skips th
         { imageDataUrl: FAKE_IMG_DATA_URL, origin: KANAZAWA_ORIGIN, destination: KANAZAWA_DEST },
         { ip: '5.5.5.5', env: { GEMINI_API_KEY: 'free-key' } }
       );
-      assert.equal(schemaFallbackCount, 1);
-      assert.deepEqual(seenModels, ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.1-flash-lite']);
+      assert.deepEqual(seenStages, [
+        { model: 'gemini-3.5-flash-lite', hasSchema: true, hasEnhanced: true },
+        { model: 'gemini-3.1-flash-lite', hasSchema: true, hasEnhanced: true },
+        { model: 'gemini-3.1-flash-lite', hasSchema: true, hasEnhanced: false },
+        { model: 'gemini-3.1-flash-lite', hasSchema: false, hasEnhanced: false },
+      ]);
       assert.equal(res.statusCode, 200);
       assert.equal(res.body.status, 'not_transit');
       assert.ok(res.body.message.includes('風景'));
@@ -469,22 +482,95 @@ test('handleScreenshotParseRequest falls back on 404 model unavailable, skips th
       assert.equal(getScreenshotFeatureStatus({ GEMINI_API_KEY: 'free-key' }).locked, false);
     }
   );
+
+  // 4. 輕量模型若回傳空殼 TRANSIT（無路線名且無上下車站名），自動以免費 gemini-3.6-flash 補讀並採用更完整結果
+  resetScreenshotQuotaStateForTest();
+  const upgradeModels = [];
+  await withMockedFetch(
+    async (url) => {
+      const u = String(url);
+      if (u.includes('generativelanguage.googleapis.com')) {
+        const model = u.match(/\/models\/([^:]+):generateContent/)?.[1] || '';
+        upgradeModels.push(model);
+        if (model === 'gemini-3.5-flash-lite') {
+          return makeGeminiSuccess({
+            isTransitScreenshot: true,
+            totalDurationMin: 20,
+            fareAmount: 210,
+            fareCurrency: 'JPY',
+            segments: [
+              { type: 'WALK', durationMin: 1 },
+              { type: 'TRANSIT' },
+              { type: 'WALK', durationMin: 10 },
+            ],
+          });
+        }
+        return makeGeminiSuccess({
+          isTransitScreenshot: true,
+          departureTimeText: '下午1:54',
+          arrivalTimeText: '下午2:14',
+          totalDurationMin: 20,
+          fareAmount: 210,
+          fareCurrency: 'JPY',
+          segments: [
+            { type: 'WALK', durationMin: 1 },
+            {
+              type: 'TRANSIT',
+              vehicleType: 'BUS',
+              lineName: '循環バス [金沢駅～金沢駅]',
+              headsign: '広坂・２１世紀美術館・兼六園下・金沢城経由橋場町・ひがし茶屋街行',
+              durationMin: 9,
+              stopCount: 4,
+              departureStopName: '武蔵ヶ辻・近江町市場（バス）',
+              arrivalStopName: '兼六園下',
+              intermediateStopNames: ['Minami-cho・Oyama Jinja Shrine', '香林坊', '広坂・２１世紀美術館（バス）'],
+              departureTimeText: '下午1:55',
+              arrivalTimeText: '下午2:04',
+            },
+            { type: 'WALK', durationMin: 10 },
+          ],
+        });
+      }
+      return makeJsonResponse({ features: [] }, 200);
+    },
+    async () => {
+      const res = await handleScreenshotParseRequest(
+        { imageDataUrl: FAKE_IMG_DATA_URL, origin: KANAZAWA_ORIGIN, destination: KANAZAWA_DEST },
+        { ip: '5.5.5.8', env: { GEMINI_API_KEY: 'free-key' } }
+      );
+      assert.deepEqual(upgradeModels, ['gemini-3.5-flash-lite', 'gemini-3.6-flash']);
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.body.draft.departureTimeText, '13:54');
+      assert.equal(res.body.draft.arrivalTimeText, '14:14');
+      const busSeg = res.body.draft.segments[1];
+      assert.equal(busSeg.lineName, '循環バス [金沢駅~金沢駅]');
+      assert.equal(busSeg.durationMin, 9);
+      assert.equal(busSeg.stopCount, 4);
+      assert.equal(busSeg.departureStopName, '武蔵ヶ辻・近江町市場');
+      assert.equal(busSeg.arrivalStopName, '兼六園下');
+      assert.deepEqual(busSeg.intermediateStopNames, ['Minami-cho・Oyama Jinja Shrine', '香林坊', '広坂・21世紀美術館']);
+    }
+  );
 });
 
-test('normalizeParsedScreenshotDraft cleans stop names, limits intermediate stops, and defaults currency by region', () => {
+test('normalizeParsedScreenshotDraft cleans stop names, converts 12-hour CJK times, caps 3 intermediate stops, and defaults currency by region', () => {
   const draft = normalizeParsedScreenshotDraft(
     {
       isTransitScreenshot: true,
+      departureTimeText: '下午1:54',
+      arrivalTimeText: '下午2:14',
       fareAmount: 230,
       segments: [
         {
           type: 'TRANSIT',
           vehicleType: 'BUS',
-          lineName: '京都市営バス 205',
-          departureStopName: '京都駅前',
-          arrivalStopName: '金閣寺道',
-          intermediateStopNames: ['京都駅前', '四条大宮', '西ノ京円町', '北野白梅町'],
-          durationMin: 38,
+          lineName: '京都市営バス ２０５',
+          departureStopName: '京都駅前（バス）',
+          arrivalStopName: '金閣寺道 バス停',
+          intermediateStopNames: ['京都駅前', '四条大宮', '西ノ京円町', '北野白梅町', 'わら天神前'],
+          departureTimeText: '上午9:05',
+          arrivalTimeText: '上午9:43',
+          durationMin: 0,
         },
       ],
     },
@@ -492,7 +578,17 @@ test('normalizeParsedScreenshotDraft cleans stop names, limits intermediate stop
   );
 
   assert.equal(draft.fareCurrency, 'JPY');
+  assert.equal(draft.departureTimeText, '13:54');
+  assert.equal(draft.arrivalTimeText, '14:14');
+  assert.equal(draft.totalDurationMin, 20);
   assert.equal(draft.segments.length, 1);
-  // 排除與上車站重複的「京都駅前」，並上限截斷為 2 站
-  assert.deepEqual(draft.segments[0].intermediateStopNames, ['四条大宮', '西ノ京円町']);
+  assert.equal(draft.segments[0].lineName, '京都市営バス 205');
+  assert.equal(draft.segments[0].departureStopName, '京都駅前');
+  assert.equal(draft.segments[0].arrivalStopName, '金閣寺道');
+  assert.equal(draft.segments[0].departureTimeText, '09:05');
+  assert.equal(draft.segments[0].arrivalTimeText, '09:43');
+  // durationMin 未填時可由上下車時刻自動推算 38 分
+  assert.equal(draft.segments[0].durationMin, 38);
+  // 排除與上車站重複的「京都駅前」，並上限截斷為 3 站
+  assert.deepEqual(draft.segments[0].intermediateStopNames, ['四条大宮', '西ノ京円町', '北野白梅町']);
 });

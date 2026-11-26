@@ -21,11 +21,21 @@ function loadImageFromObjectUrl(blob) {
   });
 }
 
-export async function compressScreenshotBlob(fileOrBlob, { maxDim = 1280, quality = 0.82 } = {}) {
+function readBlobAsDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('IMAGE_READ_FAILED'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+export async function compressScreenshotBlob(fileOrBlob, { maxDim = 1600, quality = 0.9 } = {}) {
   if (!fileOrBlob || !(fileOrBlob instanceof Blob)) {
     throw new Error('INVALID_FILE');
   }
-  if (fileOrBlob.type && !fileOrBlob.type.startsWith('image/')) {
+  const mime = String(fileOrBlob.type || '').toLowerCase();
+  if (mime && !mime.startsWith('image/')) {
     throw new Error('NOT_AN_IMAGE');
   }
 
@@ -33,6 +43,19 @@ export async function compressScreenshotBlob(fileOrBlob, { maxDim = 1280, qualit
   const srcW = img.naturalWidth || img.width;
   const srcH = img.naturalHeight || img.height;
   if (!srcW || !srcH) throw new Error('EMPTY_IMAGE');
+
+  // 原本就是清晰且小於 600 KB、尺寸未超標的 PNG / WebP 截圖直接無損保留，避免 JPEG 壓縮模糊日文／漢字小字
+  if (
+    (mime === 'image/png' || mime === 'image/webp') &&
+    Math.max(srcW, srcH) <= maxDim &&
+    fileOrBlob.size > 0 &&
+    fileOrBlob.size <= 600_000
+  ) {
+    const rawDataUrl = await readBlobAsDataUrl(fileOrBlob);
+    if (rawDataUrl.startsWith('data:image/') && rawDataUrl.length <= 1_650_000) {
+      return rawDataUrl;
+    }
+  }
 
   const encodeWith = (limit, q) => {
     const scale = Math.min(1, limit / Math.max(srcW, srcH));
@@ -53,10 +76,10 @@ export async function compressScreenshotBlob(fileOrBlob, { maxDim = 1280, qualit
   let dataUrl = encodeWith(maxDim, quality);
   // 若解碼大小接近 1.5 MB 上限，自動二次壓縮確保順暢上傳
   if (dataUrl.length > 1_650_000) {
-    dataUrl = encodeWith(1024, 0.72);
+    dataUrl = encodeWith(1280, 0.8);
   }
   if (dataUrl.length > 1_850_000) {
-    dataUrl = encodeWith(860, 0.64);
+    dataUrl = encodeWith(960, 0.72);
   }
   return dataUrl;
 }
