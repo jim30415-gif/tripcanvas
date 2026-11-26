@@ -5,8 +5,15 @@ import { formatLineDisplayName } from './routesHandler.js';
 import { fetchJsonWithTimeout, parseOptionalFiniteNumber } from './security.js';
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
-const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash-lite';
-const FALLBACK_GEMINI_MODEL = 'gemini-2.5-flash';
+const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash-lite';
+const FALLBACK_GEMINI_MODELS = [
+  'gemini-3.5-flash-lite',
+  'gemini-3.1-flash-lite',
+  'gemini-flash-lite-latest',
+  'gemini-flash-latest',
+  'gemini-3.6-flash',
+  'gemini-2.5-flash-lite',
+];
 
 const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024; // 1.5 MB 解碼後上限
 const MAX_STOPS_PER_REQUEST = 4; // 每次截圖最多定位 4 個站牌（全程使用免費開源 Photon / OSM，不觸碰 Google Places 計費）
@@ -70,6 +77,7 @@ function createInitialQuotaState(dayKey = getUtcDayKey()) {
 }
 
 let quotaState = createInitialQuotaState();
+let resolvedWorkingModel = '';
 const stopGeocodeCache = new Map();
 
 function ensureCurrentDayBucket(now = Date.now()) {
@@ -81,6 +89,7 @@ function ensureCurrentDayBucket(now = Date.now()) {
 
 export function resetScreenshotQuotaStateForTest() {
   quotaState = createInitialQuotaState();
+  resolvedWorkingModel = '';
   stopGeocodeCache.clear();
 }
 
@@ -322,6 +331,7 @@ function buildGeminiPrompt({ originName, destinationName, inJapan }) {
     '5. 務必擷取上車站 departureStopName 與下車站 arrivalStopName（去除「上車/下車/公車站/月台」等贅字，只留精準站名以利地圖定位）。若截圖有展開中途停靠站，於 intermediateStopNames 挑選最多 2 個關鍵中途站名（均勻分佈），未展開則回傳空陣列。',
     '6. 若有顯示票價請填 fareAmount（純數字）與 fareCurrency（如 JPY / TWD / USD）；沒顯示填 0 與空字串。',
     '7. 時刻請統一 HH:MM 格式（如 09:15）；顏色若有明顯官方線色徽章可填 #RRGGBB，否則留空字串。',
+    '8. 輸出 JSON 鍵名必須嚴格符合：{isTransitScreenshot, confidence, warning, totalDurationMin, departureTimeText, arrivalTimeText, fareAmount, fareCurrency, segments:[{type, vehicleType, lineName, lineShortName, headsign, durationMin, stopCount, departureStopName, arrivalStopName, intermediateStopNames, departureTimeText, arrivalTimeText, colorHex}]}。',
   ]
     .filter(Boolean)
     .join('\n');
@@ -339,15 +349,71 @@ function isGeminiQuotaError(httpStatus, data) {
   );
 }
 
-async function invokeGeminiVision({ apiKey, model, mimeType, base64Data, prompt, useThinkingZero = true }) {
+function isGeminiZeroQuotaForModelError(httpStatus, data) {
+  if (!isGeminiQuotaError(httpStatus, data)) return false;
+  const msg = String(data?.error?.message || '').toLowerCase();
+  return /\blimit:\s*0\b/.test(msg);
+}
+
+function isGeminiAuthError(httpStatus, data) {
+  if (httpStatus === 401 || httpStatus === 403) return true;
+  const statusStr = String(data?.error?.status || '').toUpperCase();
+  const msg = String(data?.error?.message || '').toLowerCase();
+  return (
+    statusStr === 'UNAUTHENTICATED' ||
+    statusStr === 'PERMISSION_DENIED' ||
+    msg.includes('api key not valid') ||
+    msg.includes('api_key_invalid') ||
+    msg.includes('invalid api key')
+  );
+}
+
+function isGeminiLocationError(httpStatus, data) {
+  const statusStr = String(data?.error?.status || '').toUpperCase();
+  const msg = String(data?.error?.message || '').toLowerCase();
+  return (
+    httpStatus === 400 &&
+    (statusStr === 'FAILED_PRECONDITION' || msg.includes('user location is not supported'))
+  );
+}
+
+function isGeminiModelUnavailableError(httpStatus, data) {
+  if (httpStatus === 404 || httpStatus === 503) return true;
+  const statusStr = String(data?.error?.status || '').toUpperCase();
+  const msg = String(data?.error?.message || '').toLowerCase();
+  return (
+    statusStr === 'NOT_FOUND' ||
+    msg.includes('no longer available') ||
+    msg.includes('not found for api version') ||
+    msg.includes('is not supported for generatecontent')
+  );
+}
+
+function buildCandidateModelList(env = process.env) {
+  const custom = String(env?.GEMINI_VISION_MODEL || '').trim();
+  const raw = [
+    custom,
+    custom ? '' : resolvedWorkingModel,
+    DEFAULT_GEMINI_MODEL,
+    ...FALLBACK_GEMINI_MODELS,
+  ].filter(Boolean);
+  return [...new Set(raw)];
+}
+
+async function invokeGeminiVision({
+  apiKey,
+  model,
+  mimeType,
+  base64Data,
+  prompt,
+  includeSchema = true,
+}) {
   const generationConfig = {
-    temperature: 0.1,
-    maxOutputTokens: 1200,
+    maxOutputTokens: 2048,
     responseMimeType: 'application/json',
-    responseSchema: GEMINI_RESPONSE_SCHEMA,
   };
-  if (useThinkingZero) {
-    generationConfig.thinkingConfig = { thinkingBudget: 0 };
+  if (includeSchema) {
+    generationConfig.responseSchema = GEMINI_RESPONSE_SCHEMA;
   }
 
   const payload = {
@@ -357,8 +423,8 @@ async function invokeGeminiVision({ apiKey, model, mimeType, base64Data, prompt,
         parts: [
           { text: prompt },
           {
-            inline_data: {
-              mime_type: mimeType,
+            inlineData: {
+              mimeType,
               data: base64Data,
             },
           },
@@ -386,8 +452,12 @@ async function invokeGeminiVision({ apiKey, model, mimeType, base64Data, prompt,
 function extractGeminiJson(data) {
   const parts = data?.candidates?.[0]?.content?.parts;
   if (!Array.isArray(parts)) return null;
-  const text = parts
-    .map((p) => (typeof p?.text === 'string' ? p.text : ''))
+
+  // Gemini 3.x 可能附帶 thought=true 思考區塊，優先僅擷取最終非思考文字
+  const answerParts = parts.filter((p) => !p?.thought && typeof p?.text === 'string');
+  const candidateParts = answerParts.length > 0 ? answerParts : parts.filter((p) => typeof p?.text === 'string');
+  const text = candidateParts
+    .map((p) => p.text)
     .join('')
     .trim();
   if (!text) return null;
@@ -399,6 +469,15 @@ function extractGeminiJson(data) {
     if (fenced?.[1]) {
       try {
         return JSON.parse(fenced[1].trim());
+      } catch {
+        // continue to brace extraction
+      }
+    }
+    const firstBrace = text.indexOf('{');
+    const lastBrace = text.lastIndexOf('}');
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      try {
+        return JSON.parse(text.slice(firstBrace, lastBrace + 1));
       } catch {
         return null;
       }
@@ -1125,7 +1204,7 @@ export async function handleScreenshotParseRequest(body, { ip = 'local', env = p
   }
 
   const apiKey = getGeminiApiKey(env);
-  const primaryModel = String(env?.GEMINI_VISION_MODEL || DEFAULT_GEMINI_MODEL).trim() || DEFAULT_GEMINI_MODEL;
+  const candidateModels = buildCandidateModelList(env);
   const inJapan = isJapanTrip(origin, destination);
   const prompt = buildGeminiPrompt({
     originName: body?.originName || '',
@@ -1133,41 +1212,67 @@ export async function handleScreenshotParseRequest(body, { ip = 'local', env = p
     inJapan,
   });
 
-  // 呼叫 Gemini Free Tier 視覺模型
-  let res;
-  let data;
+  // 依序嘗試 Gemini Free Tier 視覺模型（自動避開舊版 2.5 對新帳號 404 限制，並記住第一個成功模型）
+  let res = null;
+  let data = null;
+  let usedModel = candidateModels[0] || DEFAULT_GEMINI_MODEL;
+
   try {
-    ({ res, data } = await invokeGeminiVision({
-      apiKey,
-      model: primaryModel,
-      mimeType: image.mimeType,
-      base64Data: image.base64Data,
-      prompt,
-      useThinkingZero: true,
-    }));
-
-    // 若特定模型不支援 thinkingConfig 參數則自動降級重試一次
-    if (res.status === 400 && String(data?.error?.message || '').toLowerCase().includes('thinking')) {
+    for (const model of candidateModels) {
+      usedModel = model;
       ({ res, data } = await invokeGeminiVision({
         apiKey,
-        model: primaryModel,
+        model,
         mimeType: image.mimeType,
         base64Data: image.base64Data,
         prompt,
-        useThinkingZero: false,
+        includeSchema: true,
       }));
-    }
 
-    // 僅在模型不存在（404）時備援嘗試 fallback 模型，絕不在 429 額度滿時重打
-    if (res.status === 404 && primaryModel !== FALLBACK_GEMINI_MODEL) {
-      ({ res, data } = await invokeGeminiVision({
-        apiKey,
-        model: FALLBACK_GEMINI_MODEL,
-        mimeType: image.mimeType,
-        base64Data: image.base64Data,
-        prompt,
-        useThinkingZero: true,
-      }));
+      // 若特定模型對嚴格 responseSchema 回 400（不含金鑰／區域錯誤），降級為純 JSON 模式重試一次
+      if (
+        res.status === 400 &&
+        !isGeminiAuthError(res.status, data) &&
+        !isGeminiLocationError(res.status, data) &&
+        !isGeminiModelUnavailableError(res.status, data)
+      ) {
+        ({ res, data } = await invokeGeminiVision({
+          apiKey,
+          model,
+          mimeType: image.mimeType,
+          base64Data: image.base64Data,
+          prompt,
+          includeSchema: false,
+        }));
+      }
+
+      if (res.ok) {
+        if (!String(env?.GEMINI_VISION_MODEL || '').trim()) {
+          resolvedWorkingModel = model;
+        }
+        break;
+      }
+
+      // 若為特定模型在免費層無額度（limit: 0），改試下一個免費層模型
+      if (isGeminiZeroQuotaForModelError(res.status, data)) {
+        continue;
+      }
+
+      // 429 額度滿、金鑰無效或區域不支援時立刻停止，不重打其他模型
+      if (
+        isGeminiQuotaError(res.status, data) ||
+        isGeminiAuthError(res.status, data) ||
+        isGeminiLocationError(res.status, data)
+      ) {
+        break;
+      }
+
+      // 若為 404 / 503 模型不開放或暫時過載，自動切換下一個可用免費模型
+      if (isGeminiModelUnavailableError(res.status, data)) {
+        continue;
+      }
+
+      break;
     }
   } catch (err) {
     return {
@@ -1181,6 +1286,10 @@ export async function handleScreenshotParseRequest(body, { ip = 'local', env = p
   }
 
   if (isGeminiQuotaError(res.status, data)) {
+    const zeroQuota = isGeminiZeroQuotaForModelError(res.status, data);
+    if (zeroQuota) {
+      console.error('[screenshotTransit] Gemini zero free-tier quota across models:', res.status, usedModel);
+    }
     tripGeminiQuotaLock('GEMINI_QUOTA_EXCEEDED', Date.now());
     const lockedStatus = getScreenshotFeatureStatus(env, Date.now());
     return {
@@ -1188,19 +1297,48 @@ export async function handleScreenshotParseRequest(body, { ip = 'local', env = p
       body: {
         status: 'quota_limited',
         error: 'GEMINI_QUOTA_EXCEEDED',
-        message: lockedStatus.message,
+        message: zeroQuota
+          ? 'Google AI Studio 專案目前免費額度為 0（Free Tier limit: 0），請至 AI Studio 確認專案狀態，或先改用手動填寫。'
+          : lockedStatus.message,
         quota: lockedStatus,
       },
     };
   }
 
+  if (isGeminiAuthError(res.status, data)) {
+    console.error('[screenshotTransit] Gemini auth error:', res.status, usedModel, data?.error?.status || '');
+    return {
+      statusCode: 502,
+      body: {
+        status: 'parse_error',
+        error: 'GEMINI_AUTH_ERROR',
+        message: 'GEMINI_API_KEY 金鑰無效或權限不足，請確認 Vercel 環境變數設定並重新部署。',
+      },
+    };
+  }
+
+  if (isGeminiLocationError(res.status, data)) {
+    console.error('[screenshotTransit] Gemini region error:', res.status, usedModel);
+    return {
+      statusCode: 502,
+      body: {
+        status: 'parse_error',
+        error: 'GEMINI_REGION_UNSUPPORTED',
+        message: 'Google AI Studio 免費層不支援目前伺服器區域，請確認 Vercel Function 區域設定。',
+      },
+    };
+  }
+
   if (!res.ok) {
+    const errCode = String(data?.error?.status || res.status || 'ERROR').slice(0, 32);
+    const errMsg = String(data?.error?.message || '').slice(0, 140);
+    console.error('[screenshotTransit] Gemini upstream error:', res.status, usedModel, errCode, errMsg);
     return {
       statusCode: 502,
       body: {
         status: 'parse_error',
         error: 'GEMINI_UPSTREAM_ERROR',
-        message: '截圖辨識服務暫時異常，請稍後再試或改用手動填寫。',
+        message: `截圖辨識服務暫時異常（${res.status} / ${errCode}），請稍後再試或改用手動填寫。`,
       },
     };
   }

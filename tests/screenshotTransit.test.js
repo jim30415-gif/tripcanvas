@@ -359,24 +359,45 @@ test('Per-IP daily limit, global daily parse cap, and Gemini 429 cooldown lock p
   );
 });
 
-test('handleScreenshotParseRequest rejects non-transit screenshots and retries without thinkingConfig on 400', async () => {
+test('handleScreenshotParseRequest falls back on 404 model unavailable, skips thought parts, retries without responseSchema on 400, and reports invalid API key clearly', async () => {
+  // 1. 404 模型不可用時自動跳到下一個可用模型 + 略過 thought=true 區塊 + 400 schema 降級純 JSON
   resetScreenshotQuotaStateForTest();
-  let attempt = 0;
+  const seenModels = [];
+  let schemaFallbackCount = 0;
 
   await withMockedFetch(
     async (url, opts) => {
-      if (String(url).includes('generativelanguage.googleapis.com')) {
-        attempt += 1;
+      const u = String(url);
+      if (u.includes('generativelanguage.googleapis.com')) {
+        const modelMatch = u.match(/\/models\/([^:]+):generateContent/);
+        const model = modelMatch?.[1] || '';
+        seenModels.push(model);
         const payload = JSON.parse(opts.body);
-        if (attempt === 1) {
-          assert.ok(payload.generationConfig.thinkingConfig);
-          return makeJsonResponse({ error: { message: 'Unknown field thinkingConfig' } }, 400);
+
+        if (model === 'gemini-3.5-flash-lite') {
+          return makeJsonResponse({ error: { status: 'NOT_FOUND', message: 'model not found' } }, 404);
         }
-        assert.equal(payload.generationConfig.thinkingConfig, undefined);
-        return makeGeminiSuccess({
-          isTransitScreenshot: false,
-          warning: '這是一張風景照片，不含交通路線資訊。',
-          segments: [],
+        if (model === 'gemini-3.1-flash-lite' && payload.generationConfig?.responseSchema) {
+          schemaFallbackCount += 1;
+          return makeJsonResponse({ error: { status: 'INVALID_ARGUMENT', message: 'Schema too complex' } }, 400);
+        }
+        return makeJsonResponse({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  { text: 'Analyzing image...', thought: true },
+                  {
+                    text: JSON.stringify({
+                      isTransitScreenshot: false,
+                      warning: '這是一張風景照片，不含交通路線資訊。',
+                      segments: [],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
         });
       }
       return makeJsonResponse({}, 404);
@@ -386,10 +407,66 @@ test('handleScreenshotParseRequest rejects non-transit screenshots and retries w
         { imageDataUrl: FAKE_IMG_DATA_URL, origin: KANAZAWA_ORIGIN, destination: KANAZAWA_DEST },
         { ip: '5.5.5.5', env: { GEMINI_API_KEY: 'free-key' } }
       );
-      assert.equal(attempt, 2);
+      assert.equal(schemaFallbackCount, 1);
+      assert.deepEqual(seenModels, ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.1-flash-lite']);
       assert.equal(res.statusCode, 200);
       assert.equal(res.body.status, 'not_transit');
       assert.ok(res.body.message.includes('風景'));
+    }
+  );
+
+  // 2. 金鑰無效時立刻回報明確錯誤且不再重打其他模型
+  resetScreenshotQuotaStateForTest();
+  let authAttempts = 0;
+  await withMockedFetch(
+    async () => {
+      authAttempts += 1;
+      return makeJsonResponse({ error: { status: 'INVALID_ARGUMENT', message: 'API key not valid.' } }, 400);
+    },
+    async () => {
+      const res = await handleScreenshotParseRequest(
+        { imageDataUrl: FAKE_IMG_DATA_URL, origin: KANAZAWA_ORIGIN, destination: KANAZAWA_DEST },
+        { ip: '5.5.5.6', env: { GEMINI_API_KEY: 'bad-key' } }
+      );
+      assert.equal(authAttempts, 1);
+      assert.equal(res.statusCode, 502);
+      assert.equal(res.body.error, 'GEMINI_AUTH_ERROR');
+      assert.ok(res.body.message.includes('GEMINI_API_KEY'));
+    }
+  );
+
+  // 3. 單一模型免費層 limit: 0 時自動切換下一個可用免費模型，不誤觸全站冷卻鎖定
+  resetScreenshotQuotaStateForTest();
+  const limitZeroTried = [];
+  await withMockedFetch(
+    async (url) => {
+      const u = String(url);
+      if (u.includes('generativelanguage.googleapis.com')) {
+        const model = u.match(/\/models\/([^:]+):generateContent/)?.[1] || '';
+        limitZeroTried.push(model);
+        if (model === 'gemini-3.5-flash-lite') {
+          return makeJsonResponse(
+            { error: { status: 'RESOURCE_EXHAUSTED', message: 'Quota exceeded for metric, limit: 0, model: gemini-3.5-flash-lite' } },
+            429
+          );
+        }
+        return makeGeminiSuccess({
+          isTransitScreenshot: true,
+          totalDurationMin: 10,
+          segments: [{ type: 'WALK', durationMin: 10 }],
+        });
+      }
+      return makeJsonResponse({ code: 'NoRoute' }, 200);
+    },
+    async () => {
+      const res = await handleScreenshotParseRequest(
+        { imageDataUrl: FAKE_IMG_DATA_URL, origin: KANAZAWA_ORIGIN, destination: KANAZAWA_DEST },
+        { ip: '5.5.5.7', env: { GEMINI_API_KEY: 'free-key' } }
+      );
+      assert.deepEqual(limitZeroTried, ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite']);
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.body.status, 'ok');
+      assert.equal(getScreenshotFeatureStatus({ GEMINI_API_KEY: 'free-key' }).locked, false);
     }
   );
 });

@@ -1,4 +1,9 @@
 {
+  "functions": {
+    "api/routes.js": {
+      "maxDuration": 30
+    }
+  },
   "headers": [
     {
       "source": "/(.*)",
