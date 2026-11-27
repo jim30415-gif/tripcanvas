@@ -7,8 +7,8 @@ export const SHOOTING_STAR_CONFIG = Object.freeze({
   checkIntervalMaxMs: 42000,
   triggerProbability: 0.24,
   minCooldownMs: 55000,
-  durationMinMs: 760,
-  durationMaxMs: 1040,
+  durationMinMs: 1350,
+  durationMaxMs: 1850,
   easing: 'cubic-bezier(0.2, 0.45, 0.55, 0.88)',
 });
 
@@ -34,7 +34,7 @@ export function prefersReducedMotion() {
 }
 
 /**
- * 計算單顆流星的起點、斜落角度、尾跡長度與飛行距離（確保落於可視夜空區，不貼邊或過長）
+ * 計算單顆流星的起點、斜落角度、尾跡長度與飛行距離（依螢幕寬度等比延伸，大螢幕更具優雅延伸感）
  */
 export function computeShootingStarGeometry(viewportWidth, viewportHeight, rng = Math.random) {
   const width = Math.max(320, Number(viewportWidth) || 1280);
@@ -44,24 +44,24 @@ export function computeShootingStarGeometry(viewportWidth, viewportHeight, rng =
   // 72% 由右上斜滑向左下、28% 由左上斜滑向右下，保留自然隨機感
   const rightToLeft = rng() < 0.72;
   const angleDeg = rightToLeft
-    ? randomBetween(142, 158, rng)
-    : randomBetween(22, 38, rng);
+    ? randomBetween(144, 158, rng)
+    : randomBetween(22, 36, rng);
 
-  // 桌機避讓兩側浮動側欄中心區域，手機於中上夜空劃過
-  const xMin = rightToLeft ? (isCompact ? 0.45 : 0.42) : isCompact ? 0.08 : 0.22;
-  const xMax = rightToLeft ? (isCompact ? 0.92 : 0.78) : isCompact ? 0.55 : 0.58;
+  // 為更長的滑行距離預留充足夜空跑道，同時橫越畫面中段可視區
+  const xMin = rightToLeft ? (isCompact ? 0.62 : 0.56) : isCompact ? 0.08 : 0.16;
+  const xMax = rightToLeft ? (isCompact ? 0.92 : 0.84) : isCompact ? 0.38 : 0.44;
   const startX = Math.round(width * randomBetween(xMin, xMax, rng));
-  const startY = Math.round(height * randomBetween(0.07, 0.38, rng));
+  const startY = Math.round(height * randomBetween(0.06, 0.32, rng));
 
   const distancePx = Math.round(
     isCompact
-      ? randomBetween(165, 250, rng)
-      : randomBetween(230, 360, rng)
+      ? Math.min(Math.max(width * randomBetween(0.62, 0.78, rng), 240), 340)
+      : Math.min(Math.max(width * randomBetween(0.36, 0.5, rng), 460), 900)
   );
   const tailLengthPx = Math.round(
     isCompact
-      ? randomBetween(76, 108, rng)
-      : randomBetween(96, 142, rng)
+      ? randomBetween(112, 152, rng)
+      : Math.min(Math.max(width * randomBetween(0.11, 0.16, rng), 158), 255)
   );
   const durationMs = Math.round(
     randomBetween(SHOOTING_STAR_CONFIG.durationMinMs, SHOOTING_STAR_CONFIG.durationMaxMs, rng)
@@ -138,6 +138,7 @@ export function spawnShootingStar({ container = null, force = false, rng = Math.
 
   const head = document.createElement('span');
   head.className = 'shooting-star-head';
+  head.style.transform = `translateY(-50%) rotate(${(-geo.angleDeg).toFixed(1)}deg)`;
 
   mover.appendChild(tail);
   mover.appendChild(head);

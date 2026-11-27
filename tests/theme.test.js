@@ -262,17 +262,19 @@ test('nightSky computes bounded shooting star trajectories for desktop and mobil
   const { computeShootingStarGeometry, SHOOTING_STAR_CONFIG } = await import('../src/ui/nightSky.js');
 
   const desktopGeo = computeShootingStarGeometry(1440, 900, () => 0.5);
-  assert.ok(desktopGeo.startX >= 1440 * 0.42 && desktopGeo.startX <= 1440 * 0.78);
-  assert.ok(desktopGeo.startY >= 900 * 0.07 && desktopGeo.startY <= 900 * 0.38);
-  assert.ok(desktopGeo.angleDeg >= 142 && desktopGeo.angleDeg <= 158);
+  assert.ok(desktopGeo.startX >= 1440 * 0.56 && desktopGeo.startX <= 1440 * 0.84);
+  assert.ok(desktopGeo.startY >= 900 * 0.06 && desktopGeo.startY <= 900 * 0.32);
+  assert.ok(desktopGeo.angleDeg >= 144 && desktopGeo.angleDeg <= 158);
+  assert.ok(desktopGeo.distancePx >= 460 && desktopGeo.distancePx <= 900);
+  assert.ok(desktopGeo.tailLengthPx >= 158 && desktopGeo.tailLengthPx <= 255);
   assert.ok(
     desktopGeo.durationMs >= SHOOTING_STAR_CONFIG.durationMinMs &&
       desktopGeo.durationMs <= SHOOTING_STAR_CONFIG.durationMaxMs
   );
 
   const mobileLeftToRight = computeShootingStarGeometry(390, 844, () => 0.85);
-  assert.ok(mobileLeftToRight.angleDeg >= 22 && mobileLeftToRight.angleDeg <= 38);
-  assert.ok(mobileLeftToRight.distancePx >= 165 && mobileLeftToRight.distancePx <= 250);
+  assert.ok(mobileLeftToRight.angleDeg >= 22 && mobileLeftToRight.angleDeg <= 36);
+  assert.ok(mobileLeftToRight.distancePx >= 240 && mobileLeftToRight.distancePx <= 340);
 });
 
 test('spawnShootingStar respects dark mode, reduced motion, and uses decoupled composite-only WAAPI tracks without velocity kinks or scale(0)', async () => {
