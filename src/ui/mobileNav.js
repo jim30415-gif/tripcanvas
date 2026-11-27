@@ -251,7 +251,7 @@ function renderMobileDayDetailSheet() {
         <button
           type="button"
           id="btn-mobile-day-delete"
-          class="py-2.5 px-2 rounded-xl bg-owl-card hover:bg-[#F9EDEC] border border-owl-border hover:border-[#E3BDB8] text-xs font-bold text-[#9B534B] flex items-center justify-center gap-1 transition active:scale-95"
+          class="py-2.5 px-2 rounded-xl bg-owl-card hover:bg-[#F9EDEC] dark:hover:bg-[#35201F] border border-owl-border hover:border-[#E3BDB8] dark:hover:border-[#613835] text-xs font-bold text-[#9B534B] dark:text-[#E89B94] flex items-center justify-center gap-1 transition active:scale-95"
         >
           <i data-lucide="trash-2" class="w-3.5 h-3.5 shrink-0"></i>
           <span>刪除</span>

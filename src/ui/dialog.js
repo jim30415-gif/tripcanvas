@@ -96,7 +96,7 @@ export function openCustomDialog({
     btnConfirm.textContent = confirmText;
 
     iconWrap.className = danger
-      ? 'w-10 h-10 rounded-2xl bg-[#F9EDEC] text-[#A65D57] flex items-center justify-center shrink-0'
+      ? 'w-10 h-10 rounded-2xl bg-[#F9EDEC] dark:bg-[#35201F] text-[#A65D57] dark:text-[#E89B94] flex items-center justify-center shrink-0'
       : 'w-10 h-10 rounded-2xl bg-owl-softBg text-owl-primaryDeep flex items-center justify-center shrink-0';
     btnConfirm.className = danger
       ? 'px-4 py-2 rounded-xl text-xs font-bold text-white bg-[#A65D57] hover:bg-[#8E4B45] transition'

@@ -79,7 +79,7 @@ function renderPresetGallery() {
       const selected = currentVal === key;
       const previewImg = renderImageContent({ type: 'preset', value: key }, 'w-full h-full');
       return `
-        <button type="button" data-preset-key="${escapeHTML(key)}" title="${escapeHTML(art.name)}" class="btn-pick-preset flex flex-col items-center gap-1 p-1.5 rounded-xl border-2 transition ${selected ? 'border-owl-primary bg-owl-softBg scale-105' : 'border-owl-cardBorder bg-white hover:border-owl-accentBorder'}">
+        <button type="button" data-preset-key="${escapeHTML(key)}" title="${escapeHTML(art.name)}" class="btn-pick-preset flex flex-col items-center gap-1 p-1.5 rounded-xl border-2 transition ${selected ? 'border-owl-primary bg-owl-softBg scale-105' : 'border-owl-cardBorder bg-white dark:bg-owl-card hover:border-owl-accentBorder'}">
           <div class="w-full aspect-square rounded-lg overflow-hidden">${previewImg}</div>
           <span class="text-xs font-bold text-owl-subtext leading-none pb-0.5">${escapeHTML(art.name)}</span>
         </button>
@@ -135,18 +135,18 @@ function renderDetailSubSpots() {
           <select data-sub-idx="${i}" data-field="category" title="支出分類" aria-label="支出分類" class="subspot-input bg-owl-softBg/70 hover:bg-owl-softBg px-2 py-1.5 rounded-lg border border-owl-border text-xs font-bold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/30 shrink-0">
             ${buildCategoryOptionsHTML(spot.category || 'other')}
           </select>
-          <input type="text" data-sub-idx="${i}" data-field="name" aria-label="支出項目名稱" value="${escapeHTML(spot.name)}" class="subspot-input flex-1 min-w-[110px] bg-white px-2.5 py-1.5 rounded-lg border border-owl-border text-sm font-semibold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
-          <div class="flex items-center rounded-lg border border-owl-border bg-white overflow-hidden focus-within:ring-2 focus-within:ring-owl-primary/30 shrink-0">
+          <input type="text" data-sub-idx="${i}" data-field="name" aria-label="支出項目名稱" value="${escapeHTML(spot.name)}" class="subspot-input flex-1 min-w-[110px] bg-white dark:bg-owl-canvas px-2.5 py-1.5 rounded-lg border border-owl-border text-sm font-semibold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
+          <div class="flex items-center rounded-lg border border-owl-border bg-white dark:bg-owl-canvas overflow-hidden focus-within:ring-2 focus-within:ring-owl-primary/30 shrink-0">
             <select data-sub-idx="${i}" data-field="currency" title="選擇幣別（外幣自動換算新台幣）" aria-label="支出幣別" class="subspot-input bg-owl-softBg/80 hover:bg-owl-softBg px-1.5 py-1.5 border-r border-owl-border text-xs font-extrabold text-owl-primaryDeep focus:outline-none shrink-0">
               ${buildCurrencyOptionsHTML(activeCurrency)}
             </select>
-            <input type="number" inputmode="decimal" min="0" step="any" data-sub-idx="${i}" data-field="amount" aria-label="支出金額" value="${displayAmount}" class="subspot-input w-20 sm:w-24 bg-white px-2 py-1.5 text-sm font-bold text-owl-primaryDeep tabular-nums-strict focus:outline-none" />
+            <input type="number" inputmode="decimal" min="0" step="any" data-sub-idx="${i}" data-field="amount" aria-label="支出金額" value="${displayAmount}" class="subspot-input w-20 sm:w-24 bg-white dark:bg-owl-canvas px-2 py-1.5 text-sm font-bold text-owl-primaryDeep tabular-nums-strict focus:outline-none" />
           </div>
-          <button type="button" data-del-sub-idx="${i}" aria-label="刪除此項支出" title="刪除此項支出" class="btn-del-subspot w-8 h-8 rounded-lg text-owl-muted hover:text-[#A65D57] hover:bg-[#F9EDEC] flex items-center justify-center shrink-0 transition">
+          <button type="button" data-del-sub-idx="${i}" aria-label="刪除此項支出" title="刪除此項支出" class="btn-del-subspot w-8 h-8 rounded-lg text-owl-muted hover:text-[#A65D57] dark:hover:text-[#E89B94] hover:bg-[#F9EDEC] dark:hover:bg-[#35201F] flex items-center justify-center shrink-0 transition">
             <i data-lucide="x" class="w-4 h-4"></i>
           </button>
         </div>
-        <div data-fx-badge-idx="${i}" class="${showFxBadge ? '' : 'hidden '}text-right text-xs font-bold text-[#4F6F57] tabular-nums-strict pr-9">
+        <div data-fx-badge-idx="${i}" class="${showFxBadge ? '' : 'hidden '}text-right text-xs font-bold text-[#4F6F57] dark:text-[#9FD0AB] tabular-nums-strict pr-9">
           💱 自動換算新台幣：<span class="fx-twd-val">${escapeHTML(fxText)}</span>
         </div>
       </div>

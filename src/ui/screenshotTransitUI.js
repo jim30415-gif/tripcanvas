@@ -81,14 +81,14 @@ function renderQuotaBannerHtml(q) {
         <i data-lucide="shield-alert" class="w-4 h-4 text-owl-primary shrink-0 mt-0.5"></i>
         <div>
           <span class="font-bold text-owl-text">截圖辨識尚未啟用：</span>
-          請於後端設定免費的 <code class="px-1 py-0.5 rounded bg-white border border-owl-border text-[11px]">GEMINI_API_KEY</code>（Google AI Studio 免費層）即可使用；目前仍可直接使用下方手動填寫。
+          請於後端設定免費的 <code class="px-1 py-0.5 rounded bg-white dark:bg-owl-canvas border border-owl-border text-[11px]">GEMINI_API_KEY</code>（Google AI Studio 免費層）即可使用；目前仍可直接使用下方手動填寫。
         </div>
       </div>
     `;
   }
   if (q.locked) {
     return `
-      <div class="rounded-xl bg-[#FDF2F0] border border-[#E7C2BC] px-3 py-2.5 text-xs text-[#8E423B] leading-relaxed flex items-start gap-2">
+      <div class="rounded-xl bg-[#FDF2F0] dark:bg-[#35201F] border border-[#E7C2BC] dark:border-[#613835] px-3 py-2.5 text-xs text-[#8E423B] dark:text-[#E89B94] leading-relaxed flex items-start gap-2">
         <i data-lucide="shield-alert" class="w-4 h-4 shrink-0 mt-0.5"></i>
         <div class="space-y-0.5">
           <div class="font-extrabold">已達免費保護上限，暫時限制截圖匯入</div>
@@ -111,7 +111,7 @@ function renderQuotaBannerHtml(q) {
 function renderStopMatchBadge(stopName, coord) {
   if (!stopName || !stopName.trim()) return '';
   if (coord && Number.isFinite(coord.lat) && Number.isFinite(coord.lng)) {
-    return '<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-[#EBF2EC] border border-[#C2D8C7] text-[10px] font-extrabold text-[#3E5C45] shrink-0">📍 已定位</span>';
+    return '<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-[#EBF2EC] dark:bg-[#1D2D22] border border-[#C2D8C7] dark:border-[#32523C] text-[10px] font-extrabold text-[#3E5C45] dark:text-[#9FD0AB] shrink-0">📍 已定位</span>';
   }
   return '<span class="inline-flex items-center px-1.5 py-0.5 rounded-md bg-owl-softBg border border-owl-border text-[10px] font-bold text-owl-muted shrink-0">未定位</span>';
 }
@@ -135,16 +135,16 @@ function renderReviewCardHtml() {
 
   const anchorTone =
     matchedStops > 0
-      ? 'bg-[#EBF2EC] border-[#C2D8C7] text-[#3E5C45]'
-      : 'bg-[#FDF6EB] border-[#E7D4B6] text-[#8C5B2B]';
+      ? 'bg-[#EBF2EC] dark:bg-[#1D2D22] border-[#C2D8C7] dark:border-[#32523C] text-[#3E5C45] dark:text-[#9FD0AB]'
+      : 'bg-[#FDF6EB] dark:bg-[#33281A] border-[#E7D4B6] dark:border-[#5D482A] text-[#8C5B2B] dark:text-[#E8C589]';
 
   const confLabel =
     s.confidence === 'high' ? '辨識清晰' : s.confidence === 'low' ? '辨識較模糊・請仔細核對' : '請核對後匯入';
   const confTone =
     s.confidence === 'high'
-      ? 'bg-[#EBF2EC] text-[#3E5C45]'
+      ? 'bg-[#EBF2EC] dark:bg-[#1D2D22] text-[#3E5C45] dark:text-[#9FD0AB]'
       : s.confidence === 'low'
-        ? 'bg-[#FDF2F0] text-[#8E423B]'
+        ? 'bg-[#FDF2F0] dark:bg-[#35201F] text-[#8E423B] dark:text-[#E89B94]'
         : 'bg-owl-softBg text-owl-primaryDeep';
 
   const fareAmountVal = Number(draft.fareAmount) > 0 ? draft.fareAmount : '';
@@ -161,7 +161,7 @@ function renderReviewCardHtml() {
     .map((seg, idx) => {
       const isWalk = seg.type === 'WALK';
       const typeSelectHtml = `
-        <select data-ss-seg-idx="${idx}" data-ss-seg-field="segKind" class="px-2 py-1 rounded-lg border border-owl-border bg-white text-xs font-extrabold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35">
+        <select data-ss-seg-idx="${idx}" data-ss-seg-field="segKind" class="px-2 py-1 rounded-lg border border-owl-border bg-white dark:bg-owl-canvas text-xs font-extrabold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35">
           <option value="WALK" ${isWalk ? 'selected' : ''}>🚶 步行</option>
           ${VEHICLE_OPTIONS.map(
             (opt) =>
@@ -172,7 +172,7 @@ function renderReviewCardHtml() {
 
       if (isWalk) {
         return `
-          <div class="rounded-xl border border-owl-border/90 bg-white p-2.5 space-y-2" data-ss-seg-row="${idx}">
+          <div class="rounded-xl border border-owl-border/90 bg-white dark:bg-owl-panel p-2.5 space-y-2" data-ss-seg-row="${idx}">
             <div class="flex items-center justify-between gap-2">
               <div class="flex items-center gap-2 min-w-0">
                 <span class="w-5 h-5 rounded-full bg-owl-softBg text-owl-primaryDeep text-[11px] font-extrabold flex items-center justify-center shrink-0">${idx + 1}</span>
@@ -180,9 +180,9 @@ function renderReviewCardHtml() {
               </div>
               <div class="flex items-center gap-1.5">
                 <label class="text-[11px] font-bold text-owl-subtext">耗時</label>
-                <input type="number" min="1" max="360" inputmode="numeric" value="${escapeHTML(String(seg.durationMin || 3))}" data-ss-seg-idx="${idx}" data-ss-seg-field="durationMin" class="w-14 px-2 py-1 rounded-lg border border-owl-border bg-white text-xs font-bold text-owl-text text-center tabular-nums-strict focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
+                <input type="number" min="1" max="360" inputmode="numeric" value="${escapeHTML(String(seg.durationMin || 3))}" data-ss-seg-idx="${idx}" data-ss-seg-field="durationMin" class="w-14 px-2 py-1 rounded-lg border border-owl-border bg-white dark:bg-owl-canvas text-xs font-bold text-owl-text text-center tabular-nums-strict focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
                 <span class="text-[11px] text-owl-subtext">分</span>
-                <button type="button" data-ss-remove-seg="${idx}" title="移除此段" aria-label="移除第 ${idx + 1} 段" class="w-6 h-6 rounded-lg hover:bg-[#F9EDEC] text-owl-muted hover:text-[#A65D57] flex items-center justify-center transition">
+                <button type="button" data-ss-remove-seg="${idx}" title="移除此段" aria-label="移除第 ${idx + 1} 段" class="w-6 h-6 rounded-lg hover:bg-[#F9EDEC] dark:hover:bg-[#35201F] text-owl-muted hover:text-[#A65D57] dark:hover:text-[#E89B94] flex items-center justify-center transition">
                   <i data-lucide="x" class="w-3.5 h-3.5"></i>
                 </button>
               </div>
@@ -194,18 +194,18 @@ function renderReviewCardHtml() {
       const interText = Array.isArray(seg.intermediateStopNames) ? seg.intermediateStopNames.join('、') : '';
 
       return `
-        <div class="rounded-xl border border-owl-border/90 bg-white p-2.5 space-y-2" data-ss-seg-row="${idx}">
+        <div class="rounded-xl border border-owl-border/90 bg-white dark:bg-owl-panel p-2.5 space-y-2" data-ss-seg-row="${idx}">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="flex items-center gap-2 min-w-0">
               <span class="w-5 h-5 rounded-full bg-owl-primary text-white text-[11px] font-extrabold flex items-center justify-center shrink-0">${idx + 1}</span>
               ${typeSelectHtml}
             </div>
             <div class="flex items-center gap-1.5">
-              <input type="number" min="1" max="720" inputmode="numeric" value="${escapeHTML(String(seg.durationMin || 10))}" data-ss-seg-idx="${idx}" data-ss-seg-field="durationMin" title="此段耗時（分鐘）" class="w-14 px-2 py-1 rounded-lg border border-owl-border bg-white text-xs font-bold text-owl-text text-center tabular-nums-strict focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
+              <input type="number" min="1" max="720" inputmode="numeric" value="${escapeHTML(String(seg.durationMin || 10))}" data-ss-seg-idx="${idx}" data-ss-seg-field="durationMin" title="此段耗時（分鐘）" class="w-14 px-2 py-1 rounded-lg border border-owl-border bg-white dark:bg-owl-canvas text-xs font-bold text-owl-text text-center tabular-nums-strict focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
               <span class="text-[11px] text-owl-subtext">分</span>
-              <input type="number" min="0" max="200" inputmode="numeric" value="${escapeHTML(String(seg.stopCount || ''))}" placeholder="站數" data-ss-seg-idx="${idx}" data-ss-seg-field="stopCount" title="停靠站數（選填）" class="w-14 px-2 py-1 rounded-lg border border-owl-border bg-white text-xs font-bold text-owl-text text-center tabular-nums-strict focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
+              <input type="number" min="0" max="200" inputmode="numeric" value="${escapeHTML(String(seg.stopCount || ''))}" placeholder="站數" data-ss-seg-idx="${idx}" data-ss-seg-field="stopCount" title="停靠站數（選填）" class="w-14 px-2 py-1 rounded-lg border border-owl-border bg-white dark:bg-owl-canvas text-xs font-bold text-owl-text text-center tabular-nums-strict focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
               <span class="text-[11px] text-owl-subtext">站</span>
-              <button type="button" data-ss-remove-seg="${idx}" title="移除此段" aria-label="移除第 ${idx + 1} 段" class="w-6 h-6 rounded-lg hover:bg-[#F9EDEC] text-owl-muted hover:text-[#A65D57] flex items-center justify-center transition">
+              <button type="button" data-ss-remove-seg="${idx}" title="移除此段" aria-label="移除第 ${idx + 1} 段" class="w-6 h-6 rounded-lg hover:bg-[#F9EDEC] dark:hover:bg-[#35201F] text-owl-muted hover:text-[#A65D57] dark:hover:text-[#E89B94] flex items-center justify-center transition">
                 <i data-lucide="x" class="w-3.5 h-3.5"></i>
               </button>
             </div>
@@ -218,11 +218,11 @@ function renderReviewCardHtml() {
                 seg.lineShortName && /^[\dA-Za-z\-]+$|^[紅藍綠橘棕黃黑小幹線快][\dA-Za-z]+$/.test(seg.lineShortName.trim())
                   ? seg.lineShortName
                   : seg.lineName || seg.lineShortName || ''
-              )}" placeholder="例：206、城下まち周遊バス" data-ss-seg-idx="${idx}" data-ss-seg-field="lineName" class="w-full px-2.5 py-1.5 rounded-lg border border-owl-border bg-owl-card/40 text-xs font-bold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
+              )}" placeholder="例：206、城下まち周遊バス" data-ss-seg-idx="${idx}" data-ss-seg-field="lineName" class="w-full px-2.5 py-1.5 rounded-lg border border-owl-border bg-owl-card/40 dark:bg-owl-canvas text-xs font-bold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
             </div>
             <div>
               <label class="block text-[11px] font-bold text-owl-subtext mb-0.5">開往方向 / 備註（選填）</label>
-              <input type="text" value="${escapeHTML(seg.headsign || '')}" placeholder="例：往京都駅前" data-ss-seg-idx="${idx}" data-ss-seg-field="headsign" class="w-full px-2.5 py-1.5 rounded-lg border border-owl-border bg-owl-card/40 text-xs font-semibold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
+              <input type="text" value="${escapeHTML(seg.headsign || '')}" placeholder="例：往京都駅前" data-ss-seg-idx="${idx}" data-ss-seg-field="headsign" class="w-full px-2.5 py-1.5 rounded-lg border border-owl-border bg-owl-card/40 dark:bg-owl-canvas text-xs font-semibold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
             </div>
           </div>
 
@@ -232,14 +232,14 @@ function renderReviewCardHtml() {
                 <label class="text-[11px] font-bold text-owl-subtext">上車站牌</label>
                 ${renderStopMatchBadge(seg.departureStopName, seg.departureCoord)}
               </div>
-              <input type="text" value="${escapeHTML(seg.departureStopName || '')}" placeholder="例：兼六園下・金沢城" data-ss-seg-idx="${idx}" data-ss-seg-field="departureStopName" class="w-full px-2.5 py-1.5 rounded-lg border border-owl-border bg-white text-xs font-semibold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
+              <input type="text" value="${escapeHTML(seg.departureStopName || '')}" placeholder="例：兼六園下・金沢城" data-ss-seg-idx="${idx}" data-ss-seg-field="departureStopName" class="w-full px-2.5 py-1.5 rounded-lg border border-owl-border bg-white dark:bg-owl-canvas text-xs font-semibold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
             </div>
             <div>
               <div class="flex items-center justify-between gap-1 mb-0.5">
                 <label class="text-[11px] font-bold text-owl-subtext">下車站牌</label>
                 ${renderStopMatchBadge(seg.arrivalStopName, seg.arrivalCoord)}
               </div>
-              <input type="text" value="${escapeHTML(seg.arrivalStopName || '')}" placeholder="例：近江町市場" data-ss-seg-idx="${idx}" data-ss-seg-field="arrivalStopName" class="w-full px-2.5 py-1.5 rounded-lg border border-owl-border bg-white text-xs font-semibold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
+              <input type="text" value="${escapeHTML(seg.arrivalStopName || '')}" placeholder="例：近江町市場" data-ss-seg-idx="${idx}" data-ss-seg-field="arrivalStopName" class="w-full px-2.5 py-1.5 rounded-lg border border-owl-border bg-white dark:bg-owl-canvas text-xs font-semibold text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
             </div>
           </div>
 
@@ -247,7 +247,7 @@ function renderReviewCardHtml() {
             seg.vehicleType === 'BUS' || interText
               ? `<div>
                   <label class="block text-[11px] font-bold text-owl-subtext mb-0.5">中途關鍵停靠站（選填，以頓號分隔，最多 5 站・平均涵蓋前／中／後站點更貼路）</label>
-                  <input type="text" value="${escapeHTML(interText)}" placeholder="例：橫山町、旭町、若松、角間新町" data-ss-seg-idx="${idx}" data-ss-seg-field="intermediateStopNames" class="w-full px-2.5 py-1.5 rounded-lg border border-owl-border bg-white text-xs text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
+                  <input type="text" value="${escapeHTML(interText)}" placeholder="例：橫山町、旭町、若松、角間新町" data-ss-seg-idx="${idx}" data-ss-seg-field="intermediateStopNames" class="w-full px-2.5 py-1.5 rounded-lg border border-owl-border bg-white dark:bg-owl-canvas text-xs text-owl-text focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
                 </div>`
               : ''
           }
@@ -261,7 +261,7 @@ function renderReviewCardHtml() {
       <div class="flex items-start gap-2.5">
         ${
           s.previewDataUrl
-            ? `<img src="${s.previewDataUrl}" alt="上傳截圖預覽" class="w-14 h-20 rounded-xl object-cover border border-owl-border shrink-0 bg-white shadow-2xs" />`
+            ? `<img src="${s.previewDataUrl}" alt="上傳截圖預覽" class="w-14 h-20 rounded-xl object-cover border border-owl-border shrink-0 bg-white dark:bg-owl-canvas shadow-2xs" />`
             : ''
         }
         <div class="min-w-0 flex-1 space-y-1.5">
@@ -274,7 +274,7 @@ function renderReviewCardHtml() {
           </div>
           ${
             s.warning
-              ? `<div class="text-xs text-[#8C5B2B] font-medium">💡 ${escapeHTML(s.warning)}</div>`
+              ? `<div class="text-xs text-[#8C5B2B] dark:text-[#E8C589] font-medium">💡 ${escapeHTML(s.warning)}</div>`
               : ''
           }
         </div>
@@ -284,29 +284,29 @@ function renderReviewCardHtml() {
       <div class="grid grid-cols-2 gap-2 pt-1 border-t border-owl-border/70">
         <div>
           <label class="block text-[11px] font-bold text-owl-subtext mb-0.5">總耗時（分）</label>
-          <input id="input-ss-total-duration" type="number" min="1" max="1440" inputmode="numeric" value="${escapeHTML(String(draft.totalDurationMin || ''))}" class="w-full px-2.5 py-1.5 rounded-lg border border-owl-border bg-white text-xs font-extrabold text-owl-text tabular-nums-strict focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
+          <input id="input-ss-total-duration" type="number" min="1" max="1440" inputmode="numeric" value="${escapeHTML(String(draft.totalDurationMin || ''))}" class="w-full px-2.5 py-1.5 rounded-lg border border-owl-border bg-white dark:bg-owl-canvas text-xs font-extrabold text-owl-text tabular-nums-strict focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
         </div>
         <div>
           <label class="block text-[11px] font-bold text-owl-subtext mb-0.5">票價金額</label>
-          <div class="flex rounded-lg border border-owl-border bg-white overflow-hidden focus-within:ring-2 focus-within:ring-owl-primary/35">
+          <div class="flex rounded-lg border border-owl-border bg-white dark:bg-owl-canvas overflow-hidden focus-within:ring-2 focus-within:ring-owl-primary/35">
             <select id="select-ss-fare-currency" class="bg-owl-softBg/80 px-2 py-1.5 border-r border-owl-border text-xs font-extrabold text-owl-primaryDeep focus:outline-none shrink-0">
               ${CURRENCY_OPTIONS.map((c) => `<option value="${c}" ${c === fareCur ? 'selected' : ''}>${c}</option>`).join('')}
             </select>
-            <input id="input-ss-fare-amount" type="number" min="0" step="any" inputmode="decimal" value="${escapeHTML(String(fareAmountVal))}" placeholder="0" class="w-full min-w-0 px-2.5 py-1.5 bg-white text-xs font-extrabold text-owl-text tabular-nums-strict focus:outline-none" />
+            <input id="input-ss-fare-amount" type="number" min="0" step="any" inputmode="decimal" value="${escapeHTML(String(fareAmountVal))}" placeholder="0" class="w-full min-w-0 px-2.5 py-1.5 bg-white dark:bg-owl-canvas text-xs font-extrabold text-owl-text tabular-nums-strict focus:outline-none" />
           </div>
         </div>
         <div>
           <label class="block text-[11px] font-bold text-owl-subtext mb-0.5">出發時刻</label>
-          <input id="input-ss-dep-time" type="text" value="${escapeHTML(draft.departureTimeText || '')}" placeholder="09:15" class="w-full px-2.5 py-1.5 rounded-lg border border-owl-border bg-white text-xs font-semibold text-owl-text tabular-nums-strict focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
+          <input id="input-ss-dep-time" type="text" value="${escapeHTML(draft.departureTimeText || '')}" placeholder="09:15" class="w-full px-2.5 py-1.5 rounded-lg border border-owl-border bg-white dark:bg-owl-canvas text-xs font-semibold text-owl-text tabular-nums-strict focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
         </div>
         <div>
           <label class="block text-[11px] font-bold text-owl-subtext mb-0.5">抵達時刻</label>
-          <input id="input-ss-arr-time" type="text" value="${escapeHTML(draft.arrivalTimeText || '')}" placeholder="09:38" class="w-full px-2.5 py-1.5 rounded-lg border border-owl-border bg-white text-xs font-semibold text-owl-text tabular-nums-strict focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
+          <input id="input-ss-arr-time" type="text" value="${escapeHTML(draft.arrivalTimeText || '')}" placeholder="09:38" class="w-full px-2.5 py-1.5 rounded-lg border border-owl-border bg-white dark:bg-owl-canvas text-xs font-semibold text-owl-text tabular-nums-strict focus:outline-none focus:ring-2 focus:ring-owl-primary/35" />
         </div>
       </div>
       ${
         fareTwdPreview
-          ? `<div class="text-[11px] font-bold text-[#4F6F57]">💱 匯入時將自動帶入票價：${escapeHTML(fareTwdPreview)}</div>`
+          ? `<div class="text-[11px] font-bold text-[#4F6F57] dark:text-[#9FD0AB]">💱 匯入時將自動帶入票價：${escapeHTML(fareTwdPreview)}</div>`
           : ''
       }
 
@@ -330,7 +330,7 @@ function renderReviewCardHtml() {
           放棄截圖
         </button>
         <div class="flex flex-wrap items-center gap-1.5 ml-auto">
-          <button id="btn-ss-rebuild" type="button" ${isRebuilding ? 'disabled' : ''} class="inline-flex items-center gap-1 px-3 py-2 rounded-xl border ${s.dirtyStops ? 'border-owl-primary bg-owl-selectedBg text-owl-primaryDeep' : 'border-owl-border bg-white text-owl-subtext hover:bg-owl-softBg'} text-xs font-bold transition">
+          <button id="btn-ss-rebuild" type="button" ${isRebuilding ? 'disabled' : ''} class="inline-flex items-center gap-1 px-3 py-2 rounded-xl border ${s.dirtyStops ? 'border-owl-primary bg-owl-selectedBg text-owl-primaryDeep' : 'border-owl-border bg-white dark:bg-owl-panel text-owl-subtext hover:bg-owl-softBg'} text-xs font-bold transition">
             <i data-lucide="${isRebuilding ? 'loader-2' : 'refresh-cw'}" class="w-3.5 h-3.5 ${isRebuilding ? 'animate-spin' : ''}"></i>
             <span>${isRebuilding ? '定位中...' : '重新定位站牌'}</span>
           </button>
@@ -356,7 +356,7 @@ export function renderScreenshotImportUI() {
   const statusHtml =
     uiState.phase === 'parsing'
       ? `
-        <div class="rounded-xl border border-owl-border bg-white px-3.5 py-3 flex items-center gap-3">
+        <div class="rounded-xl border border-owl-border bg-white dark:bg-owl-panel px-3.5 py-3 flex items-center gap-3">
           ${
             uiState.previewDataUrl
               ? `<img src="${uiState.previewDataUrl}" alt="解析中" class="w-11 h-14 rounded-lg object-cover border border-owl-border shrink-0" />`
@@ -373,7 +373,7 @@ export function renderScreenshotImportUI() {
       `
       : uiState.phase === 'error' && uiState.errorMessage
         ? `
-          <div class="rounded-xl bg-[#FDF2F0] border border-[#E7C2BC] px-3 py-2 text-xs font-bold text-[#8E423B] leading-relaxed">
+          <div class="rounded-xl bg-[#FDF2F0] dark:bg-[#35201F] border border-[#E7C2BC] dark:border-[#613835] px-3 py-2 text-xs font-bold text-[#8E423B] dark:text-[#E89B94] leading-relaxed">
             ⚠️ ${escapeHTML(uiState.errorMessage)}
           </div>
         `
@@ -382,7 +382,7 @@ export function renderScreenshotImportUI() {
   const controlsDisabled = blocked || isParsing;
   const uploadBoxClass = controlsDisabled
     ? 'opacity-50 pointer-events-none select-none'
-    : 'cursor-pointer hover:border-owl-primary/70 hover:bg-white';
+    : 'cursor-pointer hover:border-owl-primary/70 hover:bg-white dark:hover:bg-owl-softBg';
 
   root.innerHTML = `
     <div class="space-y-2.5">
@@ -401,14 +401,14 @@ export function renderScreenshotImportUI() {
       ${
         !showReview
           ? `
-            <div id="screenshot-dropzone" class="rounded-xl border-2 border-dashed border-owl-border bg-white/80 p-3 space-y-2.5 transition ${controlsDisabled ? 'opacity-60' : ''}">
+            <div id="screenshot-dropzone" class="rounded-xl border-2 border-dashed border-owl-border bg-white/80 dark:bg-owl-panel/80 p-3 space-y-2.5 transition ${controlsDisabled ? 'opacity-60' : ''}">
               <div class="grid grid-cols-2 gap-2">
                 <label class="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-owl-primary hover:bg-owl-primaryHover text-white text-xs sm:text-sm font-extrabold shadow-2xs transition active:scale-95 ${controlsDisabled ? 'pointer-events-none opacity-60' : 'cursor-pointer'}">
                   <i data-lucide="upload-cloud" class="w-4 h-4 shrink-0"></i>
                   <span>上傳截圖 / 相簿</span>
                   <input id="input-transit-screenshot" type="file" accept="image/*" ${controlsDisabled ? 'disabled' : ''} class="sr-only" />
                 </label>
-                <button id="btn-paste-transit-screenshot" type="button" ${controlsDisabled ? 'disabled' : ''} class="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-white border border-owl-border text-owl-text text-xs sm:text-sm font-extrabold transition active:scale-95 ${uploadBoxClass}">
+                <button id="btn-paste-transit-screenshot" type="button" ${controlsDisabled ? 'disabled' : ''} class="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-white dark:bg-owl-card border border-owl-border text-owl-text text-xs sm:text-sm font-extrabold transition active:scale-95 ${uploadBoxClass}">
                   <i data-lucide="clipboard-paste" class="w-4 h-4 text-owl-primary shrink-0"></i>
                   <span>貼上截圖</span>
                 </button>
@@ -670,6 +670,7 @@ function bindDynamicScreenshotCardEvents(root) {
     uiState.dirtyStops = true;
     const rebuildBtn = document.getElementById('btn-ss-rebuild');
     if (rebuildBtn) {
+      rebuildBtn.classList.remove('border-owl-border', 'bg-white', 'dark:bg-owl-panel', 'text-owl-subtext');
       rebuildBtn.classList.add('border-owl-primary', 'bg-owl-selectedBg', 'text-owl-primaryDeep');
     }
   };

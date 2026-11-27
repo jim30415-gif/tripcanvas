@@ -192,9 +192,9 @@ function renderConnectorHTML(day, safeDayColor, pin, idx) {
   }
 
   const cardClasses = isAlert
-    ? 'bg-[#F0ECE7] hover:bg-[#E7E0D8] border-[#CFC5BA] text-[#6B5F55]'
+    ? 'bg-[#F0ECE7] dark:bg-[#29231E] hover:bg-[#E7E0D8] dark:hover:bg-[#342B24] border-[#CFC5BA] dark:border-[#493E35] text-[#6B5F55] dark:text-[#C5B6A6]'
     : isUnrecorded
-      ? 'bg-[#F6F1EA] hover:bg-owl-softBg border-dashed border-owl-border text-owl-subtext'
+      ? 'bg-[#F6F1EA] dark:bg-owl-selectedBg/75 hover:bg-owl-softBg border-dashed border-owl-border text-owl-subtext'
       : 'bg-owl-selectedBg/90 hover:bg-owl-softBg border-owl-cardBorder hover:border-owl-accentBorder text-owl-text';
 
   return `
@@ -204,11 +204,11 @@ function renderConnectorHTML(day, safeDayColor, pin, idx) {
         <div class="flex items-center gap-2 min-w-0">
           <span class="text-base leading-none shrink-0">${escapeHTML(info.emoji || '')}</span>
           <div class="min-w-0">
-            <div class="text-sm font-bold truncate ${isAlert ? 'text-[#63564B]' : 'text-owl-text'}">${escapeHTML(info.leftTitle)}</div>
-            <div class="text-xs font-medium truncate ${isAlert ? 'text-[#847568]' : 'text-owl-subtext'}">${escapeHTML(info.leftSub)}</div>
+            <div class="text-sm font-bold truncate ${isAlert ? 'text-[#63564B] dark:text-[#D5C6B8]' : 'text-owl-text'}">${escapeHTML(info.leftTitle)}</div>
+            <div class="text-xs font-medium truncate ${isAlert ? 'text-[#847568] dark:text-[#A99A8C]' : 'text-owl-subtext'}">${escapeHTML(info.leftSub)}</div>
           </div>
         </div>
-        <span class="transport-status-badge text-[11px] font-bold shrink-0 px-2 py-0.5 rounded-md border ${isAlert ? 'bg-white/75 border-[#CFC5BA] text-[#78685B]' : 'bg-owl-card border-owl-cardBorder text-owl-primaryDeep'}">${escapeHTML(info.badge)}</span>
+        <span class="transport-status-badge text-[11px] font-bold shrink-0 px-2 py-0.5 rounded-md border ${isAlert ? 'bg-white/75 dark:bg-owl-card border-[#CFC5BA] dark:border-[#493E35] text-[#78685B] dark:text-[#C5B6A6]' : 'bg-owl-card border-owl-cardBorder text-owl-primaryDeep'}">${escapeHTML(info.badge)}</span>
       </button>
     </div>
   `;
@@ -545,7 +545,7 @@ export function renderLeftPanel(callbacks) {
                 rel="noopener noreferrer"
                 title="在 Google Maps 開啟此景點"
                 aria-label="在 Google Maps 開啟 ${escapeHTML(pin.name)}"
-                class="btn-card-gmaps w-7 h-7 rounded-lg text-[#4F6F57] hover:bg-[#EBF2EC] flex items-center justify-center transition active:scale-90"
+                class="btn-card-gmaps w-7 h-7 rounded-lg text-[#4F6F57] dark:text-[#9FD0AB] hover:bg-[#EBF2EC] dark:hover:bg-[#1D2D22] flex items-center justify-center transition active:scale-90"
               >
                 <i data-lucide="navigation" class="w-3.5 h-3.5"></i>
               </a>
@@ -554,7 +554,7 @@ export function renderLeftPanel(callbacks) {
                 data-delete-pin-id="${safePinId}"
                 title="快速刪除此景點"
                 aria-label="刪除 ${escapeHTML(pin.name)}"
-                class="btn-card-delete w-7 h-7 rounded-lg text-owl-muted hover:text-[#A65D57] hover:bg-[#F9EDEC] flex items-center justify-center transition active:scale-90"
+                class="btn-card-delete w-7 h-7 rounded-lg text-owl-muted hover:text-[#A65D57] dark:hover:text-[#E89B94] hover:bg-[#F9EDEC] dark:hover:bg-[#35201F] flex items-center justify-center transition active:scale-90"
               >
                 <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
               </button>

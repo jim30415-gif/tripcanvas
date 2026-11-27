@@ -1,5 +1,7 @@
 import { SILENT_TILE_SOURCES } from '../config/constants.js';
+import { isDarkTheme } from '../ui/theme.js';
 import {
+  GOOGLE_MAP_NIGHT_STYLES,
   createGoogleOverlayGroup,
   createGoogleProjectionHelper,
   loadGoogleMapsSdk,
@@ -73,11 +75,12 @@ function createOfflineCanvasGridLayer(L, options) {
       tile.width = size.x;
       tile.height = size.y;
       const ctx = tile.getContext('2d');
+      const dark = isDarkTheme();
 
-      ctx.fillStyle = '#F5EFE6';
+      ctx.fillStyle = dark ? '#191512' : '#F5EFE6';
       ctx.fillRect(0, 0, size.x, size.y);
 
-      ctx.strokeStyle = '#E5DACB';
+      ctx.strokeStyle = dark ? '#29221C' : '#E5DACB';
       ctx.lineWidth = 1;
       for (let i = 0; i < size.x; i += 64) {
         ctx.beginPath();
@@ -89,7 +92,7 @@ function createOfflineCanvasGridLayer(L, options) {
         ctx.lineTo(size.x, i);
         ctx.stroke();
       }
-      ctx.strokeStyle = '#D7C5B2';
+      ctx.strokeStyle = dark ? '#3A3028' : '#D7C5B2';
       ctx.strokeRect(0, 0, size.x, size.y);
 
       const n = Math.pow(2, coords.z);
@@ -97,7 +100,7 @@ function createOfflineCanvasGridLayer(L, options) {
       const latRad = Math.atan(Math.sinh(Math.PI * (1 - (2 * coords.y) / n)));
       const lat = ((latRad * 180) / Math.PI).toFixed(2);
 
-      ctx.fillStyle = '#9E8C7A';
+      ctx.fillStyle = dark ? '#988675' : '#9E8C7A';
       ctx.font = '600 11px "Noto Sans TC", sans-serif';
       ctx.fillText(`Z${coords.z} · ${lat}°N, ${lng}°E`, 10, 18);
       return tile;
@@ -136,11 +139,14 @@ function mountTileSourceSilently(sourceIndex) {
     token,
   };
 
+  const panelMap = document.getElementById('panel-map');
   if (source.type === 'canvas') {
+    panelMap?.classList.add('map-offline-grid');
     activeBaseLayer = createOfflineCanvasGridLayer(L, source.options);
     activeBaseLayer.addTo(mapInstance);
     return;
   }
+  panelMap?.classList.remove('map-offline-grid');
 
   const size = mapInstance.getSize?.();
   const viewportTiles = size ? Math.ceil(size.x / 256) * Math.ceil(size.y / 256) : 6;
@@ -492,6 +498,8 @@ function initGoogleMap(gmaps, initialCenter = [25.044, 121.535], initialZoom = 1
   if (!mapDiv) return null;
   mapDiv.innerHTML = '';
 
+  const dark = isDarkTheme();
+  document.getElementById('panel-map')?.classList.remove('map-offline-grid');
   mapInstance = new gmaps.Map(mapDiv, {
     center: { lat: initialCenter[0], lng: initialCenter[1] },
     zoom: initialZoom,
@@ -499,6 +507,8 @@ function initGoogleMap(gmaps, initialCenter = [25.044, 121.535], initialZoom = 1
     clickableIcons: true,
     gestureHandling: 'greedy',
     keyboardShortcuts: false,
+    backgroundColor: dark ? '#16120F' : '#EDE5D8',
+    styles: dark ? GOOGLE_MAP_NIGHT_STYLES : null,
   });
 
   overlayGroup = createGoogleOverlayGroup(mapInstance);
@@ -671,6 +681,30 @@ export async function initMap({ onMapClick, onMapRightClick, onBasemapPoiClick, 
 
   await initLeafletMap();
   return { engine: 'leaflet', map: mapInstance };
+}
+
+/**
+ * 即時切換底圖日／夜間配色（Google Maps 原生套用 styles、Leaflet 離線網格即時重繪，全程 0 額外 API 呼叫）
+ */
+export function applyMapTheme(dark = isDarkTheme()) {
+  if (!mapInstance) return;
+  if (activeEngine === 'google') {
+    try {
+      mapInstance.setOptions({
+        styles: dark ? GOOGLE_MAP_NIGHT_STYLES : null,
+        backgroundColor: dark ? '#16120F' : '#EDE5D8',
+      });
+    } catch {
+      // ignore
+    }
+    return;
+  }
+  if (activeEngine === 'leaflet' && activeBaseLayer && typeof activeBaseLayer.redraw === 'function') {
+    const source = SILENT_TILE_SOURCES[tileRuntime.sourceIndex];
+    if (source?.type === 'canvas') {
+      activeBaseLayer.redraw();
+    }
+  }
 }
 
 export function getMapEngine() {

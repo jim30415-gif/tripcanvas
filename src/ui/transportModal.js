@@ -126,11 +126,11 @@ function renderTransportCostHint({ autoFillFare = false } = {}) {
     const rateTag = conv.rateSource === 'live' ? '即時匯率' : '參考匯率';
     const fareApplyBtn =
       ctx.selectedMode === 'transit' && fare?.amountTwd
-        ? `<button type="button" id="btn-apply-google-fare" class="px-2 py-0.5 rounded-lg bg-white border border-[#B5D0BA] text-[#3E5C45] font-bold hover:bg-[#F5FAF6] transition">改套用 ${providerLabel} 票價</button>`
+        ? `<button type="button" id="btn-apply-google-fare" class="px-2 py-0.5 rounded-lg bg-white dark:bg-owl-card border border-[#B5D0BA] dark:border-[#3A6347] text-[#3E5C45] dark:text-[#9FD0AB] font-bold hover:bg-[#F5FAF6] dark:hover:bg-[#263C2D] transition">改套用 ${providerLabel} 票價</button>`
         : '';
 
     hintEl.innerHTML = `
-      <div class="flex flex-wrap items-center justify-between gap-1.5 text-xs text-[#4F6F57] bg-[#EBF2EC] border border-[#C7DCCB] rounded-xl px-3 py-2">
+      <div class="flex flex-wrap items-center justify-between gap-1.5 text-xs text-[#4F6F57] dark:text-[#9FD0AB] bg-[#EBF2EC] dark:bg-[#1D2D22] border border-[#C7DCCB] dark:border-[#32523C] rounded-xl px-3 py-2">
         <span>💱 <strong>${escapeHTML(formatCurrencyAmount(rawVal, currentCurrency))}</strong>（${escapeHTML(currentCurrency)}）≈ <strong>${formatTWD(conv.amountTwd)}</strong>（${rateTag}，儲存後計入台幣總支出）</span>
         ${fareApplyBtn}
       </div>
@@ -152,16 +152,16 @@ function renderTransportCostHint({ autoFillFare = false } = {}) {
       if (fare.originalCurrency && fare.originalCurrency !== 'TWD') {
         const rateTag = fare.rateSource === 'live' ? '即時匯率' : '參考匯率';
         hintEl.innerHTML = `
-          <div class="flex flex-wrap items-center justify-between gap-1.5 text-xs text-[#4F6F57] bg-[#EBF2EC] border border-[#C7DCCB] rounded-xl px-3 py-2">
+          <div class="flex flex-wrap items-center justify-between gap-1.5 text-xs text-[#4F6F57] dark:text-[#9FD0AB] bg-[#EBF2EC] dark:bg-[#1D2D22] border border-[#C7DCCB] dark:border-[#32523C] rounded-xl px-3 py-2">
             <span>💱 ${providerLabel} 票價 <strong>${escapeHTML(fare.originalText || `${fare.originalCurrency} ${fare.originalAmount}`)}</strong>（${escapeHTML(fare.originalCurrency)}）≈ <strong>${formatTWD(fare.amountTwd)}</strong>（${rateTag}自動換算）</span>
-            ${differs ? '<button type="button" id="btn-apply-google-fare" class="px-2.5 py-1 rounded-lg bg-white border border-[#B5D0BA] text-[#3E5C45] font-bold hover:bg-[#F5FAF6] transition">套用換算票價</button>' : ''}
+            ${differs ? '<button type="button" id="btn-apply-google-fare" class="px-2.5 py-1 rounded-lg bg-white dark:bg-owl-card border border-[#B5D0BA] dark:border-[#3A6347] text-[#3E5C45] dark:text-[#9FD0AB] font-bold hover:bg-[#F5FAF6] dark:hover:bg-[#263C2D] transition">套用換算票價</button>' : ''}
           </div>
         `;
       } else {
         hintEl.innerHTML = `
-          <div class="flex flex-wrap items-center justify-between gap-1.5 text-xs text-[#4F6F57] bg-[#EBF2EC] border border-[#C7DCCB] rounded-xl px-3 py-2">
+          <div class="flex flex-wrap items-center justify-between gap-1.5 text-xs text-[#4F6F57] dark:text-[#9FD0AB] bg-[#EBF2EC] dark:bg-[#1D2D22] border border-[#C7DCCB] dark:border-[#32523C] rounded-xl px-3 py-2">
             <span>🎫 ${providerLabel} 預估票價 <strong>${formatTWD(fare.amountTwd)}</strong>${differs ? '' : '（已自動帶入）'}</span>
-            ${differs ? `<button type="button" id="btn-apply-google-fare" class="px-2.5 py-1 rounded-lg bg-white border border-[#B5D0BA] text-[#3E5C45] font-bold hover:bg-[#F5FAF6] transition">套用 ${providerLabel} 票價</button>` : ''}
+            ${differs ? `<button type="button" id="btn-apply-google-fare" class="px-2.5 py-1 rounded-lg bg-white dark:bg-owl-card border border-[#B5D0BA] dark:border-[#3A6347] text-[#3E5C45] dark:text-[#9FD0AB] font-bold hover:bg-[#F5FAF6] dark:hover:bg-[#263C2D] transition">套用 ${providerLabel} 票價</button>` : ''}
           </div>
         `;
       }
@@ -211,8 +211,8 @@ function renderManualBusRoadPreview() {
   const roadRes = ctx.manualBusRoadResult;
   if (!roadRes || roadRes.status === 'pending') {
     previewEl.innerHTML = `
-      <div class="flex items-center gap-2 rounded-xl bg-[#EBF2EC]/80 border border-[#C7DCCB] px-3 py-2 text-xs font-semibold text-[#3E5C45]">
-        <span class="w-3.5 h-3.5 rounded-full border-2 border-[#4F6F57] border-t-transparent animate-spin shrink-0"></span>
+      <div class="flex items-center gap-2 rounded-xl bg-[#EBF2EC]/80 dark:bg-[#1D2D22] border border-[#C7DCCB] dark:border-[#32523C] px-3 py-2 text-xs font-semibold text-[#3E5C45] dark:text-[#9FD0AB]">
+        <span class="w-3.5 h-3.5 rounded-full border-2 border-[#4F6F57] dark:border-[#9FD0AB] border-t-transparent animate-spin shrink-0"></span>
         <span>正在計算實際馬路公車路線與參考車程...</span>
       </div>
     `;
@@ -228,7 +228,7 @@ function renderManualBusRoadPreview() {
       durInput.placeholder = estBusMin ? `未填自動估約 ${estBusMin} 分` : '選填，例：10';
     }
     previewEl.innerHTML = `
-      <div class="flex items-start gap-2 rounded-xl bg-[#EBF2EC] border border-[#C7DCCB] px-3 py-2 text-xs text-[#3E5C45] leading-relaxed">
+      <div class="flex items-start gap-2 rounded-xl bg-[#EBF2EC] dark:bg-[#1D2D22] border border-[#C7DCCB] dark:border-[#32523C] px-3 py-2 text-xs text-[#3E5C45] dark:text-[#9FD0AB] leading-relaxed">
         <span class="shrink-0">🛣️</span>
         <span><strong>自動貼路公車</strong>：儲存後將沿實際馬路繪製路線（${escapeHTML(distPart)}${escapeHTML(estPart)}）。</span>
       </div>
@@ -293,7 +293,7 @@ function renderTransitTypeChips() {
   container.innerHTML = TRANSIT_TYPES.map((t) => {
     const active = ctx.selectedTransitType === t.id;
     return `
-      <button type="button" data-ttype="${escapeHTML(t.id)}" class="btn-pick-ttype px-2.5 py-1.5 rounded-xl text-xs font-bold border transition ${active ? 'bg-owl-primary text-white border-owl-primary' : 'bg-white text-owl-subtext border-owl-border hover:border-owl-accentBorder'}">
+      <button type="button" data-ttype="${escapeHTML(t.id)}" class="btn-pick-ttype px-2.5 py-1.5 rounded-xl text-xs font-bold border transition ${active ? 'bg-owl-primary text-white border-owl-primary' : 'bg-white dark:bg-owl-card text-owl-subtext border-owl-border hover:border-owl-accentBorder'}">
         ${escapeHTML(t.emoji)} ${escapeHTML(t.label)}
       </button>
     `;
@@ -322,7 +322,7 @@ function renderTransitPreferenceChips() {
   container.innerHTML = TRANSIT_PREFERENCES.map((p) => {
     const active = ctx.transitPreference === p.id;
     return `
-      <button type="button" data-tpref="${escapeHTML(p.id)}" class="btn-pick-tpref px-2.5 py-1.5 rounded-lg text-xs font-bold border transition ${active ? 'bg-owl-primary text-white border-owl-primary' : 'bg-white text-owl-subtext border-owl-border hover:border-owl-accentBorder'}">
+      <button type="button" data-tpref="${escapeHTML(p.id)}" class="btn-pick-tpref px-2.5 py-1.5 rounded-lg text-xs font-bold border transition ${active ? 'bg-owl-primary text-white border-owl-primary' : 'bg-white dark:bg-owl-card text-owl-subtext border-owl-border hover:border-owl-accentBorder'}">
         ${escapeHTML(p.label)}
       </button>
     `;
@@ -395,7 +395,7 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
     const devHint = isDevEnvironment()
       ? `<details class="rounded-lg bg-owl-softBg/70 border border-owl-border/80 px-2.5 py-2 text-xs text-owl-subtext">
            <summary class="font-bold text-owl-primaryDeep cursor-pointer select-none">開發者設定提示</summary>
-           <p class="mt-1 leading-relaxed">於環境變數設定 <code class="px-1 rounded bg-white text-owl-primaryDeep font-mono">RAPIDAPI_NAVITIME_KEY</code> 即可啟用日本電車自動分段查詢。</p>
+           <p class="mt-1 leading-relaxed">於環境變數設定 <code class="px-1 rounded bg-white dark:bg-owl-canvas text-owl-primaryDeep font-mono">RAPIDAPI_NAVITIME_KEY</code> 即可啟用日本電車自動分段查詢。</p>
          </details>`
       : '';
     statusEl.innerHTML = `
@@ -416,7 +416,7 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
           <a href="${escapeHTML(gmapsUrl)}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-owl-darkTop hover:bg-owl-darkBottom text-owl-cream text-xs font-bold transition">
             Google Maps 查車 ↗
           </a>
-          <a href="${escapeHTML(NAVITIME_JP_WEB_URL)}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#EBF2EC] hover:bg-[#DCE9DE] border border-[#C7DCCB] text-[#3E5C45] text-xs font-bold transition">
+          <a href="${escapeHTML(NAVITIME_JP_WEB_URL)}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#EBF2EC] dark:bg-[#1D2D22] hover:bg-[#DCE9DE] dark:hover:bg-[#263C2D] border border-[#C7DCCB] dark:border-[#32523C] text-[#3E5C45] dark:text-[#9FD0AB] text-xs font-bold transition">
             NAVITIME 繁中 ↗
           </a>
         </div>
@@ -453,7 +453,7 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
           <button type="button" id="btn-switch-to-manual-inline" class="px-3 py-1.5 rounded-lg bg-owl-softBg hover:bg-owl-border/75 text-owl-primaryDeep text-xs font-bold transition">
             改用手動填寫紀錄
           </button>
-          <button type="button" id="btn-recheck-transit-api" class="px-3 py-1.5 rounded-lg bg-white hover:bg-owl-softBg border border-owl-border text-owl-subtext text-xs font-bold transition">
+          <button type="button" id="btn-recheck-transit-api" class="px-3 py-1.5 rounded-lg bg-white dark:bg-owl-panel hover:bg-owl-softBg border border-owl-border text-owl-subtext text-xs font-bold transition">
             重新偵測
           </button>
         </div>
@@ -475,12 +475,12 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
     routesWrap.classList.add('hidden');
     const gmapsUrl = buildGoogleMapsDirUrl(ctx.pinA, ctx.pinB, 'transit');
     statusEl.innerHTML = `
-      <div class="rounded-xl bg-[#EFECE7] border border-[#CFC5BA] p-3.5 space-y-2.5 text-sm text-[#5E5248]">
+      <div class="rounded-xl bg-[#EFECE7] dark:bg-[#29231E] border border-[#CFC5BA] dark:border-[#493E35] p-3.5 space-y-2.5 text-sm text-[#5E5248] dark:text-[#D5C6B8]">
         <div class="flex items-start gap-2">
-          <i data-lucide="alert-triangle" class="w-4 h-4 text-[#A65D57] shrink-0 mt-0.5"></i>
+          <i data-lucide="alert-triangle" class="w-4 h-4 text-[#A65D57] dark:text-[#E89B94] shrink-0 mt-0.5"></i>
           <div class="leading-relaxed">
             <div class="font-extrabold">${ctx.isJapan ? '查無日本鐵道／公開公車路線' : '此時段查無大眾運輸班次'}</div>
-            <p class="text-xs text-[#7D6E62] mt-0.5">${escapeHTML(res.message || '請調整上方出發時間、改查 Google Maps，或改填貼路公車紀錄。')}</p>
+            <p class="text-xs text-[#7D6E62] dark:text-[#A99A8C] mt-0.5">${escapeHTML(res.message || '請調整上方出發時間、改查 Google Maps，或改填貼路公車紀錄。')}</p>
           </div>
         </div>
         <div class="flex flex-wrap items-center gap-1.5 pt-0.5">
@@ -502,11 +502,11 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
   if (res.status !== 'ok' || !Array.isArray(res.routes) || res.routes.length === 0) {
     routesWrap.classList.add('hidden');
     statusEl.innerHTML = `
-      <div class="rounded-xl bg-[#EFECE7] border border-[#CFC5BA] p-3 flex items-start gap-2 text-sm text-[#5E5248]">
-        <i data-lucide="wifi-off" class="w-4 h-4 text-[#A65D57] shrink-0 mt-0.5"></i>
+      <div class="rounded-xl bg-[#EFECE7] dark:bg-[#29231E] border border-[#CFC5BA] dark:border-[#493E35] p-3 flex items-start gap-2 text-sm text-[#5E5248] dark:text-[#D5C6B8]">
+        <i data-lucide="wifi-off" class="w-4 h-4 text-[#A65D57] dark:text-[#E89B94] shrink-0 mt-0.5"></i>
         <div class="leading-relaxed">
           <div class="font-extrabold">無法取得大眾運輸路線</div>
-          <p class="text-xs text-[#7D6E62] mt-0.5">${escapeHTML(res.message || '服務暫時無法連線，請重試或改用手動紀錄。')}</p>
+          <p class="text-xs text-[#7D6E62] dark:text-[#A99A8C] mt-0.5">${escapeHTML(res.message || '服務暫時無法連線，請重試或改用手動紀錄。')}</p>
         </div>
       </div>
     `;
@@ -530,12 +530,12 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
     const gmapsUrl = buildGoogleMapsDirUrl(ctx.pinA, ctx.pinB, 'transit');
     statusEl.innerHTML = `
       <div class="space-y-2">
-        <div class="rounded-xl bg-[#FAF3E6] border border-[#DFC79C] p-3.5 space-y-2.5 text-sm text-[#5A4426]">
+        <div class="rounded-xl bg-[#FAF3E6] dark:bg-[#33281A] border border-[#DFC79C] dark:border-[#5D482A] p-3.5 space-y-2.5 text-sm text-[#5A4426] dark:text-[#E8C589]">
           <div class="flex items-start gap-2">
-            <i data-lucide="alert-triangle" class="w-4 h-4 text-[#B47A2A] shrink-0 mt-0.5"></i>
+            <i data-lucide="alert-triangle" class="w-4 h-4 text-[#B47A2A] dark:text-[#E5B869] shrink-0 mt-0.5"></i>
             <div class="leading-relaxed">
               <div class="font-extrabold">${ctx.isJapan ? '此段查無日本鐵路／公開公車路線' : '此段查無大眾運輸乘車班次'}（僅有步行 ${escapeHTML(formatDurationZh(selected.durationMin))}）</div>
-              <p class="text-xs text-[#7C6038] mt-0.5">
+              <p class="text-xs text-[#7C6038] dark:text-[#D9C19B] mt-0.5">
                 ${
                   ctx.isJapan
                     ? 'NAVITIME 免費版不含日本地方公車，且公開公車資料（Transitous）尚無此業者路線。建議先開 Google Maps 看公車班次，再改填公車紀錄，地圖會自動沿實際馬路畫線。'
@@ -582,7 +582,7 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
     statusEl.innerHTML = `
       <div class="space-y-1">
         <div class="flex items-center justify-between gap-2 text-sm">
-          <div class="flex items-center gap-1.5 text-[#4F6F57] font-bold">
+          <div class="flex items-center gap-1.5 text-[#4F6F57] dark:text-[#9FD0AB] font-bold">
             <i data-lucide="check-circle-2" class="w-4 h-4 shrink-0"></i>
             <span>${headerTitle}</span>
           </div>
@@ -640,7 +640,7 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
           <div class="relative pl-7 ${isLast ? '' : 'pb-3'}">
             ${isLast ? '' : '<div class="absolute left-[11px] top-6 bottom-0 w-0.5 border-l-2 border-dotted border-owl-accentBorder/75"></div>'}
             <span class="absolute left-0 top-0.5 w-6 h-6 rounded-full bg-owl-softBg border border-owl-border flex items-center justify-center text-xs">🚶</span>
-            <div class="rounded-xl bg-white/90 border border-owl-cardBorder px-3 py-2">
+            <div class="rounded-xl bg-white/90 dark:bg-owl-card border border-owl-cardBorder px-3 py-2">
               <div class="flex items-center justify-between gap-2">
                 <span class="text-sm font-bold text-owl-text">${escapeHTML(seg.instruction || '步行')}</span>
                 <span class="text-xs font-extrabold text-owl-subtext shrink-0 tabular-nums-strict">${escapeHTML(formatDurationZh(seg.durationMin))}</span>
@@ -666,7 +666,7 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
         <div class="relative pl-7 ${isLast ? '' : 'pb-3'}">
           ${isLast ? '' : `<div class="absolute left-[11px] top-6 bottom-0 w-0.5" style="background:${lineBg};"></div>`}
           <span class="absolute left-0 top-0.5 w-6 h-6 rounded-full text-white flex items-center justify-center text-xs shadow-2xs" style="background:${lineBg};">${escapeHTML(seg.vehicleEmoji || '🚆')}</span>
-          <div class="rounded-xl bg-white border border-owl-cardBorder px-3 py-2.5 space-y-1.5" style="border-left: 3.5px solid ${lineBg};">
+          <div class="rounded-xl bg-white dark:bg-owl-card border border-owl-cardBorder px-3 py-2.5 space-y-1.5" style="border-left: 3.5px solid ${lineBg};">
             <div class="flex items-center justify-between gap-2">
               <div class="flex items-center gap-1.5 min-w-0">
                 <span class="px-2 py-0.5 rounded-md text-xs font-extrabold text-white shrink-0" style="background:${lineBg};">${escapeHTML(seg.displayLine || seg.vehicleLabel)}</span>
@@ -767,7 +767,7 @@ async function runModalLandQuery(forceRefresh = false) {
       res.provider === 'google' ? 'Google Routes 高精度路網' : 'OpenStreetMap 道路路網';
     const noteText = res.fallbackNote ? ` · ${res.fallbackNote}` : '';
     statusEl.innerHTML = `
-      <div class="flex items-center gap-2 text-[#4F6F57] font-bold">
+      <div class="flex items-center gap-2 text-[#4F6F57] dark:text-[#9FD0AB] font-bold">
         <i data-lucide="check-circle-2" class="w-4 h-4 shrink-0"></i>
         <span>已取得實際貼路路線（${escapeHTML(providerTag)}${escapeHTML(noteText)}）</span>
       </div>
@@ -781,11 +781,11 @@ async function runModalLandQuery(forceRefresh = false) {
     retryBtn.classList.add('hidden');
   } else if (res.status === 'unsupported') {
     statusEl.innerHTML = `
-      <div class="rounded-xl bg-[#EFECE7] border border-[#CFC5BA] p-3 flex items-start gap-2 text-[#5E5248]">
-        <i data-lucide="alert-triangle" class="w-4 h-4 text-[#A65D57] shrink-0 mt-0.5"></i>
+      <div class="rounded-xl bg-[#EFECE7] dark:bg-[#29231E] border border-[#CFC5BA] dark:border-[#493E35] p-3 flex items-start gap-2 text-[#5E5248] dark:text-[#D5C6B8]">
+        <i data-lucide="alert-triangle" class="w-4 h-4 text-[#A65D57] dark:text-[#E89B94] shrink-0 mt-0.5"></i>
         <div class="leading-relaxed">
           <div class="font-extrabold">不支援此陸路路線（可能跨海或無道路可達）</div>
-          <div class="text-xs text-[#7D6E62] mt-0.5">此兩點之間無法以${escapeHTML(modeMeta.label)}行駛，建議改選「大眾運輸」或以 Google Maps 查詢跨區交通方式。</div>
+          <div class="text-xs text-[#7D6E62] dark:text-[#A99A8C] mt-0.5">此兩點之間無法以${escapeHTML(modeMeta.label)}行駛，建議改選「大眾運輸」或以 Google Maps 查詢跨區交通方式。</div>
         </div>
       </div>
     `;
@@ -793,11 +793,11 @@ async function runModalLandQuery(forceRefresh = false) {
     retryBtn.classList.add('hidden');
   } else {
     statusEl.innerHTML = `
-      <div class="rounded-xl bg-[#EFECE7] border border-[#CFC5BA] p-3 flex items-start gap-2 text-[#5E5248]">
-        <i data-lucide="wifi-off" class="w-4 h-4 text-[#A65D57] shrink-0 mt-0.5"></i>
+      <div class="rounded-xl bg-[#EFECE7] dark:bg-[#29231E] border border-[#CFC5BA] dark:border-[#493E35] p-3 flex items-start gap-2 text-[#5E5248] dark:text-[#D5C6B8]">
+        <i data-lucide="wifi-off" class="w-4 h-4 text-[#A65D57] dark:text-[#E89B94] shrink-0 mt-0.5"></i>
         <div class="leading-relaxed">
           <div class="font-extrabold">無法連線取得路線</div>
-          <div class="text-xs text-[#7D6E62] mt-0.5">路網查詢服務暫時無法連線，不會顯示推測時間或橫越街區線條；請稍後重試或使用 Google Maps 查詢。</div>
+          <div class="text-xs text-[#7D6E62] dark:text-[#A99A8C] mt-0.5">路網查詢服務暫時無法連線，不會顯示推測時間或橫越街區線條；請稍後重試或使用 Google Maps 查詢。</div>
         </div>
       </div>
     `;
@@ -816,7 +816,7 @@ function renderTransportModalControls() {
     .map((m) => {
       const active = ctx.selectedMode === m.id;
       return `
-        <button type="button" data-mode="${escapeHTML(m.id)}" class="btn-pick-mode flex flex-col items-center justify-center py-2.5 px-1 rounded-2xl border-2 transition ${active ? 'border-owl-primary bg-owl-softBg text-owl-primaryDeep shadow-xs' : 'border-owl-cardBorder bg-white text-owl-subtext hover:border-owl-accentBorder'}">
+        <button type="button" data-mode="${escapeHTML(m.id)}" class="btn-pick-mode flex flex-col items-center justify-center py-2.5 px-1 rounded-2xl border-2 transition ${active ? 'border-owl-primary bg-owl-softBg text-owl-primaryDeep shadow-xs' : 'border-owl-cardBorder bg-white dark:bg-owl-panel text-owl-subtext hover:border-owl-accentBorder'}">
           <span class="text-2xl leading-none">${escapeHTML(m.emoji)}</span>
           <span class="text-xs font-bold mt-1.5">${escapeHTML(m.label)}</span>
         </button>

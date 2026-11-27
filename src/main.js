@@ -27,6 +27,7 @@ import {
   showBasemapPoiPopover,
   hideBasemapPoiPopover,
   showUserLocationMarker,
+  applyMapTheme,
 } from './map/mapInit.js';
 import { isPinRepositioning, renderDayPinsOnMap, wasPinRecentlyDragged } from './map/pinRenderer.js';
 import { drawRouteSegmentOnMap } from './map/routeRenderer.js';
@@ -46,6 +47,7 @@ import {
   hasOpenMobileOverlay,
   getMobileFitBoundsOptions,
 } from './ui/mobileNav.js';
+import { initTheme } from './ui/theme.js';
 import { openCustomDialog, showToast } from './ui/dialog.js';
 import { bindGlobalImageFallback, refreshIcons, sanitizeHexColor, uid } from './utils/format.js';
 
@@ -919,6 +921,12 @@ async function boot() {
     }
 
     bindGlobalEvents();
+    initTheme({
+      onChange: (dark) => {
+        applyMapTheme(dark);
+        renderMapLayers();
+      },
+    });
     syncDesktopSidebarCollapseUI();
     updateMapHeaderUI();
     renderLeft();

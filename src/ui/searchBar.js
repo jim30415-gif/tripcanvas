@@ -35,7 +35,7 @@ function renderResultRowHTML(item, idx, isSelected) {
   const countryBadge = countryLabel
     ? `<span class="px-1.5 py-0.5 rounded-md text-[11px] font-bold whitespace-nowrap shrink-0 ${
         item.inTripCountry
-          ? 'bg-[#EBF2EC] text-[#3F6347] border border-[#C7DCCB]'
+          ? 'bg-[#EBF2EC] dark:bg-[#1D2D22] text-[#3F6347] dark:text-[#9FD0AB] border border-[#C7DCCB] dark:border-[#32523C]'
           : 'bg-owl-canvas text-owl-subtext border border-owl-border/80'
       }">${escapeHTML(countryLabel)}</span>`
     : '';
@@ -163,7 +163,7 @@ export function bindSearchBarEvents({ onAddPinAtCoordinate }) {
     const primaryMeta = primaryCode ? getCountryDisplayMeta(primaryCode) : null;
 
     const tripCountryPill = primaryMeta?.nameZh
-      ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#EBF2EC] border border-[#C7DCCB] text-[#3F6347] font-bold whitespace-nowrap">${primaryMeta.flag} 優先顯示${escapeHTML(primaryMeta.nameZh)}</span>`
+      ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#EBF2EC] dark:bg-[#1D2D22] border border-[#C7DCCB] dark:border-[#32523C] text-[#3F6347] dark:text-[#9FD0AB] font-bold whitespace-nowrap">${primaryMeta.flag} 優先顯示${escapeHTML(primaryMeta.nameZh)}</span>`
       : '';
     const convertedPill = currentMeta.convertedHint
       ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-owl-softBg border border-owl-accentBorder/70 text-owl-primaryDeep font-bold whitespace-nowrap">通配「${escapeHTML(currentMeta.convertedHint)}」</span>`
@@ -196,7 +196,7 @@ export function bindSearchBarEvents({ onAddPinAtCoordinate }) {
       visualOrderIndices = [...inCountryItems.map((x) => x.idx), ...otherCountryItems.map((x) => x.idx)];
       const tripLabel = primaryMeta?.nameZh ? `${primaryMeta.flag} 本計畫區域（${primaryMeta.nameZh}）` : '本計畫區域相符景點';
       bodyHtml += `
-        <div class="px-3.5 py-1.5 bg-[#F4EFE6] border-b border-owl-border/60 text-xs font-extrabold text-owl-primaryDeep flex items-center justify-between">
+        <div class="px-3.5 py-1.5 bg-owl-softBg/85 border-b border-owl-border/60 text-xs font-extrabold text-owl-primaryDeep flex items-center justify-between">
           <span>${escapeHTML(tripLabel)}</span>
           <span class="text-[11px] font-semibold text-owl-muted">${inCountryItems.length} 筆</span>
         </div>
@@ -277,7 +277,7 @@ export function bindSearchBarEvents({ onAddPinAtCoordinate }) {
     } catch (err) {
       if (err?.name === 'AbortError' || seq !== requestSeq) return;
       if (!isLive || resultsEl.querySelector('.search-loading-state')) {
-        resultsEl.innerHTML = `<div class="p-4 text-sm text-[#A65D57] text-center">搜尋服務暫時無法連線，您可直接右鍵或長按地圖任意位置新增標點</div>`;
+        resultsEl.innerHTML = `<div class="p-4 text-sm text-[#A65D57] dark:text-[#E89B94] text-center">搜尋服務暫時無法連線，您可直接右鍵或長按地圖任意位置新增標點</div>`;
         resultsEl.classList.remove('hidden');
       }
     }

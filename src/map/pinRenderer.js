@@ -21,29 +21,29 @@ function buildPinMarkerHtml(pin, idx, rawColor) {
   return hasImg
     ? `
       <div class="pin-marker-wrap select-none flex flex-col items-center cursor-pointer" style="transform: translate(-50%, -88%);">
-        <span class="pin-drag-hint hidden mb-1 px-2.5 py-0.5 rounded-full bg-[#4A382B]/95 text-[#FAF4EC] text-[11px] font-bold shadow-md whitespace-nowrap">拖曳調整位置</span>
-        <div class="pin-bubble-frame relative p-1 rounded-2xl bg-[#FFFDF9] shadow-float" style="border: 3px solid ${color};">
-          <div class="w-12 h-12 rounded-xl overflow-hidden bg-[#F5EFE6]">
+        <span class="pin-drag-hint hidden mb-1 px-2.5 py-0.5 rounded-full bg-owl-darkTop/95 text-owl-cream text-[11px] font-bold shadow-md whitespace-nowrap">拖曳調整位置</span>
+        <div class="pin-bubble-frame relative p-1 rounded-2xl bg-owl-card shadow-float" style="border: 3px solid ${color};">
+          <div class="w-12 h-12 rounded-xl overflow-hidden bg-owl-canvas">
             ${renderImageContent(pin.image, 'w-full h-full')}
           </div>
-          <span class="absolute -top-2.5 -left-2.5 w-6 h-6 rounded-full text-white text-xs font-extrabold flex items-center justify-center shadow-md ring-2 ring-[#FFFDF9]" style="background:${color};">
+          <span class="absolute -top-2.5 -left-2.5 w-6 h-6 rounded-full text-white text-xs font-extrabold flex items-center justify-center shadow-md ring-2 ring-owl-card" style="background:${color};">
             ${idx + 1}
           </span>
         </div>
         <div class="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[7px] -mt-[1px]" style="border-top-color:${color};"></div>
-        <div class="mt-0.5 px-2.5 py-0.5 rounded-lg bg-[#FBF8F3]/95 backdrop-blur-xs border border-[#E2D6C5] shadow-sm text-xs font-extrabold text-[#3A2C21] whitespace-nowrap max-w-[165px] truncate">
+        <div class="mt-0.5 px-2.5 py-0.5 rounded-lg bg-owl-panel/95 backdrop-blur-xs border border-owl-border shadow-sm text-xs font-extrabold text-owl-text whitespace-nowrap max-w-[165px] truncate">
           ${escapeHTML(pin.name)}
         </div>
       </div>
     `
     : `
       <div class="pin-marker-wrap select-none flex flex-col items-center cursor-pointer" style="transform: translate(-50%, -88%);">
-        <span class="pin-drag-hint hidden mb-1 px-2.5 py-0.5 rounded-full bg-[#4A382B]/95 text-[#FAF4EC] text-[11px] font-bold shadow-md whitespace-nowrap">拖曳調整位置</span>
-        <div class="pin-bubble-frame relative w-9 h-9 rounded-full text-white text-xs font-extrabold flex items-center justify-center shadow-float" style="background:${color}; border: 2.5px solid #FFFDF9;">
+        <span class="pin-drag-hint hidden mb-1 px-2.5 py-0.5 rounded-full bg-owl-darkTop/95 text-owl-cream text-[11px] font-bold shadow-md whitespace-nowrap">拖曳調整位置</span>
+        <div class="pin-bubble-frame relative w-9 h-9 rounded-full text-white text-xs font-extrabold flex items-center justify-center shadow-float ring-[2.5px] ring-owl-card" style="background:${color};">
           ${idx + 1}
         </div>
-        <div class="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[8px] -mt-[2px]" style="border-top-color:${color};"></div>
-        <div class="mt-0.5 px-2.5 py-0.5 rounded-lg bg-[#FBF8F3]/95 backdrop-blur-xs border border-[#E2D6C5] shadow-sm text-xs font-extrabold text-[#3A2C21] whitespace-nowrap max-w-[165px] truncate">
+        <div class="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[8px] -mt-[1px]" style="border-top-color:${color};"></div>
+        <div class="mt-0.5 px-2.5 py-0.5 rounded-lg bg-owl-panel/95 backdrop-blur-xs border border-owl-border shadow-sm text-xs font-extrabold text-owl-text whitespace-nowrap max-w-[165px] truncate">
           ${escapeHTML(pin.name)}
         </div>
       </div>

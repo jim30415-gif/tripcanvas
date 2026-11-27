@@ -206,10 +206,10 @@ export function renderRightPanel({ onStateChanged, onVisibilityChanged, getFitBo
             <button type="button" data-rename-day-id="${safeDayId}" title="重新命名" aria-label="重新命名 ${escapeHTML(day.name)}" class="btn-rename-day w-7 h-7 rounded-lg text-owl-muted hover:text-owl-primaryDeep hover:bg-owl-softBg flex items-center justify-center transition">
               <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
             </button>
-            <button type="button" data-delete-day-id="${safeDayId}" title="刪除此天數" aria-label="刪除 ${escapeHTML(day.name)}" class="btn-delete-day w-7 h-7 rounded-lg text-owl-muted hover:text-[#A65D57] hover:bg-[#F9EDEC] flex items-center justify-center transition">
+            <button type="button" data-delete-day-id="${safeDayId}" title="刪除此天數" aria-label="刪除 ${escapeHTML(day.name)}" class="btn-delete-day w-7 h-7 rounded-lg text-owl-muted hover:text-[#A65D57] dark:hover:text-[#E89B94] hover:bg-[#F9EDEC] dark:hover:bg-[#35201F] flex items-center justify-center transition">
               <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
             </button>
-            <button type="button" data-eye-day-id="${safeDayId}" title="${day.visible ? '隱藏此天數地圖顯示' : '開啟此天數地圖顯示'}" aria-label="${day.visible ? `隱藏 ${escapeHTML(day.name)}` : `顯示 ${escapeHTML(day.name)}`}" aria-pressed="${day.visible}" class="btn-toggle-eye w-8 h-8 rounded-lg flex items-center justify-center ml-0.5 transition ${day.visible ? 'bg-owl-softBg text-owl-primaryDeep hover:bg-[#E5D7C5]' : 'bg-owl-border/60 text-owl-muted hover:bg-owl-border'}">
+            <button type="button" data-eye-day-id="${safeDayId}" title="${day.visible ? '隱藏此天數地圖顯示' : '開啟此天數地圖顯示'}" aria-label="${day.visible ? `隱藏 ${escapeHTML(day.name)}` : `顯示 ${escapeHTML(day.name)}`}" aria-pressed="${day.visible}" class="btn-toggle-eye w-8 h-8 rounded-lg flex items-center justify-center ml-0.5 transition ${day.visible ? 'bg-owl-softBg text-owl-primaryDeep hover:bg-owl-border/80' : 'bg-owl-border/60 text-owl-muted hover:bg-owl-border'}">
               <i data-lucide="${day.visible ? 'eye' : 'eye-off'}" class="w-4 h-4"></i>
             </button>
           </div>

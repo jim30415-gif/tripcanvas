@@ -347,6 +347,100 @@ export function createGoogleOverlayGroup(googleMap) {
 }
 
 /**
+ * 暖深焙咖啡夜間 Google Maps 底圖配色（無紫調、低眩光，突顯行程路線與標點氣泡，且完全免費零額外 API 呼叫）
+ */
+export const GOOGLE_MAP_NIGHT_STYLES = [
+  { elementType: 'geometry', stylers: [{ color: '#1F1B18' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#181411' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#D4C6B7' }] },
+  {
+    featureType: 'administrative.locality',
+    elementType: 'labels.text.fill',
+    stylers: [{ color: '#EDE2D5' }],
+  },
+  {
+    featureType: 'administrative.neighborhood',
+    elementType: 'labels.text.fill',
+    stylers: [{ color: '#C9B9A8' }],
+  },
+  {
+    featureType: 'poi',
+    elementType: 'labels.text.fill',
+    stylers: [{ color: '#C5B6A5' }],
+  },
+  {
+    featureType: 'poi.park',
+    elementType: 'geometry',
+    stylers: [{ color: '#1B2620' }],
+  },
+  {
+    featureType: 'poi.park',
+    elementType: 'labels.text.fill',
+    stylers: [{ color: '#8BB095' }],
+  },
+  {
+    featureType: 'road',
+    elementType: 'geometry',
+    stylers: [{ color: '#2D2722' }],
+  },
+  {
+    featureType: 'road',
+    elementType: 'geometry.stroke',
+    stylers: [{ color: '#1C1814' }],
+  },
+  {
+    featureType: 'road',
+    elementType: 'labels.text.fill',
+    stylers: [{ color: '#BFAEA0' }],
+  },
+  {
+    featureType: 'road.arterial',
+    elementType: 'geometry',
+    stylers: [{ color: '#372F28' }],
+  },
+  {
+    featureType: 'road.highway',
+    elementType: 'geometry',
+    stylers: [{ color: '#493B2F' }],
+  },
+  {
+    featureType: 'road.highway',
+    elementType: 'geometry.stroke',
+    stylers: [{ color: '#241D17' }],
+  },
+  {
+    featureType: 'road.highway',
+    elementType: 'labels.text.fill',
+    stylers: [{ color: '#E5C59E' }],
+  },
+  {
+    featureType: 'transit',
+    elementType: 'geometry',
+    stylers: [{ color: '#273038' }],
+  },
+  {
+    featureType: 'transit.station',
+    elementType: 'labels.text.fill',
+    stylers: [{ color: '#9AC0DB' }],
+  },
+  {
+    featureType: 'water',
+    elementType: 'geometry',
+    stylers: [{ color: '#141D26' }],
+  },
+  {
+    featureType: 'water',
+    elementType: 'labels.text.fill',
+    stylers: [{ color: '#6E8BA3' }],
+  },
+  {
+    featureType: 'water',
+    elementType: 'labels.text.stroke',
+    stylers: [{ color: '#10171F' }],
+  },
+];
+
+/**
  * 在 Google 底圖原生地標圖示上方顯示精巧浮動確認卡（「點畫面上看得到的點 → 一鍵加入」）
  */
 export function mountBasemapPoiCard(
@@ -358,41 +452,41 @@ export function mountBasemapPoiCard(
       class="basemap-poi-card pointer-events-auto select-none"
       style="transform: translate(-50%, calc(-100% - 14px));"
     >
-      <div class="min-w-[210px] max-w-[270px] rounded-2xl bg-[#FBF8F3]/95 backdrop-blur-md border border-[#D8C7B4] shadow-2xl p-3 text-[#3A2C21]">
+      <div class="min-w-[210px] max-w-[270px] rounded-2xl bg-owl-panel/95 backdrop-blur-md border border-owl-border shadow-2xl p-3 text-owl-text">
         <div class="flex items-start justify-between gap-2">
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-1.5 mb-1">
-              <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-[#EBF2EC] text-[#4F6F57] text-[10px] font-extrabold tracking-wide">
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-[#EBF2EC] dark:bg-[#1D2D22] text-[#4F6F57] dark:text-[#9FD0AB] text-[10px] font-extrabold tracking-wide">
                 Google 底圖標點
               </span>
               ${
                 categoryLabel
-                  ? `<span class="text-[10px] font-semibold text-[#8C7664] truncate">${escapeHTML(categoryLabel)}</span>`
+                  ? `<span class="text-[10px] font-semibold text-owl-muted truncate">${escapeHTML(categoryLabel)}</span>`
                   : ''
               }
             </div>
-            <div class="text-sm font-extrabold text-[#3A2C21] leading-snug break-words">
+            <div class="text-sm font-extrabold text-owl-text leading-snug break-words">
               ${loading ? '讀取底圖地標中…' : escapeHTML(name || 'Google 地圖地點')}
             </div>
             ${
               !loading && address
-                ? `<div class="text-[11px] text-[#786454] mt-0.5 line-clamp-2 leading-tight">${escapeHTML(address)}</div>`
+                ? `<div class="text-[11px] text-owl-subtext mt-0.5 line-clamp-2 leading-tight">${escapeHTML(address)}</div>`
                 : ''
             }
           </div>
           <button
             type="button"
-            class="btn-close-poi-card w-6 h-6 rounded-full hover:bg-[#EFE7DC] text-[#8C7664] hover:text-[#3A2C21] flex items-center justify-center shrink-0 text-sm font-bold transition"
+            class="btn-close-poi-card w-6 h-6 rounded-full hover:bg-owl-softBg text-owl-muted hover:text-owl-text flex items-center justify-center shrink-0 text-sm font-bold transition"
             aria-label="關閉"
           >×</button>
         </div>
         ${
           loading
-            ? `<div class="mt-2.5 h-8 rounded-xl bg-[#EFE7DC] animate-pulse"></div>`
+            ? `<div class="mt-2.5 h-8 rounded-xl bg-owl-softBg animate-pulse"></div>`
             : `
           <button
             type="button"
-            class="btn-add-basemap-poi mt-2.5 w-full py-2 px-3 rounded-xl bg-[#816448] hover:bg-[#6B513A] active:scale-[0.98] text-[#FAF4EC] text-xs font-extrabold shadow-sm transition flex items-center justify-center gap-1.5"
+            class="btn-add-basemap-poi mt-2.5 w-full py-2 px-3 rounded-xl bg-owl-primary hover:bg-owl-primaryHover active:scale-[0.98] text-white text-xs font-extrabold shadow-sm transition flex items-center justify-center gap-1.5"
           >
             <span>＋</span>
             <span>加入目前行程</span>
@@ -400,7 +494,7 @@ export function mountBasemapPoiCard(
         `
         }
       </div>
-      <div class="w-0 h-0 mx-auto border-l-[7px] border-l-transparent border-r-[7px] border-r-transparent border-t-[8px] border-t-[#FBF8F3] drop-shadow-sm"></div>
+      <div class="w-0 h-0 mx-auto border-l-[7px] border-l-transparent border-r-[7px] border-r-transparent border-t-[8px] border-t-owl-panel drop-shadow-sm"></div>
     </div>
   `;
 

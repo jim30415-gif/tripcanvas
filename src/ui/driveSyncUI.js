@@ -53,25 +53,25 @@ function renderHeaderSyncButton(state) {
     const timeStr = formatSyncTime(state.lastSyncedAt);
     const email = state.user?.email ? `${state.user.email} · ` : '';
     title = `${email}已自動同步至 Google 雲端硬碟${timeStr ? `（${timeStr}）` : ''}，點擊查看或立即同步`;
-    classes += 'text-[#3F6347] bg-[#EBF3EC] hover:bg-[#DFECE1] border-[#BFD4C3]';
+    classes += 'text-[#3F6347] dark:text-[#9FD0AB] bg-[#EBF3EC] dark:bg-[#1D2D22] hover:bg-[#DFECE1] dark:hover:bg-[#263C2D] border-[#BFD4C3] dark:border-[#32523C]';
     dotClass = 'md:hidden absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-[#4F7D59] border-2 border-owl-panel';
   } else if (state.authenticated && state.status === 'pending') {
     icon = 'cloud-upload';
     label = '待同步';
     title = '已儲存至本機，即將自動上傳至 Google 雲端硬碟…';
-    classes += 'text-[#8C6226] bg-[#FBF4E5] border-[#E7D4A9]';
+    classes += 'text-[#8C6226] dark:text-[#E8C589] bg-[#FBF4E5] dark:bg-[#33281A] border-[#E7D4A9] dark:border-[#5D482A]';
     dotClass = 'md:hidden absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-[#C48F3B] border-2 border-owl-panel';
   } else if (state.authenticated && (state.status === 'error' || state.status === 'offline')) {
     icon = 'cloud-off';
     label = state.status === 'offline' ? '離線本機' : '重試同步';
     title = state.lastError || '雲端同步暫時異常，行程已安全保存於本機，點擊重試';
-    classes += 'text-[#9B534B] bg-[#F9EDEC] hover:bg-[#F3E1DF] border-[#E3BDB8]';
+    classes += 'text-[#9B534B] dark:text-[#E89B94] bg-[#F9EDEC] dark:bg-[#35201F] hover:bg-[#F3E1DF] dark:hover:bg-[#442927] border-[#E3BDB8] dark:border-[#613835]';
     dotClass = 'md:hidden absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-[#A65D57] border-2 border-owl-panel';
   } else if (state.status === 'auth_expired') {
     icon = 'log-in';
     label = '重新登入';
     title = state.lastError || 'Google 雲端授權已過期，點擊重新登入（本機資料皆保留）';
-    classes += 'text-[#9B534B] bg-[#F9EDEC] hover:bg-[#F3E1DF] border-[#E3BDB8]';
+    classes += 'text-[#9B534B] dark:text-[#E89B94] bg-[#F9EDEC] dark:bg-[#35201F] hover:bg-[#F3E1DF] dark:hover:bg-[#442927] border-[#E3BDB8] dark:border-[#613835]';
     dotClass = 'md:hidden absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-[#A65D57] border-2 border-owl-panel';
   } else {
     icon = 'cloud';
@@ -134,7 +134,7 @@ function renderDrawerDriveCard(state) {
   if (!state.authenticated) {
     const expiredNote =
       state.status === 'auth_expired'
-        ? `<div class="text-xs font-semibold text-[#9B534B] bg-[#F9EDEC] border border-[#E3BDB8] rounded-xl px-2.5 py-2">${escapeHTML(
+        ? `<div class="text-xs font-semibold text-[#9B534B] dark:text-[#E89B94] bg-[#F9EDEC] dark:bg-[#35201F] border border-[#E3BDB8] dark:border-[#613835] rounded-xl px-2.5 py-2">${escapeHTML(
             state.lastError || 'Google 登入授權已過期，請重新登入以恢復雲端同步。'
           )}</div>`
         : '';
@@ -176,15 +176,15 @@ function renderDrawerDriveCard(state) {
   const initial = (userName || userEmail || 'G').slice(0, 1).toUpperCase();
   const timeStr = formatSyncTime(state.lastSyncedAt);
 
-  let statusPill = `<span class="inline-flex items-center gap-1 text-xs font-bold text-[#3F6347] bg-[#EBF3EC] border border-[#BFD4C3] px-2 py-0.5 rounded-full"><i data-lucide="check" class="w-3 h-3"></i>已同步${timeStr ? ` ${timeStr}` : ''}</span>`;
+  let statusPill = `<span class="inline-flex items-center gap-1 text-xs font-bold text-[#3F6347] dark:text-[#9FD0AB] bg-[#EBF3EC] dark:bg-[#1D2D22] border border-[#BFD4C3] dark:border-[#32523C] px-2 py-0.5 rounded-full"><i data-lucide="check" class="w-3 h-3"></i>已同步${timeStr ? ` ${timeStr}` : ''}</span>`;
   if (state.status === 'syncing') {
     statusPill =
       '<span class="inline-flex items-center gap-1 text-xs font-bold text-owl-primaryDeep bg-owl-softBg border border-owl-accentBorder px-2 py-0.5 rounded-full"><i data-lucide="loader-2" class="w-3 h-3 animate-spin"></i>同步中…</span>';
   } else if (state.status === 'pending') {
     statusPill =
-      '<span class="inline-flex items-center gap-1 text-xs font-bold text-[#8C6226] bg-[#FBF4E5] border border-[#E7D4A9] px-2 py-0.5 rounded-full">即將自動上傳…</span>';
+      '<span class="inline-flex items-center gap-1 text-xs font-bold text-[#8C6226] dark:text-[#E8C589] bg-[#FBF4E5] dark:bg-[#33281A] border border-[#E7D4A9] dark:border-[#5D482A] px-2 py-0.5 rounded-full">即將自動上傳…</span>';
   } else if (state.status === 'error' || state.status === 'offline') {
-    statusPill = `<span class="inline-flex items-center gap-1 text-xs font-bold text-[#9B534B] bg-[#F9EDEC] border border-[#E3BDB8] px-2 py-0.5 rounded-full">${
+    statusPill = `<span class="inline-flex items-center gap-1 text-xs font-bold text-[#9B534B] dark:text-[#E89B94] bg-[#F9EDEC] dark:bg-[#35201F] border border-[#E3BDB8] dark:border-[#613835] px-2 py-0.5 rounded-full">${
       state.status === 'offline' ? '離線暫存本機' : '同步待重試'
     }</span>`;
   }
@@ -197,7 +197,7 @@ function renderDrawerDriveCard(state) {
       )}</span>`;
 
   container.innerHTML = `
-    <div class="rounded-2xl border border-[#BFD4C3] bg-owl-card p-3.5 space-y-2.5 shadow-2xs">
+    <div class="rounded-2xl border border-[#BFD4C3] dark:border-[#32523C] bg-owl-card p-3.5 space-y-2.5 shadow-2xs">
       <div class="flex items-center gap-2.5 min-w-0">
         ${avatarHtml}
         <div class="min-w-0 flex-1">
@@ -216,7 +216,7 @@ function renderDrawerDriveCard(state) {
 
       ${
         state.lastError
-          ? `<div class="text-xs font-semibold text-[#9B534B] leading-relaxed">${escapeHTML(state.lastError)}</div>`
+          ? `<div class="text-xs font-semibold text-[#9B534B] dark:text-[#E89B94] leading-relaxed">${escapeHTML(state.lastError)}</div>`
           : ''
       }
 
@@ -232,7 +232,7 @@ function renderDrawerDriveCard(state) {
         <button
           id="btn-drawer-drive-logout"
           type="button"
-          class="py-2 px-3 rounded-xl bg-white hover:bg-[#F9EDEC] border border-owl-border hover:border-[#E3BDB8] text-xs font-bold text-owl-subtext hover:text-[#9B534B] flex items-center justify-center gap-1.5 transition active:scale-95"
+          class="py-2 px-3 rounded-xl bg-white dark:bg-owl-panel hover:bg-[#F9EDEC] dark:hover:bg-[#35201F] border border-owl-border hover:border-[#E3BDB8] dark:hover:border-[#613835] text-xs font-bold text-owl-subtext hover:text-[#9B534B] dark:hover:text-[#E89B94] flex items-center justify-center gap-1.5 transition active:scale-95"
         >
           <i data-lucide="log-out" class="w-3.5 h-3.5"></i>
           <span>登出</span>

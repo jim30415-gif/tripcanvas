@@ -34,7 +34,7 @@ function getSpecChipLabel(spec) {
 function getMapProviderNote(provider) {
   if (provider === 'google') {
     return {
-      tone: 'text-[#3E5C45] bg-[#EBF2EC] border-[#C2D8C7]',
+      tone: 'text-[#3E5C45] dark:text-[#9FD0AB] bg-[#EBF2EC] dark:bg-[#1D2D22] border-[#C2D8C7] dark:border-[#32523C]',
       text: `✓ Google Maps 高清實景底圖 · 統一標準 A4 (${A4_WIDTH}×${A4_HEIGHT} px · 150 DPI)`,
     };
   }
@@ -57,7 +57,7 @@ function getMapProviderNote(provider) {
     };
   }
   return {
-    tone: 'text-[#8C5B2B] bg-[#FDF6EB] border-[#E7D4B6]',
+    tone: 'text-[#8C5B2B] dark:text-[#E8C589] bg-[#FDF6EB] dark:bg-[#33281A] border-[#E7D4B6] dark:border-[#5D482A]',
     text: `離線紙感網格底圖 · 統一標準 A4 (${A4_WIDTH}×${A4_HEIGHT} px · 150 DPI)`,
   };
 }
@@ -148,7 +148,7 @@ function renderPageChips() {
           : `<span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${sanitizeHexColor(spec.day?.color, '#9A7B5C')};"></span>`;
       const cls = active
         ? 'bg-owl-darkTop text-owl-cream border-owl-darkTop shadow-xs'
-        : 'bg-white text-owl-subtext border-owl-border hover:bg-owl-softBg hover:text-owl-text';
+        : 'bg-white dark:bg-owl-card text-owl-subtext border-owl-border hover:bg-owl-softBg hover:text-owl-text';
       return `<button type="button" data-export-page-idx="${idx}" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-bold transition whitespace-nowrap ${cls}">${dotHtml}<span>${label}</span></button>`;
     })
     .join('');
@@ -209,7 +209,7 @@ async function renderSelectedPreview() {
   } catch (err) {
     console.warn('[TripCanvas] A4 preview render error:', err);
     if (exportModalContext && exportModalContext.renderSeq === seq && noteEl) {
-      noteEl.className = 'inline-flex items-center justify-center text-xs font-bold px-3 py-1 rounded-full border text-[#A65D57] bg-[#F9EDEC] border-[#E5C5C2]';
+      noteEl.className = 'inline-flex items-center justify-center text-xs font-bold px-3 py-1 rounded-full border text-[#A65D57] dark:text-[#E89B94] bg-[#F9EDEC] dark:bg-[#35201F] border-[#E5C5C2] dark:border-[#613835]';
       noteEl.textContent = '預覽產生時發生錯誤，請重新點選頁面再試';
     }
   } finally {

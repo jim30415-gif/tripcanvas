@@ -82,7 +82,7 @@ export function renderTripsDrawer() {
               <button type="button" data-dup-trip-id="${safeTripId}" title="複製此計畫" aria-label="複製 ${escapeHTML(trip.name)}" class="btn-dup-trip w-7 h-7 rounded-lg text-owl-muted hover:text-owl-primaryDeep hover:bg-owl-softBg flex items-center justify-center transition">
                 <i data-lucide="copy" class="w-3.5 h-3.5"></i>
               </button>
-              <button type="button" data-del-trip-id="${safeTripId}" title="刪除此計畫" aria-label="刪除 ${escapeHTML(trip.name)}" class="btn-del-trip w-7 h-7 rounded-lg text-owl-muted hover:text-[#A65D57] hover:bg-[#F9EDEC] flex items-center justify-center transition">
+              <button type="button" data-del-trip-id="${safeTripId}" title="刪除此計畫" aria-label="刪除 ${escapeHTML(trip.name)}" class="btn-del-trip w-7 h-7 rounded-lg text-owl-muted hover:text-[#A65D57] dark:hover:text-[#E89B94] hover:bg-[#F9EDEC] dark:hover:bg-[#35201F] flex items-center justify-center transition">
                 <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
               </button>
             </div>
