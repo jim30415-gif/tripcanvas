@@ -275,15 +275,14 @@ test('nightSky computes bounded shooting star trajectories for desktop and mobil
   assert.ok(mobileLeftToRight.distancePx >= 165 && mobileLeftToRight.distancePx <= 250);
 });
 
-test('spawnShootingStar respects dark mode, reduced motion, and uses composite-only WAAPI keyframes without scale(0)', async () => {
-  const { spawnShootingStar, clearActiveShootingStar } = await import('../src/ui/nightSky.js');
+test('spawnShootingStar respects dark mode, reduced motion, and uses decoupled composite-only WAAPI tracks without velocity kinks or scale(0)', async () => {
+  const { spawnShootingStar, clearActiveShootingStar, SHOOTING_STAR_CONFIG } = await import('../src/ui/nightSky.js');
 
   const origDoc = globalThis.document;
   const origWin = globalThis.window;
 
   let reducedMotion = false;
-  let capturedKeyframes = null;
-  let capturedOptions = null;
+  const capturedCalls = [];
   let cancelledCount = 0;
 
   const createDomNode = (tag) => {
@@ -304,8 +303,7 @@ test('spawnShootingStar respects dark mode, reduced motion, and uses composite-o
         return { width: 1280, height: 720 };
       },
       animate(keyframes, options) {
-        capturedKeyframes = keyframes;
-        capturedOptions = options;
+        capturedCalls.push({ className: this.className, keyframes, options });
         return {
           onfinish: null,
           oncancel: null,
@@ -341,23 +339,36 @@ test('spawnShootingStar respects dark mode, reduced motion, and uses composite-o
     assert.equal(spawnShootingStar(), false);
     assert.equal(layer.children.length, 0);
 
-    // 切換深色模式後可發射流星，且僅動畫化 transform / opacity（不用 scale(0)）
+    // 切換深色模式後發射流星：位移(2關鍵幀連續曲線)、透明度、尾跡伸縮三軌獨立，僅使用 GPU 合成屬性且不用 scale(0)
     htmlEl.classList.add('dark');
     assert.equal(spawnShootingStar({ rng: () => 0.4 }), true);
     assert.equal(layer.children.length, 1);
-    assert.ok(Array.isArray(capturedKeyframes) && capturedKeyframes.length === 4);
-    for (const frame of capturedKeyframes) {
-      const propKeys = Object.keys(frame).filter((k) => k !== 'offset' && k !== 'easing');
-      assert.deepEqual(propKeys.sort(), ['opacity', 'transform']);
-      assert.equal(frame.transform.includes('scaleX(0)'), false);
-      assert.equal(frame.transform.includes('scale(0)'), false);
-    }
-    assert.equal(capturedKeyframes[0].easing, 'cubic-bezier(0.23, 1, 0.32, 1)');
-    assert.equal(capturedOptions.easing, 'linear');
+    assert.equal(capturedCalls.length, 3);
 
-    // 清除進行中流星
+    const [moveCall, opacityCall, tailCall] = capturedCalls;
+    assert.equal(moveCall.className, 'shooting-star-mover');
+    assert.equal(moveCall.keyframes.length, 2);
+    assert.equal(moveCall.options.easing, SHOOTING_STAR_CONFIG.easing);
+
+    assert.equal(opacityCall.className, 'shooting-star-mover');
+    assert.equal(tailCall.className, 'shooting-star-tail');
+
+    for (const call of capturedCalls) {
+      for (const frame of call.keyframes) {
+        const propKeys = Object.keys(frame).filter((k) => k !== 'offset' && k !== 'easing');
+        for (const prop of propKeys) {
+          assert.ok(prop === 'transform' || prop === 'opacity', `non-composited property: ${prop}`);
+        }
+        if (typeof frame.transform === 'string') {
+          assert.equal(frame.transform.includes('scaleX(0)'), false);
+          assert.equal(frame.transform.includes('scale(0)'), false);
+        }
+      }
+    }
+
+    // 清除進行中流星：三條 WAAPI 軌道皆取消且 DOM 移除
     clearActiveShootingStar();
-    assert.equal(cancelledCount, 1);
+    assert.equal(cancelledCount, 3);
     assert.equal(layer.children[0].removed, true);
 
     // 開啟減少動態偏好時完全停用

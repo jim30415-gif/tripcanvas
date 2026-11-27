@@ -7,9 +7,9 @@ export const SHOOTING_STAR_CONFIG = Object.freeze({
   checkIntervalMaxMs: 42000,
   triggerProbability: 0.24,
   minCooldownMs: 55000,
-  durationMinMs: 880,
-  durationMaxMs: 1220,
-  easing: 'cubic-bezier(0.23, 1, 0.32, 1)',
+  durationMinMs: 760,
+  durationMaxMs: 1040,
+  easing: 'cubic-bezier(0.2, 0.45, 0.55, 0.88)',
 });
 
 let schedulerTimer = null;
@@ -129,14 +129,22 @@ export function spawnShootingStar({ container = null, force = false, rng = Math.
   track.className = 'shooting-star-track';
   track.style.transform = `translate3d(${geo.startX}px, ${geo.startY}px, 0) rotate(${geo.angleDeg}deg)`;
 
-  const streak = document.createElement('span');
-  streak.className = 'shooting-star-streak';
-  streak.style.width = `${geo.tailLengthPx}px`;
+  const mover = document.createElement('div');
+  mover.className = 'shooting-star-mover';
+  mover.style.width = `${geo.tailLengthPx}px`;
 
-  track.appendChild(streak);
+  const tail = document.createElement('span');
+  tail.className = 'shooting-star-tail';
+
+  const head = document.createElement('span');
+  head.className = 'shooting-star-head';
+
+  mover.appendChild(tail);
+  mover.appendChild(head);
+  track.appendChild(mover);
   layer.appendChild(track);
 
-  let animation = null;
+  let animations = [];
   let fallbackTimer = null;
   let cleaned = false;
 
@@ -147,14 +155,14 @@ export function spawnShootingStar({ container = null, force = false, rng = Math.
       clearTimeout(fallbackTimer);
       fallbackTimer = null;
     }
-    if (animation) {
+    for (const anim of animations) {
       try {
-        animation.cancel();
+        anim.cancel();
       } catch {
         // ignore
       }
-      animation = null;
     }
+    animations = [];
     track.remove();
     if (markFinished) {
       lastMeteorEndedAt = Date.now();
@@ -167,32 +175,27 @@ export function spawnShootingStar({ container = null, force = false, rng = Math.
   const cancelCleanup = () => cleanup({ markFinished: false });
   activeMeteorCleanup = cancelCleanup;
 
-  if (typeof streak.animate === 'function') {
-    animation = streak.animate(
+  if (typeof mover.animate === 'function') {
+    // 1. 位移採單一雙關鍵幀連續曲線，速度全程 C∞ 滑順、絕無分段急煞頓挫
+    const moveAnim = mover.animate(
       [
-        {
-          opacity: 0,
-          transform: 'translate3d(0px, 0px, 0) scaleX(0.38)',
-          offset: 0,
-          easing: SHOOTING_STAR_CONFIG.easing,
-        },
-        {
-          opacity: geo.peakOpacity,
-          transform: `translate3d(${Math.round(geo.distancePx * 0.32)}px, 0px, 0) scaleX(1)`,
-          offset: 0.22,
-          easing: SHOOTING_STAR_CONFIG.easing,
-        },
-        {
-          opacity: Number((geo.peakOpacity * 0.78).toFixed(2)),
-          transform: `translate3d(${Math.round(geo.distancePx * 0.82)}px, 0px, 0) scaleX(0.88)`,
-          offset: 0.72,
-          easing: 'ease-out',
-        },
-        {
-          opacity: 0,
-          transform: `translate3d(${geo.distancePx}px, 0px, 0) scaleX(0.42)`,
-          offset: 1,
-        },
+        { transform: 'translate3d(0px, 0px, 0)' },
+        { transform: `translate3d(${geo.distancePx}px, 0px, 0)` },
+      ],
+      {
+        duration: geo.durationMs,
+        easing: SHOOTING_STAR_CONFIG.easing,
+        fill: 'forwards',
+      }
+    );
+
+    // 2. 亮度包絡與位移解耦，各自於合成執行緒獨立運行
+    const opacityAnim = mover.animate(
+      [
+        { opacity: 0, offset: 0, easing: 'ease-out' },
+        { opacity: geo.peakOpacity, offset: 0.16, easing: 'linear' },
+        { opacity: Number((geo.peakOpacity * 0.82).toFixed(2)), offset: 0.68, easing: 'ease-in' },
+        { opacity: 0, offset: 1 },
       ],
       {
         duration: geo.durationMs,
@@ -200,8 +203,28 @@ export function spawnShootingStar({ container = null, force = false, rng = Math.
         fill: 'forwards',
       }
     );
-    animation.onfinish = () => cleanup({ markFinished: true });
-    animation.oncancel = () => cleanup({ markFinished: false });
+
+    animations.push(moveAnim, opacityAnim);
+
+    // 3. 尾跡伸縮僅作用於 tail（不壓扁星頭），0.36 處 ease-out 接 ease-in 導數連續無拉扯
+    if (typeof tail.animate === 'function') {
+      const tailAnim = tail.animate(
+        [
+          { transform: 'scaleX(0.42)', offset: 0, easing: 'ease-out' },
+          { transform: 'scaleX(1)', offset: 0.36, easing: 'ease-in' },
+          { transform: 'scaleX(0.32)', offset: 1 },
+        ],
+        {
+          duration: geo.durationMs,
+          easing: 'linear',
+          fill: 'forwards',
+        }
+      );
+      animations.push(tailAnim);
+    }
+
+    moveAnim.onfinish = () => cleanup({ markFinished: true });
+    moveAnim.oncancel = () => cleanup({ markFinished: false });
   } else {
     fallbackTimer = setTimeout(() => cleanup({ markFinished: true }), geo.durationMs);
   }
