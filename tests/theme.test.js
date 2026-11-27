@@ -8,8 +8,10 @@ import {
   applyTheme,
   getCurrentTheme,
   getStoredTheme,
+  getSystemTheme,
   initTheme,
   isDarkTheme,
+  resolveInitialTheme,
   toggleTheme,
 } from '../src/ui/theme.js';
 import { GOOGLE_MAP_NIGHT_STYLES } from '../src/map/googleEngine.js';
@@ -76,7 +78,7 @@ function createMockElement(tagName = 'div') {
   };
 }
 
-function withMockDom(fn) {
+function withMockDom(fn, { systemDark = null } = {}) {
   const origDoc = globalThis.document;
   const origWin = globalThis.window;
 
@@ -90,7 +92,10 @@ function withMockDom(fn) {
   toggleBtn.setAttribute('id', 'btn-toggle-theme');
 
   const winListeners = new Map();
-  globalThis.window = {
+  let currentSystemDark = Boolean(systemDark);
+  const mqListeners = [];
+
+  const mockWin = {
     localStorage: {
       getItem: (k) => (store.has(k) ? store.get(k) : null),
       setItem: (k, v) => store.set(k, String(v)),
@@ -102,6 +107,18 @@ function withMockDom(fn) {
     },
   };
 
+  if (systemDark !== null) {
+    mockWin.matchMedia = () => ({
+      get matches() {
+        return currentSystemDark;
+      },
+      addEventListener(evt, handler) {
+        if (evt === 'change') mqListeners.push(handler);
+      },
+    });
+  }
+
+  globalThis.window = mockWin;
   globalThis.document = {
     documentElement: htmlEl,
     getElementById(id) {
@@ -114,20 +131,26 @@ function withMockDom(fn) {
     },
   };
 
+  const triggerSystemThemeChange = (nextDark) => {
+    currentSystemDark = Boolean(nextDark);
+    mqListeners.forEach((fn) => fn({ matches: currentSystemDark }));
+  };
+
   try {
-    return fn({ store, htmlEl, metaTheme, toggleBtn, winListeners });
+    return fn({ store, htmlEl, metaTheme, toggleBtn, winListeners, triggerSystemThemeChange });
   } finally {
     globalThis.document = origDoc;
     globalThis.window = origWin;
   }
 }
 
-test('theme toggle switches classes, theme-color, ARIA state, and persists to localStorage', () => {
+test('theme toggle switches classes, theme-color, ARIA state, and persists when matchMedia is absent', () => {
   withMockDom(({ store, htmlEl, metaTheme, toggleBtn }) => {
     const changes = [];
     const initial = initTheme({ onChange: (dark) => changes.push(dark) });
 
     assert.equal(initial, 'light');
+    assert.equal(getSystemTheme(), null);
     assert.equal(isDarkTheme(), false);
     assert.equal(getCurrentTheme(), 'light');
     assert.equal(htmlEl.getAttribute('data-theme'), 'light');
@@ -157,6 +180,49 @@ test('theme toggle switches classes, theme-color, ARIA state, and persists to lo
     assert.equal(toggleBtn.getAttribute('aria-pressed'), 'false');
     assert.deepEqual(changes, [true, false]);
   });
+});
+
+test('auto-enables dark mode when mobile/OS prefers-color-scheme is dark and follows live system changes', () => {
+  withMockDom(
+    ({ store, metaTheme, toggleBtn, triggerSystemThemeChange }) => {
+      const changes = [];
+      assert.equal(getSystemTheme(), 'dark');
+      assert.equal(resolveInitialTheme(), 'dark');
+
+      const initial = initTheme({ onChange: (dark) => changes.push(dark) });
+      assert.equal(initial, 'dark');
+      assert.equal(isDarkTheme(), true);
+      assert.equal(getStoredTheme(), null);
+      assert.equal(metaTheme.getAttribute('content'), DARK_THEME_COLOR);
+      assert.equal(toggleBtn.getAttribute('aria-pressed'), 'true');
+
+      // 手機自動切回淺色模式時，若無手動覆蓋應即時跟隨
+      triggerSystemThemeChange(false);
+      assert.equal(isDarkTheme(), false);
+      assert.deepEqual(changes, [false]);
+
+      // 手機日落自動切回深色模式時，即時跟隨
+      triggerSystemThemeChange(true);
+      assert.equal(isDarkTheme(), true);
+      assert.deepEqual(changes, [false, true]);
+
+      // 使用者在深色手機上手動切為淺色模式 -> 記住覆蓋，暫不跟隨系統
+      toggleTheme();
+      assert.equal(isDarkTheme(), false);
+      assert.equal(store.get(THEME_STORAGE_KEY), 'light');
+      triggerSystemThemeChange(false);
+      triggerSystemThemeChange(true);
+      assert.equal(isDarkTheme(), false);
+
+      // 使用者再手動切回與系統一致的深色模式 -> 清除覆蓋，恢復隨系統自動切換
+      toggleTheme();
+      assert.equal(isDarkTheme(), true);
+      assert.equal(getStoredTheme(), null);
+      triggerSystemThemeChange(false);
+      assert.equal(isDarkTheme(), false);
+    },
+    { systemDark: true }
+  );
 });
 
 test('applyTheme normalizes invalid values safely and tolerates unavailable localStorage', () => {
