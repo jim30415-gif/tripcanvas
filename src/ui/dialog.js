@@ -16,12 +16,12 @@ export function showToast(message, type = 'info', options = {}) {
 
   const el = document.createElement('div');
   const styles = {
-    info: 'bg-[#4A382B] text-[#FAF4EC]',
+    info: 'bg-[#4A382B] dark:bg-[#232B38] dark:border dark:border-[#39465A] text-[#FAF4EC] dark:text-[#EEF3FA]',
     success: 'bg-[#5D8065] text-white',
     warn: 'bg-[#B98232] text-white',
     error: 'bg-[#A65D57] text-white',
   };
-  el.className = `${styles[type] || styles.info} px-4 py-2.5 rounded-2xl shadow-float text-xs font-bold flex items-center gap-2.5 transition-all duration-300 opacity-0 translate-y-2 pointer-events-auto max-w-[90vw] text-center`;
+  el.className = `${styles[type] || styles.info} px-4 py-2.5 rounded-2xl shadow-float text-xs font-bold flex items-center gap-2.5 transition-[opacity,transform] duration-250 ease-[cubic-bezier(0.23,1,0.32,1)] opacity-0 translate-y-2 pointer-events-auto max-w-[90vw] text-center`;
 
   const msgSpan = document.createElement('span');
   msgSpan.textContent = message;

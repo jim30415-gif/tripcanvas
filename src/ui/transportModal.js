@@ -475,12 +475,12 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
     routesWrap.classList.add('hidden');
     const gmapsUrl = buildGoogleMapsDirUrl(ctx.pinA, ctx.pinB, 'transit');
     statusEl.innerHTML = `
-      <div class="rounded-xl bg-[#EFECE7] dark:bg-[#29231E] border border-[#CFC5BA] dark:border-[#493E35] p-3.5 space-y-2.5 text-sm text-[#5E5248] dark:text-[#D5C6B8]">
+      <div class="rounded-xl bg-[#EFECE7] dark:bg-[#222833] border border-[#CFC5BA] dark:border-[#364152] p-3.5 space-y-2.5 text-sm text-[#5E5248] dark:text-[#D3DCE8]">
         <div class="flex items-start gap-2">
           <i data-lucide="alert-triangle" class="w-4 h-4 text-[#A65D57] dark:text-[#E89B94] shrink-0 mt-0.5"></i>
           <div class="leading-relaxed">
             <div class="font-extrabold">${ctx.isJapan ? '查無日本鐵道／公開公車路線' : '此時段查無大眾運輸班次'}</div>
-            <p class="text-xs text-[#7D6E62] dark:text-[#A99A8C] mt-0.5">${escapeHTML(res.message || '請調整上方出發時間、改查 Google Maps，或改填貼路公車紀錄。')}</p>
+            <p class="text-xs text-[#7D6E62] dark:text-[#9AA7B8] mt-0.5">${escapeHTML(res.message || '請調整上方出發時間、改查 Google Maps，或改填貼路公車紀錄。')}</p>
           </div>
         </div>
         <div class="flex flex-wrap items-center gap-1.5 pt-0.5">
@@ -502,11 +502,11 @@ function renderTransitAutoResults({ autoFillFare = false } = {}) {
   if (res.status !== 'ok' || !Array.isArray(res.routes) || res.routes.length === 0) {
     routesWrap.classList.add('hidden');
     statusEl.innerHTML = `
-      <div class="rounded-xl bg-[#EFECE7] dark:bg-[#29231E] border border-[#CFC5BA] dark:border-[#493E35] p-3 flex items-start gap-2 text-sm text-[#5E5248] dark:text-[#D5C6B8]">
+      <div class="rounded-xl bg-[#EFECE7] dark:bg-[#222833] border border-[#CFC5BA] dark:border-[#364152] p-3 flex items-start gap-2 text-sm text-[#5E5248] dark:text-[#D3DCE8]">
         <i data-lucide="wifi-off" class="w-4 h-4 text-[#A65D57] dark:text-[#E89B94] shrink-0 mt-0.5"></i>
         <div class="leading-relaxed">
           <div class="font-extrabold">無法取得大眾運輸路線</div>
-          <p class="text-xs text-[#7D6E62] dark:text-[#A99A8C] mt-0.5">${escapeHTML(res.message || '服務暫時無法連線，請重試或改用手動紀錄。')}</p>
+          <p class="text-xs text-[#7D6E62] dark:text-[#9AA7B8] mt-0.5">${escapeHTML(res.message || '服務暫時無法連線，請重試或改用手動紀錄。')}</p>
         </div>
       </div>
     `;
@@ -781,11 +781,11 @@ async function runModalLandQuery(forceRefresh = false) {
     retryBtn.classList.add('hidden');
   } else if (res.status === 'unsupported') {
     statusEl.innerHTML = `
-      <div class="rounded-xl bg-[#EFECE7] dark:bg-[#29231E] border border-[#CFC5BA] dark:border-[#493E35] p-3 flex items-start gap-2 text-[#5E5248] dark:text-[#D5C6B8]">
+      <div class="rounded-xl bg-[#EFECE7] dark:bg-[#222833] border border-[#CFC5BA] dark:border-[#364152] p-3 flex items-start gap-2 text-[#5E5248] dark:text-[#D3DCE8]">
         <i data-lucide="alert-triangle" class="w-4 h-4 text-[#A65D57] dark:text-[#E89B94] shrink-0 mt-0.5"></i>
         <div class="leading-relaxed">
           <div class="font-extrabold">不支援此陸路路線（可能跨海或無道路可達）</div>
-          <div class="text-xs text-[#7D6E62] dark:text-[#A99A8C] mt-0.5">此兩點之間無法以${escapeHTML(modeMeta.label)}行駛，建議改選「大眾運輸」或以 Google Maps 查詢跨區交通方式。</div>
+          <div class="text-xs text-[#7D6E62] dark:text-[#9AA7B8] mt-0.5">此兩點之間無法以${escapeHTML(modeMeta.label)}行駛，建議改選「大眾運輸」或以 Google Maps 查詢跨區交通方式。</div>
         </div>
       </div>
     `;
@@ -793,11 +793,11 @@ async function runModalLandQuery(forceRefresh = false) {
     retryBtn.classList.add('hidden');
   } else {
     statusEl.innerHTML = `
-      <div class="rounded-xl bg-[#EFECE7] dark:bg-[#29231E] border border-[#CFC5BA] dark:border-[#493E35] p-3 flex items-start gap-2 text-[#5E5248] dark:text-[#D5C6B8]">
+      <div class="rounded-xl bg-[#EFECE7] dark:bg-[#222833] border border-[#CFC5BA] dark:border-[#364152] p-3 flex items-start gap-2 text-[#5E5248] dark:text-[#D3DCE8]">
         <i data-lucide="wifi-off" class="w-4 h-4 text-[#A65D57] dark:text-[#E89B94] shrink-0 mt-0.5"></i>
         <div class="leading-relaxed">
           <div class="font-extrabold">無法連線取得路線</div>
-          <div class="text-xs text-[#7D6E62] dark:text-[#A99A8C] mt-0.5">路網查詢服務暫時無法連線，不會顯示推測時間或橫越街區線條；請稍後重試或使用 Google Maps 查詢。</div>
+          <div class="text-xs text-[#7D6E62] dark:text-[#9AA7B8] mt-0.5">路網查詢服務暫時無法連線，不會顯示推測時間或橫越街區線條；請稍後重試或使用 Google Maps 查詢。</div>
         </div>
       </div>
     `;

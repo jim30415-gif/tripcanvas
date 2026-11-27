@@ -77,10 +77,10 @@ function createOfflineCanvasGridLayer(L, options) {
       const ctx = tile.getContext('2d');
       const dark = isDarkTheme();
 
-      ctx.fillStyle = dark ? '#191512' : '#F5EFE6';
+      ctx.fillStyle = dark ? '#161B22' : '#F5EFE6';
       ctx.fillRect(0, 0, size.x, size.y);
 
-      ctx.strokeStyle = dark ? '#29221C' : '#E5DACB';
+      ctx.strokeStyle = dark ? '#242B35' : '#E5DACB';
       ctx.lineWidth = 1;
       for (let i = 0; i < size.x; i += 64) {
         ctx.beginPath();
@@ -92,7 +92,7 @@ function createOfflineCanvasGridLayer(L, options) {
         ctx.lineTo(size.x, i);
         ctx.stroke();
       }
-      ctx.strokeStyle = dark ? '#3A3028' : '#D7C5B2';
+      ctx.strokeStyle = dark ? '#323C4B' : '#D7C5B2';
       ctx.strokeRect(0, 0, size.x, size.y);
 
       const n = Math.pow(2, coords.z);
@@ -100,7 +100,7 @@ function createOfflineCanvasGridLayer(L, options) {
       const latRad = Math.atan(Math.sinh(Math.PI * (1 - (2 * coords.y) / n)));
       const lat = ((latRad * 180) / Math.PI).toFixed(2);
 
-      ctx.fillStyle = dark ? '#988675' : '#9E8C7A';
+      ctx.fillStyle = dark ? '#8A99AE' : '#9E8C7A';
       ctx.font = '600 11px "Noto Sans TC", sans-serif';
       ctx.fillText(`Z${coords.z} · ${lat}°N, ${lng}°E`, 10, 18);
       return tile;
@@ -507,7 +507,7 @@ function initGoogleMap(gmaps, initialCenter = [25.044, 121.535], initialZoom = 1
     clickableIcons: true,
     gestureHandling: 'greedy',
     keyboardShortcuts: false,
-    backgroundColor: dark ? '#16120F' : '#EDE5D8',
+    backgroundColor: dark ? '#14181F' : '#EDE5D8',
     styles: dark ? GOOGLE_MAP_NIGHT_STYLES : null,
   });
 
@@ -692,7 +692,7 @@ export function applyMapTheme(dark = isDarkTheme()) {
     try {
       mapInstance.setOptions({
         styles: dark ? GOOGLE_MAP_NIGHT_STYLES : null,
-        backgroundColor: dark ? '#16120F' : '#EDE5D8',
+        backgroundColor: dark ? '#14181F' : '#EDE5D8',
       });
     } catch {
       // ignore

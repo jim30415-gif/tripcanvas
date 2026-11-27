@@ -15,11 +15,11 @@ import { getLeafletLib } from './mapInit.js';
 import { isDarkTheme } from '../ui/theme.js';
 
 function getRouteCasingColor() {
-  return isDarkTheme() ? '#16120F' : '#FFFDF9';
+  return isDarkTheme() ? '#14181F' : '#FFFDF9';
 }
 
 function getStopDotFillColor() {
-  return isDarkTheme() ? '#201B17' : '#FFFDF9';
+  return isDarkTheme() ? '#1C212A' : '#FFFDF9';
 }
 
 /**
@@ -260,8 +260,8 @@ function drawSegmentedTransitRoute(overlayGroup, day, safeDayColor, pinA, pinB, 
         {
           color: dark
             ? isActive
-              ? '#E5C59E'
-              : '#B39F8B'
+              ? '#8AB4F8'
+              : '#6F8EB8'
             : isActive
               ? '#6B513A'
               : '#8C7866',

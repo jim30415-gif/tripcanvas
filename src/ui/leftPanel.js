@@ -192,7 +192,7 @@ function renderConnectorHTML(day, safeDayColor, pin, idx) {
   }
 
   const cardClasses = isAlert
-    ? 'bg-[#F0ECE7] dark:bg-[#29231E] hover:bg-[#E7E0D8] dark:hover:bg-[#342B24] border-[#CFC5BA] dark:border-[#493E35] text-[#6B5F55] dark:text-[#C5B6A6]'
+    ? 'bg-[#F0ECE7] dark:bg-[#222833] hover:bg-[#E7E0D8] dark:hover:bg-[#2A3240] border-[#CFC5BA] dark:border-[#364152] text-[#6B5F55] dark:text-[#C5D0DF]'
     : isUnrecorded
       ? 'bg-[#F6F1EA] dark:bg-owl-selectedBg/75 hover:bg-owl-softBg border-dashed border-owl-border text-owl-subtext'
       : 'bg-owl-selectedBg/90 hover:bg-owl-softBg border-owl-cardBorder hover:border-owl-accentBorder text-owl-text';
@@ -204,11 +204,11 @@ function renderConnectorHTML(day, safeDayColor, pin, idx) {
         <div class="flex items-center gap-2 min-w-0">
           <span class="text-base leading-none shrink-0">${escapeHTML(info.emoji || '')}</span>
           <div class="min-w-0">
-            <div class="text-sm font-bold truncate ${isAlert ? 'text-[#63564B] dark:text-[#D5C6B8]' : 'text-owl-text'}">${escapeHTML(info.leftTitle)}</div>
-            <div class="text-xs font-medium truncate ${isAlert ? 'text-[#847568] dark:text-[#A99A8C]' : 'text-owl-subtext'}">${escapeHTML(info.leftSub)}</div>
+            <div class="text-sm font-bold truncate ${isAlert ? 'text-[#63564B] dark:text-[#D3DCE8]' : 'text-owl-text'}">${escapeHTML(info.leftTitle)}</div>
+            <div class="text-xs font-medium truncate ${isAlert ? 'text-[#847568] dark:text-[#9AA7B8]' : 'text-owl-subtext'}">${escapeHTML(info.leftSub)}</div>
           </div>
         </div>
-        <span class="transport-status-badge text-[11px] font-bold shrink-0 px-2 py-0.5 rounded-md border ${isAlert ? 'bg-white/75 dark:bg-owl-card border-[#CFC5BA] dark:border-[#493E35] text-[#78685B] dark:text-[#C5B6A6]' : 'bg-owl-card border-owl-cardBorder text-owl-primaryDeep'}">${escapeHTML(info.badge)}</span>
+        <span class="transport-status-badge text-[11px] font-bold shrink-0 px-2 py-0.5 rounded-md border ${isAlert ? 'bg-white/75 dark:bg-owl-card border-[#CFC5BA] dark:border-[#364152] text-[#78685B] dark:text-[#9AA7B8]' : 'bg-owl-card border-owl-cardBorder text-owl-primaryDeep'}">${escapeHTML(info.badge)}</span>
       </button>
     </div>
   `;

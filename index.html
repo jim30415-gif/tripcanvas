@@ -22,7 +22,7 @@
           document.documentElement.classList.add('dark');
           document.documentElement.setAttribute('data-theme', 'dark');
           var m = document.querySelector('meta[name="theme-color"]');
-          if (m) m.setAttribute('content', '#16120F');
+          if (m) m.setAttribute('content', '#14181F');
         }
       } catch (e) {}
     })();
@@ -191,6 +191,8 @@
       <!-- ==================== 中間主畫面：Google 地圖互動區（isolation: isolate） ==================== -->
       <section id="panel-map" class="map-wrapper block">
         <div id="map"></div>
+        <!-- 深色模式專屬：非互動式夜空流星彩蛋圖層 -->
+        <div id="night-sky-easter-egg" class="night-sky-layer" aria-hidden="true"></div>
 
         <!-- 電腦版左側欄邊界收合／展開箭頭 -->
         <button
@@ -242,7 +244,7 @@
             title="切換夜間深色模式"
             aria-label="切換夜間深色模式"
             aria-pressed="false"
-            class="bg-owl-panel/90 hover:bg-owl-softBg backdrop-blur-md border border-owl-border shadow-float rounded-2xl w-10 h-10 text-owl-text hover:text-owl-primaryDeep transition active:scale-95 flex items-center justify-center shrink-0"
+            class="bg-owl-panel/90 hover:bg-owl-softBg backdrop-blur-md border border-owl-border shadow-float rounded-2xl w-10 h-10 text-owl-text hover:text-owl-primaryDeep flex items-center justify-center shrink-0"
           >
             <i id="icon-theme-toggle" data-lucide="moon" class="w-4 h-4"></i>
           </button>
@@ -272,9 +274,9 @@
               aria-expanded="false"
               class="pointer-events-auto h-[48px] px-6 rounded-full mobile-expense-capsule shadow-float flex items-center justify-center gap-2.5 transition-all duration-200 active:scale-[0.97]"
             >
-              <span class="text-sm font-semibold text-[#DECDB8] whitespace-nowrap shrink-0">總支出</span>
+              <span class="text-sm font-semibold text-[#DECDB8] dark:text-[#9AA7B8] whitespace-nowrap shrink-0">總支出</span>
               <span id="desktop-grand-total-expense" class="text-lg font-extrabold tracking-tight text-owl-cream tabular-nums-strict whitespace-nowrap">NT$ 0</span>
-              <span id="desktop-expense-arrow" class="text-[11px] text-owl-gold transition-transform duration-200 shrink-0">▲</span>
+              <span id="desktop-expense-arrow" class="text-[11px] text-owl-gold dark:text-[#8AB4F8] transition-transform duration-200 shrink-0">▲</span>
             </button>
           </div>
         </div>
@@ -346,9 +348,9 @@
           aria-expanded="false"
           class="pointer-events-auto flex-1 max-w-[244px] h-[48px] px-4 rounded-full mobile-expense-capsule shadow-float flex items-center justify-center gap-2 transition-all duration-200 active:scale-[0.97] min-w-0"
         >
-          <span class="text-xs font-semibold text-[#DECDB8] whitespace-nowrap shrink-0">總支出</span>
+          <span class="text-xs font-semibold text-[#DECDB8] dark:text-[#9AA7B8] whitespace-nowrap shrink-0">總支出</span>
           <span id="mobile-grand-total-expense" class="text-base font-extrabold tracking-tight text-owl-cream tabular-nums-strict truncate">NT$ 0</span>
-          <span id="mobile-expense-arrow" class="text-[10px] text-owl-gold transition-transform duration-200 shrink-0">▲</span>
+          <span id="mobile-expense-arrow" class="text-[10px] text-owl-gold dark:text-[#8AB4F8] transition-transform duration-200 shrink-0">▲</span>
         </button>
 
         <!-- 右邊半透明小圓球：往上彈出正方形日期選項 -->

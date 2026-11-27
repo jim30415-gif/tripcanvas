@@ -100,24 +100,24 @@ function renderMobileExpenseSheet(breakdown) {
           .join('')
       : '';
 
-  let detailBody = `<div class="text-sm text-[#CBB7A1] text-center py-3">尚未記錄任何支出項目</div>`;
+  let detailBody = `<div class="text-sm text-[#CBB7A1] dark:text-[#9AA7B8] text-center py-3">尚未記錄任何支出項目</div>`;
   if (breakdown.grandTotal > 0) {
     const categoriesHtml = breakdown.categories
       .map(
         (c) => `
         <div class="space-y-1">
           <div class="flex items-center justify-between gap-2 text-xs sm:text-[13px] leading-tight">
-            <span class="inline-flex items-center gap-1.5 text-[#F2E7D9] font-semibold">
+            <span class="inline-flex items-center gap-1.5 text-[#F2E7D9] dark:text-[#E8EDF4] font-semibold">
               <span>${escapeHTML(c.emoji || '')}</span>
               <span>${escapeHTML(c.label)}</span>
             </span>
-            <span class="tabular-nums-strict text-[#FAF4EC] font-bold">
+            <span class="tabular-nums-strict text-[#FAF4EC] dark:text-[#F1F5FA] font-bold">
               ${formatTWD(c.amount)}
-              <span class="text-[#E5C59E] font-semibold ml-1">${formatPct(c.pct)}</span>
+              <span class="text-[#E5C59E] dark:text-[#8AB4F8] font-semibold ml-1">${formatPct(c.pct)}</span>
             </span>
           </div>
           <div class="w-full h-1.5 rounded-full bg-white/15 overflow-hidden">
-            <div class="h-full rounded-full transition-all" style="width:${Math.min(100, c.pct)}%; background:${sanitizeHexColor(c.color)};"></div>
+            <div class="h-full rounded-full transition-[width] duration-300" style="width:${Math.min(100, c.pct)}%; background:${sanitizeHexColor(c.color)};"></div>
           </div>
         </div>
       `
@@ -130,17 +130,17 @@ function renderMobileExpenseSheet(breakdown) {
         return `
         <div class="space-y-1 ${d.visible ? '' : 'opacity-60'}">
           <div class="flex items-center justify-between gap-2 text-xs sm:text-[13px] leading-tight">
-            <span class="inline-flex items-center gap-1.5 min-w-0 text-[#F2E7D9] font-semibold">
+            <span class="inline-flex items-center gap-1.5 min-w-0 text-[#F2E7D9] dark:text-[#E8EDF4] font-semibold">
               <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${safeColor};"></span>
               <span class="truncate">${escapeHTML(d.name)}</span>
             </span>
-            <span class="tabular-nums-strict text-[#FAF4EC] font-bold shrink-0">
+            <span class="tabular-nums-strict text-[#FAF4EC] dark:text-[#F1F5FA] font-bold shrink-0">
               ${formatTWD(d.amount)}
-              <span class="text-[#E5C59E] font-semibold ml-1">${formatPct(d.pct)}</span>
+              <span class="text-[#E5C59E] dark:text-[#8AB4F8] font-semibold ml-1">${formatPct(d.pct)}</span>
             </span>
           </div>
           <div class="w-full h-1.5 rounded-full bg-white/15 overflow-hidden">
-            <div class="h-full rounded-full transition-all" style="width:${Math.min(100, d.pct)}%; background:${safeColor};"></div>
+            <div class="h-full rounded-full transition-[width] duration-300" style="width:${Math.min(100, d.pct)}%; background:${safeColor};"></div>
           </div>
         </div>
       `;
@@ -150,11 +150,11 @@ function renderMobileExpenseSheet(breakdown) {
     detailBody = `
       <div class="space-y-3.5 pt-3 border-t border-white/15">
         <div class="space-y-2">
-          <div class="text-xs font-bold tracking-wide text-[#CBB7A1]">分類開銷比例</div>
+          <div class="text-xs font-bold tracking-wide text-[#CBB7A1] dark:text-[#9AA7B8]">分類開銷比例</div>
           <div class="space-y-2">${categoriesHtml}</div>
         </div>
         <div class="border-t border-white/12 pt-3 space-y-2">
-          <div class="text-xs font-bold tracking-wide text-[#CBB7A1]">各天數開銷比例</div>
+          <div class="text-xs font-bold tracking-wide text-[#CBB7A1] dark:text-[#9AA7B8]">各天數開銷比例</div>
           <div class="space-y-2">${daysHtml}</div>
         </div>
       </div>
@@ -165,18 +165,18 @@ function renderMobileExpenseSheet(breakdown) {
     <div class="space-y-2.5">
       <div class="flex items-center justify-between gap-2">
         <div class="flex items-baseline gap-2 min-w-0">
-          <span class="text-sm font-bold text-[#F2E7D9]">旅程總支出</span>
-          <span class="text-xs text-[#CBB7A1]">共 ${breakdown.totalItemCount} 項</span>
+          <span class="text-sm font-bold text-[#F2E7D9] dark:text-[#E8EDF4]">旅程總支出</span>
+          <span class="text-xs text-[#CBB7A1] dark:text-[#9AA7B8]">共 ${breakdown.totalItemCount} 項</span>
         </div>
         <div class="flex items-center gap-2 shrink-0">
           <span class="text-xl font-extrabold text-owl-cream tabular-nums-strict">${formatTWD(breakdown.grandTotal)}</span>
-          <button type="button" id="btn-close-mobile-expense" aria-label="關閉支出明細" class="w-9 h-9 rounded-full bg-white/12 hover:bg-white/22 text-[#F2E7D9] flex items-center justify-center transition active:scale-95">
+          <button type="button" id="btn-close-mobile-expense" aria-label="關閉支出明細" class="w-9 h-9 rounded-full bg-white/12 hover:bg-white/22 text-[#F2E7D9] dark:text-[#E8EDF4] flex items-center justify-center transition-[background-color,transform] duration-150 active:scale-95">
             <i data-lucide="x" class="w-4 h-4"></i>
           </button>
         </div>
       </div>
       <div class="expense-bar-track !my-0">${barHtml}</div>
-      <div class="flex items-center justify-between text-xs text-[#D8C7B4]">
+      <div class="flex items-center justify-between text-xs text-[#D8C7B4] dark:text-[#9AA7B8]">
         <span class="inline-flex items-center gap-1.5">
           <i data-lucide="eye" class="w-3.5 h-3.5 text-owl-gold"></i>
           <span>顯示中圖層小計</span>

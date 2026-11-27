@@ -2,7 +2,7 @@ import { refreshIcons } from '../utils/format.js';
 
 export const THEME_STORAGE_KEY = 'tripcanvas_theme_v1';
 export const LIGHT_THEME_COLOR = '#FBF8F3';
-export const DARK_THEME_COLOR = '#16120F';
+export const DARK_THEME_COLOR = '#14181F';
 
 const DARK_MEDIA_QUERY = '(prefers-color-scheme: dark)';
 

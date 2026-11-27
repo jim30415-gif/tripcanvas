@@ -48,6 +48,7 @@ import {
   getMobileFitBoundsOptions,
 } from './ui/mobileNav.js';
 import { initTheme } from './ui/theme.js';
+import { initNightSky, syncNightSkyActive } from './ui/nightSky.js';
 import { openCustomDialog, showToast } from './ui/dialog.js';
 import { bindGlobalImageFallback, refreshIcons, sanitizeHexColor, uid } from './utils/format.js';
 
@@ -925,8 +926,10 @@ async function boot() {
       onChange: (dark) => {
         applyMapTheme(dark);
         renderMapLayers();
+        syncNightSkyActive(dark);
       },
     });
+    initNightSky();
     syncDesktopSidebarCollapseUI();
     updateMapHeaderUI();
     renderLeft();

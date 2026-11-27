@@ -247,11 +247,125 @@ test('applyTheme normalizes invalid values safely and tolerates unavailable loca
   });
 });
 
-test('GOOGLE_MAP_NIGHT_STYLES provides warm dark geometry and legible labels', () => {
+test('GOOGLE_MAP_NIGHT_STYLES provides Google-Maps-inspired cool dark slate geometry and legible labels', () => {
   assert.ok(Array.isArray(GOOGLE_MAP_NIGHT_STYLES));
   assert.ok(GOOGLE_MAP_NIGHT_STYLES.length >= 10);
   const baseGeom = GOOGLE_MAP_NIGHT_STYLES.find((s) => !s.featureType && s.elementType === 'geometry');
+  const waterGeom = GOOGLE_MAP_NIGHT_STYLES.find((s) => s.featureType === 'water' && s.elementType === 'geometry');
   const labelFill = GOOGLE_MAP_NIGHT_STYLES.find((s) => !s.featureType && s.elementType === 'labels.text.fill');
-  assert.ok(baseGeom?.stylers?.[0]?.color?.startsWith('#1'));
+  assert.equal(baseGeom?.stylers?.[0]?.color, '#21262D');
+  assert.equal(waterGeom?.stylers?.[0]?.color, '#122234');
   assert.ok(labelFill?.stylers?.[0]?.color);
+});
+
+test('nightSky computes bounded shooting star trajectories for desktop and mobile', async () => {
+  const { computeShootingStarGeometry, SHOOTING_STAR_CONFIG } = await import('../src/ui/nightSky.js');
+
+  const desktopGeo = computeShootingStarGeometry(1440, 900, () => 0.5);
+  assert.ok(desktopGeo.startX >= 1440 * 0.42 && desktopGeo.startX <= 1440 * 0.78);
+  assert.ok(desktopGeo.startY >= 900 * 0.07 && desktopGeo.startY <= 900 * 0.38);
+  assert.ok(desktopGeo.angleDeg >= 142 && desktopGeo.angleDeg <= 158);
+  assert.ok(
+    desktopGeo.durationMs >= SHOOTING_STAR_CONFIG.durationMinMs &&
+      desktopGeo.durationMs <= SHOOTING_STAR_CONFIG.durationMaxMs
+  );
+
+  const mobileLeftToRight = computeShootingStarGeometry(390, 844, () => 0.85);
+  assert.ok(mobileLeftToRight.angleDeg >= 22 && mobileLeftToRight.angleDeg <= 38);
+  assert.ok(mobileLeftToRight.distancePx >= 165 && mobileLeftToRight.distancePx <= 250);
+});
+
+test('spawnShootingStar respects dark mode, reduced motion, and uses composite-only WAAPI keyframes without scale(0)', async () => {
+  const { spawnShootingStar, clearActiveShootingStar } = await import('../src/ui/nightSky.js');
+
+  const origDoc = globalThis.document;
+  const origWin = globalThis.window;
+
+  let reducedMotion = false;
+  let capturedKeyframes = null;
+  let capturedOptions = null;
+  let cancelledCount = 0;
+
+  const createDomNode = (tag) => {
+    const node = {
+      tagName: tag.toUpperCase(),
+      className: '',
+      style: {},
+      children: [],
+      removed: false,
+      appendChild(child) {
+        this.children.push(child);
+        return child;
+      },
+      remove() {
+        this.removed = true;
+      },
+      getBoundingClientRect() {
+        return { width: 1280, height: 720 };
+      },
+      animate(keyframes, options) {
+        capturedKeyframes = keyframes;
+        capturedOptions = options;
+        return {
+          onfinish: null,
+          oncancel: null,
+          cancel() {
+            cancelledCount += 1;
+          },
+        };
+      },
+    };
+    return node;
+  };
+
+  const htmlEl = createMockElement('html');
+  const layer = createDomNode('div');
+
+  globalThis.window = {
+    innerWidth: 1280,
+    innerHeight: 720,
+    matchMedia: (query) => ({
+      matches: query.includes('prefers-reduced-motion') ? reducedMotion : false,
+      addEventListener() {},
+    }),
+  };
+  globalThis.document = {
+    documentElement: htmlEl,
+    visibilityState: 'visible',
+    getElementById: (id) => (id === 'night-sky-easter-egg' ? layer : null),
+    createElement: (tag) => createDomNode(tag),
+  };
+
+  try {
+    // 淺色模式下不應發射流星
+    assert.equal(spawnShootingStar(), false);
+    assert.equal(layer.children.length, 0);
+
+    // 切換深色模式後可發射流星，且僅動畫化 transform / opacity（不用 scale(0)）
+    htmlEl.classList.add('dark');
+    assert.equal(spawnShootingStar({ rng: () => 0.4 }), true);
+    assert.equal(layer.children.length, 1);
+    assert.ok(Array.isArray(capturedKeyframes) && capturedKeyframes.length === 4);
+    for (const frame of capturedKeyframes) {
+      const propKeys = Object.keys(frame).filter((k) => k !== 'offset' && k !== 'easing');
+      assert.deepEqual(propKeys.sort(), ['opacity', 'transform']);
+      assert.equal(frame.transform.includes('scaleX(0)'), false);
+      assert.equal(frame.transform.includes('scale(0)'), false);
+    }
+    assert.equal(capturedKeyframes[0].easing, 'cubic-bezier(0.23, 1, 0.32, 1)');
+    assert.equal(capturedOptions.easing, 'linear');
+
+    // 清除進行中流星
+    clearActiveShootingStar();
+    assert.equal(cancelledCount, 1);
+    assert.equal(layer.children[0].removed, true);
+
+    // 開啟減少動態偏好時完全停用
+    reducedMotion = true;
+    assert.equal(spawnShootingStar({ force: true }), false);
+  } finally {
+    clearActiveShootingStar();
+    globalThis.document = origDoc;
+    globalThis.window = origWin;
+  }
 });

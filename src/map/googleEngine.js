@@ -347,96 +347,101 @@ export function createGoogleOverlayGroup(googleMap) {
 }
 
 /**
- * 暖深焙咖啡夜間 Google Maps 底圖配色（無紫調、低眩光，突顯行程路線與標點氣泡，且完全免費零額外 API 呼叫）
+ * 參考 Google Maps 深色模式打造的夜間底圖配色（深藍灰石板地表、沉靜海灣藍水體、柔和雲白地標字，久看舒適且零額外 API 費用）
  */
 export const GOOGLE_MAP_NIGHT_STYLES = [
-  { elementType: 'geometry', stylers: [{ color: '#1F1B18' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#181411' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#D4C6B7' }] },
+  { elementType: 'geometry', stylers: [{ color: '#21262D' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#171B21' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#CBD5E1' }] },
+  {
+    featureType: 'landscape.man_made',
+    elementType: 'geometry',
+    stylers: [{ color: '#1D2229' }],
+  },
   {
     featureType: 'administrative.locality',
     elementType: 'labels.text.fill',
-    stylers: [{ color: '#EDE2D5' }],
+    stylers: [{ color: '#E8EDF4' }],
   },
   {
     featureType: 'administrative.neighborhood',
     elementType: 'labels.text.fill',
-    stylers: [{ color: '#C9B9A8' }],
+    stylers: [{ color: '#B4C1D1' }],
   },
   {
     featureType: 'poi',
     elementType: 'labels.text.fill',
-    stylers: [{ color: '#C5B6A5' }],
+    stylers: [{ color: '#A8B6C8' }],
   },
   {
     featureType: 'poi.park',
     elementType: 'geometry',
-    stylers: [{ color: '#1B2620' }],
+    stylers: [{ color: '#1C2E27' }],
   },
   {
     featureType: 'poi.park',
     elementType: 'labels.text.fill',
-    stylers: [{ color: '#8BB095' }],
+    stylers: [{ color: '#7BB596' }],
   },
   {
     featureType: 'road',
     elementType: 'geometry',
-    stylers: [{ color: '#2D2722' }],
+    stylers: [{ color: '#2D343F' }],
   },
   {
     featureType: 'road',
     elementType: 'geometry.stroke',
-    stylers: [{ color: '#1C1814' }],
+    stylers: [{ color: '#1B2028' }],
   },
   {
     featureType: 'road',
     elementType: 'labels.text.fill',
-    stylers: [{ color: '#BFAEA0' }],
+    stylers: [{ color: '#9AA7B8' }],
   },
   {
     featureType: 'road.arterial',
     elementType: 'geometry',
-    stylers: [{ color: '#372F28' }],
+    stylers: [{ color: '#363F4D' }],
   },
   {
     featureType: 'road.highway',
     elementType: 'geometry',
-    stylers: [{ color: '#493B2F' }],
+    stylers: [{ color: '#455163' }],
   },
   {
     featureType: 'road.highway',
     elementType: 'geometry.stroke',
-    stylers: [{ color: '#241D17' }],
+    stylers: [{ color: '#242B36' }],
   },
   {
     featureType: 'road.highway',
     elementType: 'labels.text.fill',
-    stylers: [{ color: '#E5C59E' }],
+    stylers: [{ color: '#E2E8F0' }],
   },
   {
     featureType: 'transit',
     elementType: 'geometry',
-    stylers: [{ color: '#273038' }],
+    stylers: [{ color: '#263447' }],
   },
   {
     featureType: 'transit.station',
     elementType: 'labels.text.fill',
-    stylers: [{ color: '#9AC0DB' }],
+    stylers: [{ color: '#8AB4F8' }],
   },
   {
     featureType: 'water',
     elementType: 'geometry',
-    stylers: [{ color: '#141D26' }],
+    stylers: [{ color: '#122234' }],
   },
   {
     featureType: 'water',
     elementType: 'labels.text.fill',
-    stylers: [{ color: '#6E8BA3' }],
+    stylers: [{ color: '#618BB8' }],
   },
   {
     featureType: 'water',
     elementType: 'labels.text.stroke',
-    stylers: [{ color: '#10171F' }],
+    stylers: [{ color: '#0E1A28' }],
   },
 ];
 
